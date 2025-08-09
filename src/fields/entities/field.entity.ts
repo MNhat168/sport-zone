@@ -26,6 +26,18 @@ export class Field extends Document {
   @Prop({ type: Number, required: true, min: 0 })
   pricePerHour: number;
 
+  @Prop({ required: true, default: '08:00' })
+  openTime: string;
+
+  @Prop({ required: true, default: '22:00' })
+  closeTime: string;
+
+  @Prop({ type: Number, required: true, min: 1, max: 24, default: 1 })
+  minBookingHours: number;
+
+  @Prop({ type: Number, required: true, min: 1, max: 24, default: 3 })
+  maxBookingHours: number;
+
   @Prop({ type: Boolean, default: true })
   isActive: boolean;
 
