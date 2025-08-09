@@ -25,6 +25,23 @@ export class Booking extends Document {
   @Prop({ required: true, enum: BookingType })
   type: BookingType;
 
+  @Prop({ type: Types.ObjectId, ref: 'CoachProfile' })
+  requestedCoach?: Types.ObjectId;
+
+  @Prop({ 
+    type: String, 
+    enum: ['pending', 'accepted', 'declined'],
+    default: 'pending'
+  })
+  coachStatus?: string;
+
+  @Prop({   
+    default: 0,
+    min: 0,
+    max: 3  
+  })
+  retryAttempts?: number;
+
   @Prop({ required: true })
   slot: string;
 
