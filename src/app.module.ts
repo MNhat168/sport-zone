@@ -14,9 +14,15 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { AdminModule } from './admin/admin.module';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
+import { SchedulesModule } from './bookings/schedules.module';
+
 @Module({
   imports: [
     ConfigModule.forRoot(),
+    MongooseModule.forRoot(
+      process.env.MONGODB_URI ||
+      'mongodb+srv://nhatnmde180:helloworld@cluster0.zufvinh.mongodb.net/SportZone?retryWrites=true&w=majority'
+    ),
     AuthModule,
     UsersModule,
     ProfilesModule,
@@ -28,9 +34,9 @@ import { ConfigModule } from '@nestjs/config';
     AiModule,
     NotificationsModule,
     AdminModule,
-    MongooseModule.forRoot(process.env.MONGODB_URI || 'mongodb+srv://nhatnmde180:helloworld@cluster0.zufvinh.mongodb.net/SportZone?retryWrites=true&w=majority')
+    SchedulesModule
   ],
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule { }
