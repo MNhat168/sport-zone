@@ -31,6 +31,7 @@ import { CoachesModule } from './coaches/coaches.module';
     NotificationsModule,
     AdminModule,
     CoachesModule,
+    NotificationsModule,
     MongooseModule.forRoot(process.env.MONGODB_URI || 'mongodb+srv://nhatnmde180:helloworld@cluster0.zufvinh.mongodb.net/SportZone?retryWrites=true&w=majority')
   ],
   controllers: [AppController],
