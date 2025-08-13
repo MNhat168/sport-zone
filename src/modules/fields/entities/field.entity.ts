@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { User } from 'src/users/entities/user.entity';
+import { User } from 'src/modules/users/entities/user.entity';
 import { SportType } from 'src/common/enums/sport-type.enum';
 
 @Schema({ timestamps: true })
