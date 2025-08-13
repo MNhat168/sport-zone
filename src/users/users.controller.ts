@@ -6,6 +6,7 @@ import { UserProfileDto } from './dtos/user-profile.dto';
 export class UsersController {
     constructor(private readonly usersService: UsersService) { }
 
+
     @Get(':id/profile')
     async getProfile(@Param('id') id: string): Promise<UserProfileDto> {
         return this.usersService.getProfile(id);

@@ -15,9 +15,9 @@ export class FieldsService {
         const filter: any = {};
         if (query?.name) filter.name = { $regex: query.name, $options: 'i' };
         if (query?.location) filter.location = { $regex: query.location, $options: 'i' };
-        if (query?.sportType) filter.sportType = query.sportType;
+        if (query?.sportType) filter.sportType = new RegExp(`^${query.sportType}$`, 'i');
 
-        const fields = await this.fieldModel.find().lean();
+        const fields = await this.fieldModel.find(filter).lean();
         return fields.map(field => ({
             id: field._id.toString(),
             owner: field.owner.toString(),
