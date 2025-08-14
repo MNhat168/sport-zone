@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Param } from '@nestjs/common';
+import { Controller, Get, Query, Param, Post, Body } from '@nestjs/common';
 import { SchedulesService } from './schedules.service';
 @Controller('schedules')
 export class SchedulesController {
@@ -14,5 +14,16 @@ export class SchedulesController {
         const endDate = new Date(endDateStr);
 
         return this.scheduleService.getCoachSchedule(coachId, startDate, endDate);
+    }
+
+    @Post('set-holiday')
+    async setHoliday(
+        @Body() body: { startDate: string; endDate: string },
+    ) {
+        const { startDate, endDate } = body;
+        return this.scheduleService.SetHoliday(
+            new Date(startDate),
+            new Date(endDate),
+        );
     }
 }

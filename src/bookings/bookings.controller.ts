@@ -3,7 +3,7 @@ import { BookingsService } from './bookings.service';
 
 @Controller('bookings')
 export class BookingsController {
-  constructor(private readonly bookingsService: BookingsService) {}
+  constructor(private readonly bookingsService: BookingsService) { }
 
   @Patch(':id/coach-status')
   async setCoachStatus(

@@ -48,4 +48,25 @@ export class SchedulesService {
             };
         });
     }
+
+    async SetHoliday(startDate: Date, endDate: Date): Promise<{ modifiedCount: number }> {
+        const start = new Date(startDate);
+        start.setUTCHours(0, 0, 0, 0);
+
+        const end = new Date(endDate);
+        end.setUTCHours(23, 59, 59, 999);
+        const result = await this.scheduleModel.updateMany(
+            {
+                date: { $gte: start, $lte: end },
+            },
+            {
+                $set: {
+                    isHoliday: true,
+                    availableSlots: [],
+                },
+            },
+        );
+
+        return { modifiedCount: result.modifiedCount };
+    }
 }

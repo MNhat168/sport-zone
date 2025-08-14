@@ -12,6 +12,23 @@ export class ProfilesService {
         private readonly coachProfileModel: Model<CoachProfile>,
     ) { }
 
+    async findByUserId(userId: string) {
+        if (!Types.ObjectId.isValid(userId)) {
+            throw new NotFoundException('Invalid userId');
+        }
+
+        const coachProfile = await this.coachProfileModel
+            .findOne({ user: new Types.ObjectId(userId) })
+            .populate('user', 'name email')
+            .exec();
+
+        if (!coachProfile) {
+            throw new NotFoundException('Coach profile not found');
+        }
+
+        return coachProfile;
+    }
+
     async setHourlyRate(coachId: string, newRate: number): Promise<CoachProfile> {
         if (newRate < 0) {
             throw new BadRequestException('Hourly rate cannot be negative');

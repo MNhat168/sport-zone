@@ -17,7 +17,7 @@ export class UsersService {
         if (!user) {
             throw new NotFoundException('User not found')
         };
-        if (user.role !== UserRole.USER) throw new BadRequestException('Not a normal user');
+        // if (user.role !== UserRole.USER) throw new BadRequestException('Not a normal user');
         return {
             id: user._id.toString(),
             fullName: user.fullName,

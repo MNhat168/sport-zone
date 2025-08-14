@@ -1,4 +1,4 @@
-import { Controller, Patch, Param, Body } from '@nestjs/common';
+import { Controller, Patch, Param, Body, Get } from '@nestjs/common';
 import { ProfilesService } from './profiles.service';
 import { UpdateCoachProfileDto } from './dtos/update-coach-profile.dto';
 import { UpdateCertificationDto } from './dtos/update-certification.dto';
@@ -7,6 +7,11 @@ import { Types } from 'mongoose';
 @Controller('profiles')
 export class ProfilesController {
     constructor(private readonly profileService: ProfilesService) { }
+
+    @Get('user/:userId')
+    async getByUserId(@Param('userId') userId: string) {
+        return this.profileService.findByUserId(userId);
+    }
 
     @Patch(':userId/hourly-rate')
     async updateHourlyRate(
