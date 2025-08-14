@@ -15,6 +15,7 @@ import { AdminModule } from './admin/admin.module';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
 import { SchedulesModule } from './bookings/schedules.module';
+import { CoachesModule } from './coaches/coaches.module';
 
 @Module({
   imports: [
@@ -34,7 +35,10 @@ import { SchedulesModule } from './bookings/schedules.module';
     AiModule,
     NotificationsModule,
     AdminModule,
-    SchedulesModule
+    SchedulesModule,
+    CoachesModule,
+    NotificationsModule,
+    MongooseModule.forRoot(process.env.MONGODB_URI || 'mongodb+srv://nhatnmde180:helloworld@cluster0.zufvinh.mongodb.net/SportZone?retryWrites=true&w=majority')
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -44,13 +44,6 @@ export class AuthController {
     return this.authService.resetPassword(body);
   }
 
-  // //Login with Google OAuth
-
-  // @Post('login-google')
-  // async loginWithGoogle(@Body() body: { googleId: string; email: string; fullName: string }) {
-  //   return this.authService.loginWithGoogle(body);
-  // }
-
   // Google OAuth callback handler
   @Post('google/callback')
   async googleCallback(@Body() body: { code: string }) {
@@ -86,4 +79,5 @@ export class AuthController {
       });
     }
   }
+  
 }
