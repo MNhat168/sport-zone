@@ -9,7 +9,7 @@ import * as nodemailer from 'nodemailer';
 export class AuthService {
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<User>,
-  ) {}
+  ) { }
 
   // Register a new user
   async register(body: {
@@ -143,7 +143,7 @@ export class AuthService {
     await user.save();
     return { message: 'Password reset successful' };
   }
-  
+
   // Login with Google OAuth
   async loginWithGoogle(body: { googleId: string; email: string; fullName: string }) {
     const { googleId, email, fullName } = body;
