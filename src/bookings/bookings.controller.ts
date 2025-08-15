@@ -1,5 +1,6 @@
-import { Controller, Patch, Param, Body } from '@nestjs/common';
+import { Controller, Patch, Param, Body, Get } from '@nestjs/common';
 import { BookingsService } from './bookings.service';
+import { Booking } from './entities/booking.entity';
 
 @Controller('bookings')
 export class BookingsController {
@@ -16,4 +17,9 @@ export class BookingsController {
       body.status,
     );
   }
+
+  @Get('coach/:coachId')
+async getBookingsByCoachId(@Param('coachId') coachId: string): Promise<Booking[]> {
+    return this.bookingsService.getByRequestedCoachId(coachId);
+}
 }

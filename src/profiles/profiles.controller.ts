@@ -1,8 +1,8 @@
 import { Controller, Patch, Param, Body, Get } from '@nestjs/common';
 import { ProfilesService } from './profiles.service';
-import { UpdateCoachProfileDto } from './dtos/update-coach-profile.dto';
-import { UpdateCertificationDto } from './dtos/update-certification.dto';
 import { Types } from 'mongoose';
+import { BadRequestException } from '@nestjs/common';
+import { SportType } from 'src/common/enums/sport-type.enum';
 
 @Controller('profiles')
 export class ProfilesController {
@@ -21,22 +21,34 @@ export class ProfilesController {
         return this.profileService.setHourlyRate(userId, hourlyRate);
     }
 
-    @Patch(':userId')
-    async updateProfile(
-        @Param('userId') userId: string,
-        @Body() updateDto: UpdateCoachProfileDto,
-    ) {
-        return this.profileService.updateProfile(userId, updateDto);
-    }
-
     @Patch(':userId/certification')
     async updateCertification(
         @Param('userId') userId: string,
-        @Body() dto: UpdateCertificationDto,
+        @Body('certification') certification: string,
     ) {
+        if (!certification || typeof certification !== 'string') {
+            throw new BadRequestException('Certification is required and must be a string');
+        }
+
         return this.profileService.updateCertification(
             new Types.ObjectId(userId),
-            dto,
+            certification,
         );
+    }
+
+    @Patch(':userId/bio')
+    async updateBio(
+        @Param('userId') userId: string,
+        @Body('bio') bio: string
+    ) {
+        return this.profileService.updateBio(userId, bio);
+    }
+
+    @Patch(':userId/sports')
+    async updateSports(
+        @Param('userId') userId: string,
+        @Body('sports') sports: SportType[]
+    ) {
+        return this.profileService.updateSports(userId, sports);
     }
 }

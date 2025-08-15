@@ -2,8 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CoachProfile } from './entities/coach-profile.entity';
-import { UpdateCoachProfileDto } from './dtos/update-coach-profile.dto';
-import { UpdateCertificationDto } from './dtos/update-certification.dto';
+import { SportType } from 'src/common/enums/sport-type.enum';
 
 @Injectable()
 export class ProfilesService {
@@ -19,7 +18,7 @@ export class ProfilesService {
 
         const coachProfile = await this.coachProfileModel
             .findOne({ user: new Types.ObjectId(userId) })
-            .populate('user', 'name email')
+            .populate('user')
             .exec();
 
         if (!coachProfile) {
@@ -34,8 +33,8 @@ export class ProfilesService {
             throw new BadRequestException('Hourly rate cannot be negative');
         }
 
-        const updatedCoach = await this.coachProfileModel.findByIdAndUpdate(
-            new Types.ObjectId(coachId),
+        const updatedCoach = await this.coachProfileModel.findOneAndUpdate(
+            { user: new Types.ObjectId(coachId) },
             { $set: { hourlyRate: newRate } },
             { new: true }
         );
@@ -47,13 +46,10 @@ export class ProfilesService {
         return updatedCoach;
     }
 
-    async updateProfile(
-        userId: string,
-        updateDto: UpdateCoachProfileDto,
-    ): Promise<CoachProfile> {
+    async updateCertification(userId: Types.ObjectId, certification: string) {
         const profile = await this.coachProfileModel.findOneAndUpdate(
-            { user: new Types.ObjectId(userId) },
-            { $set: updateDto },
+            { user: userId },
+            { certification },
             { new: true },
         );
 
@@ -64,13 +60,24 @@ export class ProfilesService {
         return profile;
     }
 
-    async updateCertification(
-        userId: Types.ObjectId,
-        dto: UpdateCertificationDto,
-    ) {
+    async updateBio(userId: string, bio: string): Promise<CoachProfile> {
         const profile = await this.coachProfileModel.findOneAndUpdate(
-            { user: userId },
-            { certification: dto.certification },
+            { user: new Types.ObjectId(userId) },
+            { $set: { bio } },
+            { new: true },
+        );
+
+        if (!profile) {
+            throw new NotFoundException('Coach profile not found');
+        }
+
+        return profile;
+    }
+
+    async updateSports(userId: string, sports: SportType[]): Promise<CoachProfile> {
+        const profile = await this.coachProfileModel.findOneAndUpdate(
+            { user: new Types.ObjectId(userId) },
+            { $set: { sports } },
             { new: true },
         );
 

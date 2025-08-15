@@ -39,4 +39,14 @@ export class BookingsService {
 
         return booking;
     }
+
+    async getByRequestedCoachId(coachId: string): Promise<Booking[]> {
+    return this.bookingModel
+        .find({ requestedCoach: new Types.ObjectId(coachId) })
+            .populate('user')
+            .populate('schedule')
+            //.populate('payment')
+            .populate('requestedCoach')
+            .exec();
+    }
 }
