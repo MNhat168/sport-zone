@@ -181,7 +181,7 @@ export class AuthService {
     await user.save();
     return { message: 'Password reset successful' };
   }
-  
+
   // Login with Google OAuth
   async loginWithGoogle(body: { googleId: string; email: string; fullName: string }) {
     const { googleId, email, fullName } = body;

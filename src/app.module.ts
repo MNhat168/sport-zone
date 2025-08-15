@@ -35,6 +35,9 @@ import { CoachesModule } from './modules/coaches/coaches.module';
     AiModule,
     NotificationsModule,
     AdminModule,
+    SchedulesModule,
+    CoachesModule,
+    NotificationsModule,
     MongooseModule.forRoot(process.env.MONGODB_URI!)
   ],
   controllers: [AppController],
