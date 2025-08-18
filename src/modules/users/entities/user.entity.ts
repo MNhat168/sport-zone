@@ -24,11 +24,7 @@ export class User extends Document {
   @Prop({ required: false })
   password: string;
 
-  @Prop({ 
-    type: String, 
-    enum: UserRole, 
-    default: UserRole.USER
-  })
+  @Prop({ type: String, enum: UserRole, default: UserRole.USER })
   role: UserRole;
 
   @Prop({ type: String })
@@ -57,4 +53,4 @@ export class User extends Document {
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
-UserSchema.index({ role: 1 }); 
+UserSchema.index({ role: 1 });
