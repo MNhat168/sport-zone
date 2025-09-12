@@ -1,5 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, HydratedDocument } from 'mongoose';
+
+export type UserDocument = HydratedDocument<User>;
 
 export enum UserRole {
   USER = 'user',
@@ -46,6 +48,12 @@ export class User extends Document {
 
   @Prop({ type: String })
   googleId?: string;
+
+  @Prop({ type: [String] })
+  favouriteField?: string[];
+
+  @Prop({ type: Boolean, default: true })
+  isActive: boolean;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

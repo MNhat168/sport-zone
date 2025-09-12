@@ -1,6 +1,8 @@
 import { Controller, Post, Body, BadRequestException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { Inject } from '@nestjs/common';
+import { SignInTokenDto } from './dto/sign-in-token.dto';
+import { HttpStatus } from '@nestjs/common';
 
 @Controller('auth')
 export class AuthController {
@@ -46,10 +48,11 @@ export class AuthController {
 
   // //Login with Google OAuth
 
-  // @Post('login-google')
-  // async loginWithGoogle(@Body() body: { googleId: string; email: string; fullName: string }) {
-  //   return this.authService.loginWithGoogle(body);
-  // }
+  @Post('google')
+  async authWithGoogle(@Body() sign_in_token: SignInTokenDto) {
+    const result = await this.authService.authenticateWithGoogle(sign_in_token);
+    return { status: HttpStatus.OK, message: 'Đăng nhập Google thành công', data: result };
+  }
 
   // Google OAuth callback handler
   @Post('google/callback')

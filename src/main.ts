@@ -53,7 +53,7 @@ async function bootstrap() {
   // limit: '10mb' => giới hạn dung lượng
   app.use(urlencoded({ extended: true, limit: '10mb' }));
   await app.listen(port, () =>
-    logger.log(` Server running on: http://localhost:${port}/api-docs`),
+    logger.log(` Server running on: http://localhost:${port}`),
   );
 }
 

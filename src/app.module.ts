@@ -14,10 +14,16 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { AdminModule } from './modules/admin/admin.module';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
-import type{ ConfigService } from '@nestjs/config';
+import { SchedulesModule } from './modules/bookings/schedules.module';
+import { CoachesModule } from './modules/coaches/coaches.module';
 @Module({
   imports: [
-    ConfigModule.forRoot(),
+    ConfigModule.forRoot({
+      isGlobal: true, // ← cho phép dùng ở mọi module
+    }),
+    MongooseModule.forRoot(
+      process.env.MONGODB_URI!
+    ),
     AuthModule,
     UsersModule,
     ProfilesModule,
