@@ -1,11 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { User } from 'src/modules/users/entities/user.entity';
 import { SportType } from 'src/common/enums/sport-type.enum';
 
 @Schema({ timestamps: true })
 export class Field extends Document {
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: Types.ObjectId, ref: 'FieldOwnerProfile', required: true })
   owner: Types.ObjectId;
 
   @Prop({ required: true })
@@ -16,9 +15,6 @@ export class Field extends Document {
 
   @Prop({ required: true })
   description: string;
-
-  @Prop({ required: true })
-  location: string;
 
   @Prop({ type: [String], required: true })
   images: string[];
