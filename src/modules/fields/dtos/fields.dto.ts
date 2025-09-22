@@ -1,10 +1,8 @@
-import { SportType } from "src/common/enums/sport-type.enum";
-
 export class FieldsDto {
     id: string;
     owner: string;
     name: string;
-    sportType: SportType;
+    sportType: string;
     description: string;
     location: string;
     images: string[];

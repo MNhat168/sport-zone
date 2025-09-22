@@ -48,6 +48,9 @@ export class Field extends Document {
 
   @Prop({ type: Number, default: 0 })
   totalReviews: number;
+
+  @Prop({ required: true })
+  location: string;
 }
 
 export const FieldSchema = SchemaFactory.createForClass(Field);
