@@ -1,10 +1,12 @@
 import { Controller, Post, Body, BadRequestException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { Inject } from '@nestjs/common';
+import { SignInTokenDto } from './dto/sign-in-token.dto';
+import { HttpStatus } from '@nestjs/common';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly authService: AuthService) { }
   // Register a new user
   @Post('register')
   async register(
@@ -44,6 +46,14 @@ export class AuthController {
     return this.authService.resetPassword(body);
   }
 
+  // //Login with Google OAuth
+
+  @Post('google')
+  async authWithGoogle(@Body() sign_in_token: SignInTokenDto) {
+    const result = await this.authService.authenticateWithGoogle(sign_in_token);
+    return { status: HttpStatus.OK, message: 'Đăng nhập Google thành công', data: result };
+  }
+
   // Google OAuth callback handler
   @Post('google/callback')
   async googleCallback(@Body() body: { code: string }) {
@@ -79,5 +89,5 @@ export class AuthController {
       });
     }
   }
-  
+
 }

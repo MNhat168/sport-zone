@@ -1,16 +1,45 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, HttpException, HttpStatus, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { User, UserRole } from '../users/entities/user.entity';
 import * as bcrypt from 'bcrypt';
 import * as nodemailer from 'nodemailer';
+import { ConfigService } from '@nestjs/config';
+import { TokenPayload } from './interfaces/token.interface';
+import { JwtService } from '@nestjs/jwt';
+import { SignInTokenDto } from './dto/sign-in-token.dto';
+import { HttpService } from '@nestjs/axios';
+import { USER_REPOSITORY, UserRepositoryInterface } from '../users/interface/users.interface';
 
 @Injectable()
 export class AuthService {
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    private readonly jwt_service: JwtService,
+    private readonly config_service: ConfigService,
+    private readonly http_service: HttpService,
+    @Inject(USER_REPOSITORY) private readonly user_repository: UserRepositoryInterface,
   ) {}
+  
+  generateAccessToken(payload: TokenPayload) {
+    return this.jwt_service.sign(payload, {
+      algorithm: 'RS256',
+      privateKey: process.env.JWT_ACCESS_TOKEN_PRIVATE_KEY,
+      expiresIn: `${this.config_service.get<string>(
+        'JWT_ACCESS_TOKEN_EXPIRATION_TIME',
+      )}s`,
+    });
+  }
 
+  generateRefreshToken(payload: TokenPayload) {
+    return this.jwt_service.sign(payload, {
+      algorithm: 'RS256',
+      privateKey: process.env.JWT_REFRESH_TOKEN_PRIVATE_KEY,
+      expiresIn: `${this.config_service.get<string>(
+        'JWT_REFRESH_TOKEN_EXPIRATION_TIME',
+      )}s`,
+    });
+  }
   // Register a new user
   async register(body: {
     fullName: string;
@@ -68,7 +97,7 @@ export class AuthService {
       family: 4,
     } as any);
     await transporter.sendMail({
-      from: process.env.DEFAULT_MAIL_FROM || 'SportZone@example.com',
+      from: process.env.DEFAULT_MAIL_FROM!,
       to: email,
       subject: 'SportZone Verification Code',
       text: `Your verification code is: ${code}`,
@@ -90,7 +119,16 @@ export class AuthService {
       process.env.JWT_SECRET || 'defaultsecret',
       { expiresIn: process.env.JWT_ACCESS_TOKEN_EXPIRATION_TIME || '1h' },
     );
-    return { access_token: token };
+    return {
+      access_token: token, user: {
+        _id: user._id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        avatarUrl: user.avatarUrl,
+        isActive: user.isActive,
+        isVerified: user.isVerified
+      } };
   }
 
   // Forgot password
@@ -122,7 +160,7 @@ export class AuthService {
       family: 4,
     } as any);
     await transporter.sendMail({
-      from: process.env.DEFAULT_MAIL_FROM || 'SportZone@example.com',
+      from: process.env.DEFAULT_MAIL_FROM!,
       to: email,
       subject: 'SportZone Reset Password Code',
       text: `Your reset password code is: ${code}`,
@@ -143,7 +181,7 @@ export class AuthService {
     await user.save();
     return { message: 'Password reset successful' };
   }
-  
+
   // Login with Google OAuth
   async loginWithGoogle(body: { googleId: string; email: string; fullName: string }) {
     const { googleId, email, fullName } = body;
@@ -171,10 +209,54 @@ export class AuthService {
     const jwt = require('jsonwebtoken');
     const token = jwt.sign(
       { sub: user._id, email: user.email, role: user.role },
-      process.env.JWT_SECRET || 'defaultsecret',
-      { expiresIn: process.env.JWT_ACCESS_TOKEN_EXPIRATION_TIME || '1h' },
+      process.env.JWT_SECRET!,
+      { expiresIn: process.env.JWT_ACCESS_TOKEN_EXPIRATION_TIME! },
     );
     return { access_token: token };
   }
+  async authenticateWithGoogle(sign_in_token: SignInTokenDto) {
+    const { token, avatar } = sign_in_token;
+    const userInfo = await this.http_service.axiosRef.get(
+      'https://www.googleapis.com/oauth2/v3/userinfo',
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
 
+    const { email, name, picture } = userInfo.data;
+    if (!email) throw new HttpException({ message: 'Token không hợp lệ' }, HttpStatus.BAD_REQUEST);
+
+    let user = await this.user_repository.findOneByCondition({ email });
+
+    if (!user) {
+      const defaultPassword = '123456';
+      const passwordHash = await bcrypt.hash(defaultPassword, 10);
+      user = await this.user_repository.create({
+        email,
+        googleId: userInfo.data.sub,
+        fullName: userInfo.data.given_name,
+        role: UserRole.USER,
+        isActive: true,
+        password: passwordHash,
+        isVerified: userInfo.data.email_verified,
+        avatarUrl: picture || avatar,
+      });
+    }
+
+    if (!user.isActive) throw new HttpException({ message: 'Tài khoản đã bị khóa' }, HttpStatus.UNAUTHORIZED);
+    if (avatar && user.avatarUrl !== avatar) await this.user_repository.update(user.id, { avatarUrl: avatar });
+
+    const accessToken = this.generateAccessToken({ userId: user.id, role: user.role });
+    const refreshToken = this.generateRefreshToken({ userId: user.id, role: user.role });
+
+    return {
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      user: {
+        _id: user._id, email: user.email, fullName: user.fullName, avatarUrl: user.avatarUrl,
+        role: user.role, 
+        // gender: user.gender || null, phone_number: user.phone_number,
+        // date_of_birth: user.date_of_birth, address: user.address || null, profile: user.profile || {},
+        // status: user.status, favoriteCourses: user.favoriteCourses || [],
+      }
+    };
+  }
 }
