@@ -10,7 +10,6 @@ import { JwtService } from '@nestjs/jwt';
 import { SignInTokenDto } from './dto/sign-in-token.dto';
 import { HttpService } from '@nestjs/axios';
 import { USER_REPOSITORY, UserRepositoryInterface } from '../users/interface/users.interface';
-
 @Injectable()
 export class AuthService {
   constructor(
@@ -19,25 +18,17 @@ export class AuthService {
     private readonly config_service: ConfigService,
     private readonly http_service: HttpService,
     @Inject(USER_REPOSITORY) private readonly user_repository: UserRepositoryInterface,
-  ) {}
-  
+  ) { }
+
   generateAccessToken(payload: TokenPayload) {
     return this.jwt_service.sign(payload, {
-      algorithm: 'RS256',
-      privateKey: process.env.JWT_ACCESS_TOKEN_PRIVATE_KEY,
-      expiresIn: `${this.config_service.get<string>(
-        'JWT_ACCESS_TOKEN_EXPIRATION_TIME',
-      )}s`,
+      expiresIn: `${this.config_service.get<string>('JWT_ACCESS_TOKEN_EXPIRATION_TIME')}s`,
     });
   }
 
   generateRefreshToken(payload: TokenPayload) {
     return this.jwt_service.sign(payload, {
-      algorithm: 'RS256',
-      privateKey: process.env.JWT_REFRESH_TOKEN_PRIVATE_KEY,
-      expiresIn: `${this.config_service.get<string>(
-        'JWT_REFRESH_TOKEN_EXPIRATION_TIME',
-      )}s`,
+      expiresIn: `${this.config_service.get<string>('JWT_REFRESH_TOKEN_EXPIRATION_TIME')}s`,
     });
   }
   // Register a new user
@@ -112,11 +103,8 @@ export class AuthService {
     if (!user.isVerified) throw new BadRequestException('Account not verified');
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) throw new BadRequestException('Invalid credentials');
-    // JWT
-    const jwt = require('jsonwebtoken');
-    const token = jwt.sign(
+    const token = this.jwt_service.sign(
       { sub: user._id, email: user.email, role: user.role },
-      process.env.JWT_SECRET || 'defaultsecret',
       { expiresIn: process.env.JWT_ACCESS_TOKEN_EXPIRATION_TIME || '1h' },
     );
     return {
@@ -205,11 +193,8 @@ export class AuthService {
       });
       await user.save();
     }
-    // JWT
-    const jwt = require('jsonwebtoken');
-    const token = jwt.sign(
+    const token = this.jwt_service.sign(
       { sub: user._id, email: user.email, role: user.role },
-      process.env.JWT_SECRET!,
       { expiresIn: process.env.JWT_ACCESS_TOKEN_EXPIRATION_TIME! },
     );
     return { access_token: token };

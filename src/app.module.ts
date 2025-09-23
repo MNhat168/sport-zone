@@ -20,6 +20,7 @@ import { CoachesModule } from './modules/coaches/coaches.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true, // ← cho phép dùng ở mọi module
+      envFilePath: '.env',
     }),
     MongooseModule.forRoot(
       process.env.MONGODB_URI!
@@ -43,4 +44,4 @@ import { CoachesModule } from './modules/coaches/coaches.module';
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule { }

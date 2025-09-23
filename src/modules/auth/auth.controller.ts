@@ -6,7 +6,7 @@ import { HttpStatus } from '@nestjs/common';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly authService: AuthService) { }
   // Register a new user
   @Post('register')
   async register(
@@ -89,4 +89,5 @@ export class AuthController {
       });
     }
   }
+
 }
