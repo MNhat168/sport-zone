@@ -12,7 +12,7 @@ export class FieldOwnerProfile extends Document {
   facilityName: string;
 
   @Prop({ required: true })
-  facilityLocation: string; 
+  facilityLocation: string;
 
   @Prop({ type: [String], enum: SportType, required: true })
   supportedSports: SportType[];
@@ -21,7 +21,7 @@ export class FieldOwnerProfile extends Document {
   description: string;
 
   @Prop({ type: [String] })
-  amenities: string[]; 
+  amenities: string[];
   @Prop({ type: Number, default: 0, min: 0, max: 5 })
   rating: number;
 

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Field } from './entities/field.entity';
 import { Model } from 'mongoose';
@@ -35,4 +35,25 @@ export class FieldsService {
         }));
     }
 
+    async findOne(id: string): Promise<FieldsDto> {
+        const field = await this.fieldModel.findById(id).lean();
+        if (!field) {
+            throw new NotFoundException(`Field with ID ${id} not found`);
+        }
+        return {
+            id: field._id.toString(),
+            owner: field.owner.toString(),
+            name: field.name,
+            sportType: field.sportType,
+            description: field.description,
+            location: field.location,
+            images: field.images,
+            pricePerHour: field.pricePerHour,
+            isActive: field.isActive,
+            maintenanceNote: field.maintenanceNote,
+            maintenanceUntil: field.maintenanceUntil,
+            rating: field.rating,
+            totalReviews: field.totalReviews,
+        };
+    }
 }

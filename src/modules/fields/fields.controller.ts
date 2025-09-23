@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, Param } from '@nestjs/common';
 import { FieldsService } from './fields.service';
 import { FieldsDto } from './dtos/fields.dto';
 
@@ -13,5 +13,10 @@ export class FieldsController {
         @Query('sportType') sportType?: string,
     ): Promise<FieldsDto[]> {
         return this.fieldsService.findAll({ name, location, sportType });
+    }
+
+    @Get(':id')
+    async findOne(@Param('id') id: string): Promise<FieldsDto> {
+        return this.fieldsService.findOne(id);
     }
 }
