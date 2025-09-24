@@ -1,4 +1,127 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { Booking, BookingType, BookingStatus } from './entities/booking.entity';
 
 @Injectable()
-export class BookingsService {}
+export class BookingsService {
+  constructor(
+    @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
+  ) {}
+
+  //Create field booking service
+  async createFieldBooking(data: {
+    user: string;
+    schedule: string;
+    slot: string;
+    totalPrice: number;
+  }) {
+    if (!data.user || !data.schedule || !data.slot || data.totalPrice < 0) {
+      throw new BadRequestException('Missing or invalid booking data');
+    }
+    const booking = new this.bookingModel({
+      user: data.user,
+      schedule: data.schedule,
+      slot: data.slot,
+      type: BookingType.FIELD,
+      status: BookingStatus.PENDING,
+      totalPrice: data.totalPrice,
+    });
+    await booking.save();
+    return booking;
+  }
+
+  // Create booking session service (field + coach)
+  async createSessionBooking(data: {
+    user: string;
+    fieldSchedule: string;
+    coachSchedule: string;
+    fieldSlot: string;
+    coachSlot: string;
+    fieldPrice: number;
+    coachPrice: number;
+  }) {
+    if (
+      !data.user ||
+      !data.fieldSchedule ||
+      !data.coachSchedule ||
+      !data.fieldSlot ||
+      !data.coachSlot ||
+      data.fieldPrice < 0 ||
+      data.coachPrice < 0
+    ) {
+      throw new BadRequestException('Missing or invalid session booking data');
+    }
+    // Create field booking
+    const fieldBooking = new this.bookingModel({
+      user: data.user,
+      schedule: data.fieldSchedule,
+      slot: data.fieldSlot,
+      type: BookingType.FIELD,
+      status: BookingStatus.PENDING,
+      totalPrice: data.fieldPrice,
+    });
+    // Create coach booking
+    const coachBooking = new this.bookingModel({
+      user: data.user,
+      schedule: data.coachSchedule,
+      slot: data.coachSlot,
+      type: BookingType.COACH,
+      status: BookingStatus.PENDING,
+      totalPrice: data.coachPrice,
+    });
+    await fieldBooking.save();
+    await coachBooking.save();
+    return { fieldBooking, coachBooking };
+  }
+
+  // Cancel field booking service
+  async cancelBooking(data: {
+    bookingId: string;
+    userId: string;
+    cancellationReason?: string;
+  }) {
+    const booking = await this.bookingModel.findById(data.bookingId);
+    if (!booking) {
+      throw new BadRequestException('Booking not found');
+    }
+    if (String(booking.user) !== String(data.userId)) {
+      throw new BadRequestException(
+        'You are not authorized to cancel this booking',
+      );
+    }
+    booking.status = BookingStatus.CANCELLED;
+    booking.cancellationReason = data.cancellationReason;
+    await booking.save();
+    return booking;
+  }
+
+  // Cancel booking session service (field + coach)
+  async cancelSessionBooking(data: {
+    fieldBookingId: string;
+    coachBookingId: string;
+    userId: string;
+    cancellationReason?: string;
+  }) {
+    const fieldBooking = await this.bookingModel.findById(data.fieldBookingId);
+    const coachBooking = await this.bookingModel.findById(data.coachBookingId);
+    if (!fieldBooking || !coachBooking) {
+      throw new BadRequestException('One or both bookings not found');
+    }
+    if (
+      String(fieldBooking.user) !== String(data.userId) ||
+      String(coachBooking.user) !== String(data.userId)
+    ) {
+      throw new BadRequestException(
+        'You are not authorized to cancel these bookings',
+      );
+    }
+    fieldBooking.status = BookingStatus.CANCELLED;
+    coachBooking.status = BookingStatus.CANCELLED;
+    fieldBooking.cancellationReason = data.cancellationReason;
+    coachBooking.cancellationReason = data.cancellationReason;
+    await fieldBooking.save();
+    await coachBooking.save();
+    return { fieldBooking, coachBooking };
+  }
+}
