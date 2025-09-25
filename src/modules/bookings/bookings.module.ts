@@ -9,6 +9,7 @@ import { Booking, BookingSchema } from './entities/booking.entity';
     MongooseModule.forFeature([{ name: Booking.name, schema: BookingSchema }]),
   ],
   controllers: [BookingsController],
-  providers: [BookingsService]
+  providers: [BookingsService],
+  exports: [BookingsService],
 })
 export class BookingsModule { }
