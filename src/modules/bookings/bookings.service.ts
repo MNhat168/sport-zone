@@ -2,12 +2,14 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Booking, BookingType, BookingStatus } from './entities/booking.entity';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class BookingsService {
     constructor(
         @InjectModel(Booking.name)
         private readonly bookingModel: Model<Booking>,
+        private eventEmitter: EventEmitter2,
     ) { }
 
     async updateCoachStatus(
@@ -36,6 +38,14 @@ export class BookingsService {
 
         booking.coachStatus = newStatus;
         await booking.save();
+
+        //create notification event
+        this.eventEmitter.emit('booking.status.updated', {
+          bookingId,
+          userId: booking.user,
+          coachId,
+          newStatus,
+        });
 
         return booking;
     }
