@@ -1,22 +1,30 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { AuthModule } from './auth/auth.module';
-import { UsersModule } from './users/users.module';
-import { ProfilesModule } from './profiles/profiles.module';
-import { FieldsModule } from './fields/fields.module';
-import { BookingsModule } from './bookings/bookings.module';
-import { PaymentsModule } from './payments/payments.module';
-import { TournamentsModule } from './tournaments/tournaments.module';
-import { ReviewsModule } from './reviews/reviews.module';
-import { AiModule } from './ai/ai.module';
-import { NotificationsModule } from './notifications/notifications.module';
-import { AdminModule } from './admin/admin.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { UsersModule } from './modules/users/users.module';
+import { ProfilesModule } from './modules/profiles/profiles.module';
+import { FieldsModule } from './modules/fields/fields.module';
+import { BookingsModule } from './modules/bookings/bookings.module';
+import { PaymentsModule } from './modules/payments/payments.module';
+import { TournamentsModule } from './modules/tournaments/tournaments.module';
+import { ReviewsModule } from './modules/reviews/reviews.module';
+import { AiModule } from './modules/ai/ai.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { AdminModule } from './modules/admin/admin.module';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
+import { SchedulesModule } from './modules/bookings/schedules.module';
+import { CoachesModule } from './modules/coaches/coaches.module';
 @Module({
   imports: [
-    ConfigModule.forRoot(),
+    ConfigModule.forRoot({
+      isGlobal: true, // ← cho phép dùng ở mọi module
+      envFilePath: '.env',
+    }),
+    MongooseModule.forRoot(
+      process.env.MONGODB_URI!
+    ),
     AuthModule,
     UsersModule,
     ProfilesModule,
@@ -28,9 +36,12 @@ import { ConfigModule } from '@nestjs/config';
     AiModule,
     NotificationsModule,
     AdminModule,
-    MongooseModule.forRoot(process.env.MONGODB_URI || 'mongodb+srv://nhatnmde180:helloworld@cluster0.zufvinh.mongodb.net/SportZone?retryWrites=true&w=majority')
+    SchedulesModule,
+    CoachesModule,
+    NotificationsModule,
+    MongooseModule.forRoot(process.env.MONGODB_URI!)
   ],
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule { }
