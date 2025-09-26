@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CreateNotificationDto } from './dtos/create-notification.dto';
 import { Notification } from './entities/notification.entity';
+import { NotificationType } from 'src/common/enums/notification-type.enum';
 
 @Injectable()
 export class NotificationsService {

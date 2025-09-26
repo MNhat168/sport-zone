@@ -7,6 +7,7 @@ import {
   Post,
   Request,
   UseGuards,
+  BadRequestException 
 } from '@nestjs/common';
 import { BookingsService } from './bookings.service';
 import { Booking } from './entities/booking.entity';
@@ -41,11 +42,16 @@ export class CancelSessionBookingDto {
 export class BookingsController {
   constructor(private readonly bookingsService: BookingsService) { }
 
+  //accept decline coaching book
   @Patch(':id/coach-status')
   async setCoachStatus(
     @Param('id') bookingId: string,
     @Body() body: { coachId: string; status: 'accepted' | 'declined' },
   ) {
+    if (!body || !body.coachId || !body.status) {
+      throw new BadRequestException('coachId and status are required');
+    }
+    
     return this.bookingsService.updateCoachStatus(
       bookingId,
       body.coachId,
@@ -53,6 +59,7 @@ export class BookingsController {
     );
   }
 
+  //get all bookings of a coach
   @Get('coach/:coachId')
 async getBookingsByCoachId(@Param('coachId') coachId: string): Promise<Booking[]> {
     return this.bookingsService.getByRequestedCoachId(coachId);

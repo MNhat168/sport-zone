@@ -28,17 +28,17 @@ export class Booking extends Document {
   @Prop({ type: Types.ObjectId, ref: 'CoachProfile' })
   requestedCoach?: Types.ObjectId;
 
-  @Prop({ 
-    type: String, 
+  @Prop({
+    type: String,
     enum: ['pending', 'accepted', 'declined'],
     default: 'pending'
   })
   coachStatus?: string;
 
-  @Prop({   
+  @Prop({
     default: 0,
     min: 0,
-    max: 3  
+    max: 3
   })
   retryAttempts?: number;
 
@@ -60,12 +60,15 @@ export class Booking extends Document {
 
   @Prop({ type: String })
   cancellationReason?: string;
-  
+
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Amenity' }] })
   selectedAmenities: Types.ObjectId[];
 
   @Prop({ type: Number, default: 0 })
   amenitiesFee: number;
+
+  @Prop({ type: Boolean, default: false })
+  holidayNotified?: boolean;
 }
 
 export const BookingSchema = SchemaFactory.createForClass(Booking);
