@@ -14,8 +14,8 @@ import { UsersService } from './users.service';
 import { AuthGuard } from '@nestjs/passport';
 import { UserRole } from './entities/user.entity';
 
-export class SetFavouriteFieldDto {
-  favouriteField: string;
+export class SetFavouriteFieldsDto {
+  favouriteFields: string[];
 }
 
 @Controller('users')
@@ -36,8 +36,8 @@ export class UsersController {
   // }
 
   @UseGuards(AuthGuard('jwt'))
-  @Post('favourite-field')
-  async setFavouriteField(@Request() req, @Body() body: SetFavouriteFieldDto) {
+  @Post('favourite-fields')
+  async setFavouriteFields(@Request() req, @Body() body: SetFavouriteFieldsDto) {
     const userEmail = req.user.email;
     const user = await this.usersService.findByEmail(userEmail);
     if (!user) {
@@ -45,10 +45,10 @@ export class UsersController {
     }
     if (user.role !== UserRole.USER) {
       throw new BadRequestException(
-        'Only users with role USER can set favourite field',
+        'Only users with role USER can set favourite fields',
       );
     }
-    // Now allows adding multiple favourite fields, but blocks duplicates
-    return this.usersService.setFavouriteField(userEmail, body.favouriteField);
+    // Add multiple favourite fields, block duplicates
+    return this.usersService.setFavouriteFields(userEmail, body.favouriteFields);
   }
 }

@@ -33,7 +33,7 @@ export class UsersService {
     return this.userModel.findOne({ email });
   }
 
-  async setFavouriteField(email: string, favouriteField: string) {
+  async setFavouriteFields(email: string, favouriteFields: string[]) {
     const user = await this.userModel.findOne({ email });
     if (!user) {
       throw new BadRequestException('User not found');
@@ -41,10 +41,14 @@ export class UsersService {
     if (!Array.isArray(user.favouriteField)) {
       user.favouriteField = [];
     }
-    if (user.favouriteField.includes(favouriteField)) {
-      throw new BadRequestException('Favourite field already set');
+    const currentFields: string[] = user.favouriteField || [];
+    const newFields = favouriteFields.filter(
+      (field) => !currentFields.includes(field)
+    );
+    if (newFields.length === 0) {
+      throw new BadRequestException('All favourite fields already set');
     }
-    user.favouriteField.push(favouriteField);
+    user.favouriteField.push(...newFields);
     await user.save();
     return user;
   }
