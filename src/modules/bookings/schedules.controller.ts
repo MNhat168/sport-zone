@@ -18,10 +18,11 @@ export class SchedulesController {
 
     @Post('set-holiday')
     async setHoliday(
-        @Body() body: { startDate: string; endDate: string },
-    ) {
-        const { startDate, endDate } = body;
+        @Body() body: { coachId: string; startDate: string; endDate: string },
+        ) {
+        const { coachId, startDate, endDate } = body;
         return this.scheduleService.SetHoliday(
+            coachId,
             new Date(startDate),
             new Date(endDate),
         );

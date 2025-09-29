@@ -5,10 +5,16 @@ import { Schedule, ScheduleSchema } from './entities/schedule.entity';
 import { MongooseModule } from '@nestjs/mongoose';
 import { SchedulesController } from './schedules.controller';
 import { SchedulesService } from './schedules.service';
+import { Booking, BookingSchema } from './entities/booking.entity';
+import { BookingsModule } from './bookings.module';
 
 @Module({
     imports: [
-        MongooseModule.forFeature([{ name: Schedule.name, schema: ScheduleSchema }]),
+        MongooseModule.forFeature([
+            { name: Schedule.name, schema: ScheduleSchema },
+            { name: Booking.name, schema: BookingSchema }
+        ]),
+        BookingsModule,
     ],
     controllers: [SchedulesController],
     providers: [SchedulesService],

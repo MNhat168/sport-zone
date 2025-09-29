@@ -16,14 +16,17 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
 import { SchedulesModule } from './modules/bookings/schedules.module';
 import { CoachesModule } from './modules/coaches/coaches.module';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true, // ← cho phép dùng ở mọi module
+      envFilePath: '.env',
     }),
     MongooseModule.forRoot(
       process.env.MONGODB_URI!
     ),
+    EventEmitterModule.forRoot(),
     AuthModule,
     UsersModule,
     ProfilesModule,
