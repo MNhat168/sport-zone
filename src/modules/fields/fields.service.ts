@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, InternalServerErrorException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Field } from './entities/field.entity';
 import { Model } from 'mongoose';
@@ -7,9 +7,9 @@ import { FieldOwnerProfile } from './entities/field-owner-profile.entity';
 
 @Injectable()
 export class FieldsService {
-    constructor(@InjectModel(Field.name) private fieldModel: Model<Field>) {
+    private readonly logger = new Logger(FieldsService.name);
 
-    }
+    constructor(@InjectModel(Field.name) private fieldModel: Model<Field>) {}
 
     async findAll(query?: { name?: string; location?: string; sportType?: string }): Promise<FieldsDto[]> {
         // Lọc theo tên và loại thể thao

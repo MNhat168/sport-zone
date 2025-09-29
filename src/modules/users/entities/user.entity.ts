@@ -21,6 +21,9 @@ export class User extends Document {
   @Prop({ required: false })
   phone: string;
 
+  @Prop({ required: false, type: Date })
+  date_of_birth?: Date;
+
   @Prop({ required: false })
   password: string;
 

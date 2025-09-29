@@ -19,8 +19,12 @@ export class Notification extends Document {
   @Prop({ type: Boolean, default: false })
   isRead: boolean;
 
+  @Prop()
+  createdAt?: Date;
+
   @Prop({ type: Object })
   metadata?: Record<string, any>;
 }
 
+export type NotificationDocument = Notification & Document;
 export const NotificationSchema = SchemaFactory.createForClass(Notification);

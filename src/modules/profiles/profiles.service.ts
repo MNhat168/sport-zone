@@ -29,6 +29,10 @@ export class ProfilesService {
     }
 
     async setHourlyRate(coachId: string, newRate: number): Promise<CoachProfile> {
+        if (!Types.ObjectId.isValid(coachId)) {
+            throw new BadRequestException('Invalid coach ID format');
+        }
+
         if (newRate < 0) {
             throw new BadRequestException('Hourly rate cannot be negative');
         }
@@ -46,9 +50,13 @@ export class ProfilesService {
         return updatedCoach;
     }
 
-    async updateCertification(userId: Types.ObjectId, certification: string) {
+    async updateCertification(userId: string, certification: string): Promise<CoachProfile> {
+        if (!Types.ObjectId.isValid(userId)) {
+            throw new BadRequestException('Invalid user ID format');
+        }
+
         const profile = await this.coachProfileModel.findOneAndUpdate(
-            { user: userId },
+            { user: new Types.ObjectId(userId) },
             { certification },
             { new: true },
         );
@@ -61,6 +69,10 @@ export class ProfilesService {
     }
 
     async updateBio(userId: string, bio: string): Promise<CoachProfile> {
+        if (!Types.ObjectId.isValid(userId)) {
+            throw new BadRequestException('Invalid user ID format');
+        }
+
         const profile = await this.coachProfileModel.findOneAndUpdate(
             { user: new Types.ObjectId(userId) },
             { $set: { bio } },
@@ -75,6 +87,10 @@ export class ProfilesService {
     }
 
     async updateSports(userId: string, sports: SportType[]): Promise<CoachProfile> {
+        if (!Types.ObjectId.isValid(userId)) {
+            throw new BadRequestException('Invalid user ID format');
+        }
+
         const profile = await this.coachProfileModel.findOneAndUpdate(
             { user: new Types.ObjectId(userId) },
             { $set: { sports } },
