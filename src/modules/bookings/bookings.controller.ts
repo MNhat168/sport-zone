@@ -11,32 +11,11 @@ import {
 } from '@nestjs/common';
 import { BookingsService } from './bookings.service';
 import { Booking } from './entities/booking.entity';
+import { CancelBookingDto } from './dto/cancel-booking.dto';
+import { CreateFieldBookingDto } from './dto/create-field-booking.dto';
+import { CreateSessionBookingDto } from './dto/create-session-booking.dto';
+import { CancelSessionBookingDto } from './dto/cancel-session-booking.dto';
 import { AuthGuard } from '@nestjs/passport';
-
-export class CancelBookingDto {
-  cancellationReason?: string;
-}
-
-export class CreateFieldBookingDto {
-  scheduleId: string;
-  slot: string;
-  totalPrice: number;
-}
-
-export class CreateSessionBookingDto {
-  fieldScheduleId: string;
-  coachScheduleId: string;
-  fieldSlot: string;
-  coachSlot: string;
-  fieldPrice: number;
-  coachPrice: number;
-}
-
-export class CancelSessionBookingDto {
-  fieldBookingId: string;
-  coachBookingId: string;
-  cancellationReason?: string;
-}
 
 @Controller('bookings')
 export class BookingsController {
@@ -76,7 +55,8 @@ async getBookingsByCoachId(@Param('coachId') coachId: string): Promise<Booking[]
     return this.bookingsService.createFieldBooking({
       user: userId,
       schedule: body.scheduleId,
-      slot: body.slot,
+      startTime: body.startTime,
+      endTime: body.endTime,
       totalPrice: body.totalPrice,
     });
   }
@@ -109,8 +89,10 @@ async getBookingsByCoachId(@Param('coachId') coachId: string): Promise<Booking[]
       user: userId,
       fieldSchedule: body.fieldScheduleId,
       coachSchedule: body.coachScheduleId,
-      fieldSlot: body.fieldSlot,
-      coachSlot: body.coachSlot,
+      fieldStartTime: body.fieldStartTime,
+      fieldEndTime: body.fieldEndTime,
+      coachStartTime: body.coachStartTime,
+      coachEndTime: body.coachEndTime,
       fieldPrice: body.fieldPrice,
       coachPrice: body.coachPrice,
     });

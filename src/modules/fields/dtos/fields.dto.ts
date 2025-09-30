@@ -6,7 +6,12 @@ export class FieldsDto {
     description: string;
     location: string;
     images: string[];
-    pricePerHour: number;
+    operatingHours: { start: string; end: string };
+    slotDuration: number;
+    minSlots: number;
+    maxSlots: number;
+    priceRanges: { start: string; end: string; multiplier: number }[];
+    basePrice: number;
     isActive: boolean;
     maintenanceNote?: string;
     maintenanceUntil?: Date;

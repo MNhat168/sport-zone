@@ -14,7 +14,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { AdminModule } from './modules/admin/admin.module';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
-import { SchedulesModule } from './modules/bookings/schedules.module';
+import { SchedulesModule } from './modules/schedules/schedules.module';
 import { CoachesModule } from './modules/coaches/coaches.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 @Module({

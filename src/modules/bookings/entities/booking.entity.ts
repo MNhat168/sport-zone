@@ -22,6 +22,9 @@ export class Booking extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Schedule', required: true })
   schedule: Types.ObjectId;
 
+  @Prop({ type: Types.ObjectId, ref: 'Field', required: true })
+  field: Types.ObjectId;
+
   @Prop({ required: true, enum: BookingType })
   type: BookingType;
 
@@ -31,24 +34,30 @@ export class Booking extends Document {
   @Prop({
     type: String,
     enum: ['pending', 'accepted', 'declined'],
-    default: 'pending'
+    default: 'pending',
   })
   coachStatus?: string;
 
   @Prop({
     default: 0,
     min: 0,
-    max: 3
+    max: 3,
   })
   retryAttempts?: number;
 
   @Prop({ required: true })
-  slot: string;
+  startTime: string;
+
+  @Prop({ required: true })
+  endTime: string;
+
+  @Prop({ type: Number, required: true, min: 1 }) // Thêm numSlots để dễ validate min/maxSlots mà không recalculate
+  numSlots: number;
 
   @Prop({
     required: true,
     enum: BookingStatus,
-    default: BookingStatus.PENDING
+    default: BookingStatus.PENDING,
   })
   status: BookingStatus;
 
@@ -71,4 +80,3 @@ export class Booking extends Document {
   holidayNotified?: boolean;
 }
 
-export const BookingSchema = SchemaFactory.createForClass(Booking);

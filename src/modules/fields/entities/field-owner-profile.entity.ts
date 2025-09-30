@@ -44,4 +44,3 @@ export class FieldOwnerProfile extends Document {
   website?: string;
 }
 
-export const FieldOwnerProfileSchema = SchemaFactory.createForClass(FieldOwnerProfile);

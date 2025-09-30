@@ -2,9 +2,10 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Schedule } from './entities/schedule.entity';
-import { Booking } from './entities/booking.entity';
+import { Booking } from '../bookings/entities/booking.entity';
+import { Field } from '../fields/entities/field.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { BookingsService } from './bookings.service';
+import { BookingsService } from '../bookings/bookings.service';
 
 
 @Injectable()
@@ -14,6 +15,8 @@ export class SchedulesService {
         private readonly scheduleModel: Model<Schedule>,
         @InjectModel(Booking.name)
         private readonly bookingModel: Model<Booking>,
+        @InjectModel(Field.name)
+        private readonly fieldModel: Model<Field>,
         private eventEmitter: EventEmitter2,
         private bookingsService: BookingsService,
     ) { }
@@ -28,6 +31,7 @@ export class SchedulesService {
                 coach: new Types.ObjectId(coachId),
                 date: { $gte: startDate, $lte: endDate },
             })
+            .populate('field')
             .sort({ date: 1 })
             .exec();
 
@@ -44,10 +48,25 @@ export class SchedulesService {
                 };
             }
 
-            const slots = schedule.availableSlots.map(slot => ({
-                time: slot,
-                available: !schedule.bookedSlots.includes(slot),
-            }));
+            const field = schedule.field as any;
+            if (!field) {
+                throw new BadRequestException('Field not found for schedule');
+            }
+
+            // Generate virtual slots from Field configuration
+            const virtualSlots = this.generateVirtualSlots(field);
+
+            // Check availability against bookedSlots
+            const slots = virtualSlots.map(slot => {
+                const overlaps = schedule.bookedSlots.some(bs => {
+                    return !(bs.endTime <= slot.startTime || bs.startTime >= slot.endTime);
+                });
+                return {
+                    startTime: slot.startTime,
+                    endTime: slot.endTime,
+                    available: !overlaps,
+                };
+            });
 
             return {
                 date: schedule.date,
@@ -55,6 +74,36 @@ export class SchedulesService {
                 slots,
             };
         });
+    }
+
+    private generateVirtualSlots(field: any): { startTime: string; endTime: string }[] {
+        const slots: { startTime: string; endTime: string }[] = [];
+        const startMin = this.timeToMinutes(field.operatingHours.start);
+        const endMin = this.timeToMinutes(field.operatingHours.end);
+        const slotDuration = field.slotDuration;
+
+        for (let currentMin = startMin; currentMin < endMin; currentMin += slotDuration) {
+            const nextMin = currentMin + slotDuration;
+            if (nextMin <= endMin) {
+                slots.push({
+                    startTime: this.minutesToTime(currentMin),
+                    endTime: this.minutesToTime(nextMin),
+                });
+            }
+        }
+
+        return slots;
+    }
+
+    private timeToMinutes(time: string): number {
+        const [hours, minutes] = time.split(':').map(Number);
+        return hours * 60 + minutes;
+    }
+
+    private minutesToTime(minutes: number): string {
+        const hours = Math.floor(minutes / 60);
+        const mins = minutes % 60;
+        return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
     }
 
     async SetHoliday(
@@ -92,7 +141,6 @@ export class SchedulesService {
             {
                 $set: {
                     isHoliday: true,
-                    availableSlots: [],
                     bookedSlots: [],
                 },
             },
@@ -113,7 +161,8 @@ export class SchedulesService {
                         bookingId: booking._id,
                         userId: booking.user,
                         scheduleId: booking.schedule,
-                        slot: booking.slot,
+                        startTime: booking.startTime,
+                        endTime: booking.endTime,
                         date: schedules.find(s => (s._id as Types.ObjectId).equals(booking.schedule))?.date,
                         coachStatus: booking.coachStatus,
                     });

@@ -3,6 +3,12 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Booking, BookingType, BookingStatus } from './entities/booking.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  CancelBookingPayload,
+  CancelSessionBookingPayload,
+  CreateFieldBookingPayload,
+  CreateSessionBookingPayload,
+} from './interfaces/booking-service.interfaces';
 
 @Injectable()
 export class BookingsService {
@@ -61,19 +67,15 @@ export class BookingsService {
   }
 
   //Create field booking service
-  async createFieldBooking(data: {
-    user: string;
-    schedule: string;
-    slot: string;
-    totalPrice: number;
-  }) {
-    if (!data.user || !data.schedule || !data.slot || data.totalPrice < 0) {
+  async createFieldBooking(data: CreateFieldBookingPayload) {
+    if (!data.user || !data.schedule || !data.startTime || !data.endTime || data.totalPrice < 0) {
       throw new BadRequestException('Missing or invalid booking data');
     }
     const booking = new this.bookingModel({
       user: data.user,
       schedule: data.schedule,
-      slot: data.slot,
+      startTime: data.startTime,
+      endTime: data.endTime,
       type: BookingType.FIELD,
       status: BookingStatus.PENDING,
       totalPrice: data.totalPrice,
@@ -83,21 +85,15 @@ export class BookingsService {
   }
 
   // Create booking session service (field + coach)
-  async createSessionBooking(data: {
-    user: string;
-    fieldSchedule: string;
-    coachSchedule: string;
-    fieldSlot: string;
-    coachSlot: string;
-    fieldPrice: number;
-    coachPrice: number;
-  }) {
+  async createSessionBooking(data: CreateSessionBookingPayload) {
     if (
       !data.user ||
       !data.fieldSchedule ||
       !data.coachSchedule ||
-      !data.fieldSlot ||
-      !data.coachSlot ||
+      !data.fieldStartTime ||
+      !data.fieldEndTime ||
+      !data.coachStartTime ||
+      !data.coachEndTime ||
       data.fieldPrice < 0 ||
       data.coachPrice < 0
     ) {
@@ -107,7 +103,8 @@ export class BookingsService {
     const fieldBooking = new this.bookingModel({
       user: data.user,
       schedule: data.fieldSchedule,
-      slot: data.fieldSlot,
+      startTime: data.fieldStartTime,
+      endTime: data.fieldEndTime,
       type: BookingType.FIELD,
       status: BookingStatus.PENDING,
       totalPrice: data.fieldPrice,
@@ -116,7 +113,8 @@ export class BookingsService {
     const coachBooking = new this.bookingModel({
       user: data.user,
       schedule: data.coachSchedule,
-      slot: data.coachSlot,
+      startTime: data.coachStartTime,
+      endTime: data.coachEndTime,
       type: BookingType.COACH,
       status: BookingStatus.PENDING,
       totalPrice: data.coachPrice,
@@ -127,11 +125,7 @@ export class BookingsService {
   }
 
   // Cancel field booking service
-  async cancelBooking(data: {
-    bookingId: string;
-    userId: string;
-    cancellationReason?: string;
-  }) {
+  async cancelBooking(data: CancelBookingPayload) {
     const booking = await this.bookingModel.findById(data.bookingId);
     if (!booking) {
       throw new BadRequestException('Booking not found');
@@ -148,12 +142,7 @@ export class BookingsService {
   }
 
   // Cancel booking session service (field + coach)
-  async cancelSessionBooking(data: {
-    fieldBookingId: string;
-    coachBookingId: string;
-    userId: string;
-    cancellationReason?: string;
-  }) {
+  async cancelSessionBooking(data: CancelSessionBookingPayload) {
     const fieldBooking = await this.bookingModel.findById(data.fieldBookingId);
     const coachBooking = await this.bookingModel.findById(data.coachBookingId);
     if (!fieldBooking || !coachBooking) {
