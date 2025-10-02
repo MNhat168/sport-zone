@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Types } from 'mongoose';
 import { SportType } from 'src/common/enums/sport-type.enum';
+import { BaseEntity } from 'src/common/entities/base.entity';
 
 export enum BookingType {
   FIELD = 'field',
@@ -14,8 +15,10 @@ export enum BookingStatus {
   COMPLETED = 'completed',
 }
 
-@Schema({ timestamps: true })
-export class Booking extends Document {
+
+
+@Schema()
+export class Booking extends BaseEntity {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   user: Types.ObjectId;
 

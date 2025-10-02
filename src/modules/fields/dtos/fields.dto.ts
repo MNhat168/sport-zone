@@ -85,6 +85,12 @@ export class FieldsDto {
 
     @ApiProperty({ example: 128, description: 'Tổng số đánh giá' })
     totalReviews: number;
+
+    @ApiPropertyOptional({ example: '2025-10-02T23:32:00.000+07:00', description: 'Thời gian tạo (Vietnam time)' })
+    createdAt?: Date;
+
+    @ApiPropertyOptional({ example: '2025-10-02T23:32:00.000+07:00', description: 'Thời gian cập nhật (Vietnam time)' })
+    updatedAt?: Date;
 }
 
 /**

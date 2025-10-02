@@ -5,7 +5,10 @@ import { Booking, BookingStatus, BookingType } from './entities/booking.entity';
 import { Schedule } from '../schedules/entities/schedule.entity';
 import { Field } from '../fields/entities/field.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { CreateFieldBookingLazyDto, FieldAvailabilityQueryDto } from './dto/create-field-booking-pure-lazy.dto';
+import { PaymentsService } from '../payments/payments.service';
+
+import { PaymentMethod } from 'src/common/enums/payment-method.enum';
+import { CreateFieldBookingLazyDto, FieldAvailabilityQueryDto } from './dto/create-field-booking-lazy.dto';
 import {
   CancelBookingPayload,
   CancelSessionBookingPayload,
@@ -44,7 +47,11 @@ export class BookingsService {
     @InjectModel(Field.name) private readonly fieldModel: Model<Field>,
     @InjectConnection() private readonly connection: Connection,
     private eventEmitter: EventEmitter2,
+    private readonly paymentsService: PaymentsService,
+
   ) {}
+
+
 
   // ============================================================================
   // PURE LAZY CREATION METHODS (NEW)
@@ -224,6 +231,19 @@ export class BookingsService {
 
         await booking.save({ session });
 
+        // Create Payment record using PaymentsService
+        const payment = await this.paymentsService.createPayment({
+          bookingId: (booking._id as Types.ObjectId).toString(),
+          userId: userId,
+          amount: booking.totalPrice,
+          method: bookingData.paymentMethod ?? PaymentMethod.CASH,
+          paymentNote: bookingData.paymentNote
+        });
+
+        // Update booking with payment reference
+        booking.payment = payment._id as Types.ObjectId;
+        await booking.save({ session });
+
         // Update Schedule with new booked slot and increment version
         await this.scheduleModel.findByIdAndUpdate(
           scheduleUpdate._id,
@@ -401,13 +421,15 @@ export class BookingsService {
   }
 
   async getByRequestedCoachId(coachId: string): Promise<Booking[]> {
-    return this.bookingModel
+    const bookings = await this.bookingModel
       .find({ requestedCoach: new Types.ObjectId(coachId) })
       .populate('user')
       .populate('schedule')
       //.populate('payment')
       .populate('requestedCoach')
       .exec();
+      
+    return bookings;
   }
 
   //Create field booking service (legacy - updated for Pure Lazy Creation)

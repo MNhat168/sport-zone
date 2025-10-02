@@ -1,10 +1,11 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Types } from 'mongoose';
 import { User } from '../../users/entities/user.entity';
 import { SportType } from 'src/common/enums/sport-type.enum';
+import { BaseEntity } from 'src/common/entities/base.entity';
 
-@Schema({ timestamps: true })
-export class FieldOwnerProfile extends Document {
+@Schema()
+export class FieldOwnerProfile extends BaseEntity {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true, unique: true })
   user: Types.ObjectId;
 

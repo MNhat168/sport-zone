@@ -1,8 +1,27 @@
 ## Booking & Field API (for FE)
 
-All #### Create field booking (Pure Lazy Creation)
+All responses are JSON. Unless marked Public, include Aut**Request Body**:
 
-- **Method**: POST
+```json
+{
+  "fieldId": "string",
+  "date": "YYYY-MM-DD",
+  "startTime": "HH:mm",
+  "endTime": "HH:mm",
+  "selectedAmenities": ["string"], // tiện ích bổ sung (optional)
+  "paymentMethod": 1, // 1=CASH, 2=EBANKING, 3=CARD, etc. (optional, defaults to 1)
+  "paymentNote": "string" // ghi chú thanh toán (optional)
+}
+```header with Bearer access token.
+
+- Authorization: Bearer <access_token>
+- Base URL: /api (example); endpoints below are relative to server root.
+
+### Bookings
+
+#### Create field booking (Pure Lazy Creation)
+
+- **Met
 - **Path**: `/bookings/field`
 - **Auth**: Required (Bearer token in Authorization header)
 
@@ -16,14 +35,31 @@ All #### Create field booking (Pure Lazy Creation)
   "date": "2025-10-20",
   "startTime": "08:00",
   "endTime": "10:00",
-  "selectedAmenities": []
+  "selectedAmenities": [],
+  "paymentMethod": 1,
+  "paymentNote": "Trả tiền mặt tại sân"
 }
 ```
 
 **Note**: 
 - `selectedAmenities` can be empty array `[]` if no amenities selected
+- `paymentMethod` is optional, defaults to `1` (cash) if not provided
+- `paymentNote` is optional, can contain payment details like account number, transaction ID, etc.
 - JWT token must be valid and contain `userId` field
-- `fieldId` must be a valid ObjectId of an existing fieldN. Unless marked Public, include Authorization header with Bearer access token.
+- `fieldId` must be a valid ObjectId of an existing field
+
+**Payment Methods Available**:
+- `1` - Trả tiền mặt (cash)
+- `2` - Internet Banking (ebanking)
+- `3` - Thẻ tín dụng (credit_card)
+- `4` - Thẻ ghi nợ (debit_card)
+- `5` - Ví MoMo (momo)
+- `6` - ZaloPay (zalopay)
+- `7` - VNPay (vnpay)
+- `8` - Chuyển khoản ngân hàng (bank_transfer)
+- `9` - QR Code (qr_code)
+
+All responses are JSON. Unless marked Public, include Authorization header with Bearer access token.
 
 - Authorization: Bearer <access_token>
 - Base URL: /api (example); endpoints below are relative to server root.
@@ -91,9 +127,10 @@ All #### Create field booking (Pure Lazy Creation)
   "numSlots": 1,
   "type": "FIELD",
   "status": "PENDING",
-  "totalPrice": 0,
+  "totalPrice": 150000,
   "selectedAmenities": ["string"],
   "amenitiesFee": 0,
+  "payment": "string", // Payment ObjectId reference
   "pricingSnapshot": {
     "basePrice": 150000,
     "appliedMultiplier": 1.5,
@@ -102,24 +139,9 @@ All #### Create field booking (Pure Lazy Creation)
 }
 ```
 
-#### Create field booking (Legacy endpoint - DEPRECATED)
+**Note**: Payment information is now stored in a separate Payment entity. To get payment details, use the Payment API with the `payment` ObjectId.
 
-- **Method**: POST
-- **Path**: `/bookings/legacy`
-- **Auth**: Required (Bearer)
 
-**Request Body**:
-
-```json
-{
-  "scheduleId": "string",
-  "startTime": "HH:mm", 
-  "endTime": "HH:mm",
-  "totalPrice": 0
-}
-```
-
-> **⚠️ Note**: This endpoint is deprecated. Use Pure Lazy Creation endpoint instead.
 
 #### Cancel field booking
 
@@ -164,7 +186,9 @@ All #### Create field booking (Pure Lazy Creation)
   "fieldEndTime": "HH:mm",
   "coachStartTime": "HH:mm",
   "coachEndTime": "HH:mm",
-  "selectedAmenities": ["string"]
+  "selectedAmenities": ["string"], // optional
+  "paymentMethod": 2, // 1=CASH, 2=EBANKING, 3=CARD, etc. (optional)
+  "paymentNote": "Chuyển khoản Vietcombank - STK: 1234567890" // optional
 }
 ```
 
@@ -182,7 +206,8 @@ All #### Create field booking (Pure Lazy Creation)
     "startTime": "HH:mm",
     "endTime": "HH:mm",
     "numSlots": 1,
-    "totalPrice": 0,
+    "totalPrice": 150000,
+    "payment": "string", // Payment ObjectId reference
     "pricingSnapshot": {
       "basePrice": 150000,
       "appliedMultiplier": 1.5
@@ -199,34 +224,16 @@ All #### Create field booking (Pure Lazy Creation)
     "startTime": "HH:mm",
     "endTime": "HH:mm",
     "numSlots": 1,
-    "totalPrice": 0,
+    "totalPrice": 300000,
+    "payment": "string", // Payment ObjectId reference
     "coachStatus": "pending"
   }
 }
 ```
 
-#### Create session booking (Legacy - DEPRECATED)
+**Note**: Payment information is stored in separate Payment entities. Use the Payment API with the `payment` ObjectIds to get payment details.
 
-- **Method**: POST
-- **Path**: `/bookings/session/legacy`
-- **Auth**: Required (Bearer)
 
-**Request Body**:
-
-```json
-{
-  "fieldScheduleId": "string",
-  "coachScheduleId": "string",
-  "fieldStartTime": "HH:mm",
-  "fieldEndTime": "HH:mm",
-  "coachStartTime": "HH:mm",
-  "coachEndTime": "HH:mm",
-  "fieldPrice": 0,
-  "coachPrice": 0
-}
-```
-
-> **⚠️ Note**: This endpoint is deprecated. Use Pure Lazy Creation endpoint instead.
 
 #### Cancel session booking (field + coach)
 
@@ -270,6 +277,62 @@ All #### Create field booking (Pure Lazy Creation)
   - coachId: string
 
 **Success 200**: Array of booking objects with populated `user`, `field`, and `requestedCoach`.
+
+### Payments
+
+#### Get payment details by booking ID
+
+- **Method**: GET
+- **Path**: `/payments/booking/:bookingId`
+- **Auth**: Required (Bearer)
+- **Params**:
+  - bookingId: string (Booking ObjectId)
+
+**Success 200**:
+
+```json
+{
+  "_id": "string",
+  "booking": "string",
+  "user": "string",
+  "amount": 150000,
+  "method": 1, // PaymentMethod enum
+  "status": "PENDING", // PENDING, COMPLETED, FAILED, REFUNDED
+  "paymentNote": "Trả tiền mặt tại sân",
+  "transactionId": null,
+  "paidBy": "string",
+  "createdAt": "2025-10-02T10:00:00.000Z",
+  "updatedAt": "2025-10-02T10:00:00.000Z"
+}
+```
+
+#### Update payment status
+
+- **Method**: PATCH
+- **Path**: `/payments/:paymentId/status`
+- **Auth**: Required (Bearer - Admin/Staff)
+- **Params**:
+  - paymentId: string (Payment ObjectId)
+
+**Request Body**:
+
+```json
+{
+  "status": "COMPLETED", // PENDING, COMPLETED, FAILED, REFUNDED
+  "transactionId": "TXN_123456789" // optional
+}
+```
+
+**Success 200**:
+
+```json
+{
+  "_id": "string",
+  "status": "COMPLETED",
+  "transactionId": "TXN_123456789",
+  "updatedAt": "2025-10-02T10:05:00.000Z"
+}
+```
 
 ### Schedules
 
@@ -339,10 +402,18 @@ All #### Create field booking (Pure Lazy Creation)
 
 **Data Structure Changes:**
 
-- Booking entity now includes `date`, `pricingSnapshot`, and `selectedAmenities`
+- Booking entity now includes `date`, `pricingSnapshot`, `selectedAmenities`, and `payment` reference
+- Payment information is stored in separate Payment entities with numeric PaymentMethod enum (1-9)
 - `numSlots` is computed based on Field `slotDuration` and time range
 - Pricing is captured at booking time for consistency
-- Legacy endpoints are maintained for backward compatibility
+- Legacy endpoints have been removed for cleaner architecture
+
+**Payment System:**
+
+- Payment methods are stored as numeric enums for better performance
+- Each booking creates a corresponding Payment entity for tracking
+- Payment status can be updated independently from booking status
+- Supports transaction IDs for external payment gateway integration
 
 **Error Handling:**
 

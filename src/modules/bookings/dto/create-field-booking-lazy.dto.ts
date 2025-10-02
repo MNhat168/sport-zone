@@ -1,6 +1,7 @@
-import { IsString, IsDateString, IsNumber, IsOptional, IsArray, IsUUID, Min } from 'class-validator';
+import { IsString, IsDateString, IsNumber, IsOptional, IsArray, IsUUID, Min, IsEnum, IsInt } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
+import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 
 /**
  * DTO for creating field booking with Pure Lazy Creation pattern
@@ -62,6 +63,31 @@ export class CreateFieldBookingLazyDto {
   @IsArray()
   @IsString({ each: true })
   selectedAmenities?: string[];
+
+  /**
+   * Phương thức thanh toán
+   * @example 1
+   */
+  @ApiPropertyOptional({ 
+    enum: PaymentMethod,
+    example: PaymentMethod.CASH,
+    description: 'Phương thức thanh toán: 1=cash, 2=ebanking, 3=credit_card, 4=debit_card, 5=momo, 6=zalopay, 7=vnpay, 8=bank_transfer, 9=qr_code'
+  })
+  @IsOptional()
+  @IsInt()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod;
+
+  /**
+   * Ghi chú thanh toán (tùy chọn)
+   * @example "Chuyển khoản qua Techcombank - STK: 1234567890"
+   */
+  @ApiPropertyOptional({ 
+    description: 'Ghi chú về thanh toán (số tài khoản, mã giao dịch, etc.)'
+  })
+  @IsOptional()
+  @IsString()
+  paymentNote?: string;
 }
 
 /**

@@ -6,6 +6,7 @@ import { FieldsDto, CreateFieldDto, UpdateFieldDto } from './dtos/fields.dto';
 import { FieldOwnerProfile } from './entities/field-owner-profile.entity';
 import { PriceSchedulerService } from './services/price-scheduler.service';
 
+
 @Injectable()
 export class FieldsService {
     private readonly logger = new Logger(FieldsService.name);
@@ -17,7 +18,10 @@ export class FieldsService {
     constructor(
         @InjectModel(Field.name) private fieldModel: Model<Field>,
         private priceSchedulerService: PriceSchedulerService,
+        
     ) {}
+
+
 
     // ============================================================================
     // CRUD OPERATIONS
@@ -31,16 +35,15 @@ export class FieldsService {
 
         const fields = await this.fieldModel
             .find(filter)
-            .populate<{ owner: FieldOwnerProfile | null }>({ path: 'owner', select: 'facilityLocation', model: 'FieldOwnerProfile' })
             .lean();
 
         return fields.map(field => ({
             id: field._id.toString(),
-            owner: field.owner?._id?.toString() || '',
+            owner: field.owner?.toString() || '',
             name: field.name,
             sportType: field.sportType,
             description: field.description,
-            location: field.owner?.facilityLocation || 'Unknown',
+            location: field.location || 'Unknown',
             images: field.images,
             operatingHours: field.operatingHours,
             slotDuration: field.slotDuration,
@@ -59,7 +62,6 @@ export class FieldsService {
     async findOne(id: string): Promise<FieldsDto> {
         const field = await this.fieldModel
             .findById(id)
-            .populate<{ owner: FieldOwnerProfile | null }>({ path: 'owner', select: 'facilityLocation', model: 'FieldOwnerProfile' })
             .lean();
 
         if (!field) {
@@ -68,11 +70,11 @@ export class FieldsService {
 
         return {
             id: field._id.toString(),
-            owner: field.owner?._id?.toString() || '',
+            owner: field.owner?.toString() || '',
             name: field.name,
             sportType: field.sportType,
             description: field.description,
-            location: field.owner?.facilityLocation || 'Unknown',
+            location: field.location || 'Unknown',
             images: field.images,
             operatingHours: field.operatingHours,
             slotDuration: field.slotDuration,
@@ -173,7 +175,7 @@ export class FieldsService {
                 name: updatedField.name,
                 sportType: updatedField.sportType,
                 description: updatedField.description,
-                location: updateFieldDto.location || 'Unknown',
+                location: updatedField.location || 'Unknown',
                 images: updatedField.images,
                 operatingHours: updatedField.operatingHours,
                 slotDuration: updatedField.slotDuration,

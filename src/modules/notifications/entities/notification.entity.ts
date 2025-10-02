@@ -1,9 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Types } from 'mongoose';
 import { NotificationType } from 'src/common/enums/notification-type.enum';
+import { BaseEntity } from 'src/common/entities/base.entity';
 
-@Schema({ timestamps: true })
-export class Notification extends Document {
+@Schema()
+export class Notification extends BaseEntity {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   recipient: Types.ObjectId;
 
@@ -18,9 +19,6 @@ export class Notification extends Document {
 
   @Prop({ type: Boolean, default: false })
   isRead: boolean;
-
-  @Prop()
-  createdAt?: Date;
 
   @Prop({ type: Object })
   metadata?: Record<string, any>;

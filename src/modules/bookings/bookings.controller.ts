@@ -14,10 +14,8 @@ import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBearerAuth }
 import { AuthGuard } from '@nestjs/passport';
 import { BookingsService, DailyAvailability } from './bookings.service';
 import { Booking } from './entities/booking.entity';
-import { CreateFieldBookingLazyDto, FieldAvailabilityQueryDto, MarkHolidayDto } from './dto/create-field-booking-pure-lazy.dto';
+import { CreateFieldBookingLazyDto, FieldAvailabilityQueryDto, MarkHolidayDto } from './dto/create-field-booking-lazy.dto';
 import { CancelBookingDto } from './dto/cancel-booking.dto';
-import { CreateFieldBookingDto } from './dto/create-field-booking.dto';
-import { CreateSessionBookingDto } from './dto/create-session-booking.dto';
 import { CreateSessionBookingLazyDto } from './dto/create-session-booking-lazy.dto';
 import { CancelSessionBookingDto } from './dto/cancel-session-booking.dto';
 import { Schedule } from '../schedules/entities/schedule.entity';
@@ -322,46 +320,7 @@ export class BookingsController {
     });
   }
 
-  /**
-   * Create session booking (legacy - requires scheduleId)
-   * @deprecated Use POST /bookings/session with CreateSessionBookingLazyDto instead
-   */
-  @UseGuards(AuthGuard('jwt'))
-  @Post('bookings/session/legacy')
-  @ApiBearerAuth()
-  @ApiOperation({ 
-    summary: 'Create session booking (legacy)', 
-    description: 'Legacy endpoint - requires scheduleId. Use POST /bookings/session instead for Pure Lazy Creation' 
-  })
-  async createSessionBookingLegacy(
-    @Request() req,
-    @Body() body: CreateSessionBookingDto,
-  ) {
-    const userId = this.getUserId(req);
-    
-    // Fetch schedules to extract field, coach, and date for Pure Lazy Creation compatibility
-    const [fieldSchedule, coachSchedule] = await Promise.all([
-      this.scheduleModel.findById(body.fieldScheduleId).exec(),
-      this.scheduleModel.findById(body.coachScheduleId).exec(),
-    ]);
-    
-    if (!fieldSchedule || !coachSchedule) {
-      throw new BadRequestException('Field schedule or coach schedule not found');
-    }
-    
-    return this.bookingsService.createSessionBooking({
-      user: userId,
-      field: fieldSchedule.field.toString(),
-      coach: coachSchedule.coach?.toString() || '',
-      date: fieldSchedule.date, // Assuming field and coach schedules are for the same date
-      fieldStartTime: body.fieldStartTime,
-      fieldEndTime: body.fieldEndTime,
-      coachStartTime: body.coachStartTime,
-      coachEndTime: body.coachEndTime,
-      fieldPrice: body.fieldPrice,
-      coachPrice: body.coachPrice,
-    });
-  }
+
 
   /**
    * Cancel booking session (field + coach) (legacy)

@@ -35,12 +35,21 @@ Authorization: Bearer <access_token>
 ```json
 [
   {
-    "_id": "string",
-    "owner": "string", 
+    "id": "string",
+    "owner": {
+      "id": "string",
+      "name": "string",
+      "contact": "string"
+    },
     "name": "string",
-    "sportType": "FOOTBALL",
-    "description": "string",
+    "type": "tennis",
+    "description": "string", 
+    "location": "267G+533, Đ. 29 Tháng 3, Hoà Xuân, Cẩm Lệ, Đà Nẵng 550000, Việt Nam",
     "images": ["string"],
+    "pricePerHour": 150000,
+    "availability": true,
+    "facilities": ["string"],
+    "totalBookings": 0,
     "operatingHours": {
       "start": "06:00",
       "end": "22:00"
@@ -64,7 +73,8 @@ Authorization: Bearer <access_token>
     "isActive": true,
     "rating": 4.5,
     "totalReviews": 128,
-    "location": "District 1, Ho Chi Minh City"
+    "createdAt": "2025-01-15T00:00:00.000Z",
+    "updatedAt": "2025-10-01T00:00:00.000Z"
   }
 ]
 ```

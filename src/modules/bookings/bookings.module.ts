@@ -10,6 +10,8 @@ import { Field, FieldSchema } from '../fields/entities/field.entity';
 // Services and Controllers
 import { BookingsService } from './bookings.service';
 import { BookingsController } from './bookings.controller';
+import { PaymentsModule } from '../payments/payments.module';
+
 
 /**
  * Bookings Module with Pure Lazy Creation pattern
@@ -23,6 +25,7 @@ import { BookingsController } from './bookings.controller';
       { name: Field.name, schema: FieldSchema },
     ]),
     EventEmitterModule,
+    PaymentsModule,
   ],
   controllers: [BookingsController],
   providers: [BookingsService],
