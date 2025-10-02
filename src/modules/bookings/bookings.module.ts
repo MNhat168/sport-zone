@@ -1,15 +1,34 @@
 import { Module } from '@nestjs/common';
-import { BookingsController } from './bookings.controller';
-import { BookingsService } from './bookings.service';
 import { MongooseModule } from '@nestjs/mongoose';
-import { Booking, BookingSchema } from './entities/booking.entity';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 
+// Entities
+import { Booking, BookingSchema } from './entities/booking.entity';
+import { Schedule, ScheduleSchema } from '../schedules/entities/schedule.entity';
+import { Field, FieldSchema } from '../fields/entities/field.entity';
+
+// Services and Controllers
+import { BookingsService } from './bookings.service';
+import { BookingsController } from './bookings.controller';
+import { PaymentsModule } from '../payments/payments.module';
+
+
+/**
+ * Bookings Module with Pure Lazy Creation pattern
+ * Implements lazy schedule creation with atomic upserts
+ */
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: Booking.name, schema: BookingSchema }]),
+    MongooseModule.forFeature([
+      { name: Booking.name, schema: BookingSchema },
+      { name: Schedule.name, schema: ScheduleSchema },
+      { name: Field.name, schema: FieldSchema },
+    ]),
+    EventEmitterModule,
+    PaymentsModule,
   ],
   controllers: [BookingsController],
   providers: [BookingsService],
   exports: [BookingsService],
 })
-export class BookingsModule { }
+export class BookingsModule {}

@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { CommonModule } from './common/common.module';
+import { GlobalTimezoneInterceptor } from './common/interceptors/global-timezone.interceptor';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
@@ -14,7 +17,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { AdminModule } from './modules/admin/admin.module';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
-import { SchedulesModule } from './modules/bookings/schedules.module';
+import { SchedulesModule } from './modules/schedules/schedules.module';
 import { CoachesModule } from './modules/coaches/coaches.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 @Module({
@@ -27,6 +30,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
       process.env.MONGODB_URI!
     ),
     EventEmitterModule.forRoot(),
+    CommonModule,
     AuthModule,
     UsersModule,
     ProfilesModule,
@@ -44,6 +48,12 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     MongooseModule.forRoot(process.env.MONGODB_URI!)
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: GlobalTimezoneInterceptor,
+    },
+  ],
 })
 export class AppModule { }

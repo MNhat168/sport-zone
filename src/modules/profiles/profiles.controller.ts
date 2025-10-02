@@ -31,7 +31,7 @@ export class ProfilesController {
         }
 
         return this.profileService.updateCertification(
-            new Types.ObjectId(userId),
+            userId,
             certification,
         );
     }

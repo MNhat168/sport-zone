@@ -4,6 +4,8 @@ import { NotificationsService } from './notifications.service';
 import { NotificationsController } from './notifications.controller';
 import { Notification, NotificationSchema } from './entities/notification.entity';
 import { NotificationListener } from './notifications.listener';
+import { NotificationRepository } from './repositories/notification.repository';
+import { NOTIFICATION_REPOSITORY } from './interfaces/notifications.interface';
 
 @Module({
   imports: [
@@ -12,7 +14,12 @@ import { NotificationListener } from './notifications.listener';
   controllers: [NotificationsController],
   providers: [
     NotificationsService,
-    NotificationListener
+    NotificationListener,
+    NotificationRepository,
+    {
+      provide: NOTIFICATION_REPOSITORY,
+      useClass: NotificationRepository,
+    }
   ],
   exports: [NotificationsService]
 })
