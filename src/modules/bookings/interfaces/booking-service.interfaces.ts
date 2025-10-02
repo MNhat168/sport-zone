@@ -1,6 +1,7 @@
 export interface CreateFieldBookingPayload {
   user: string;
-  schedule: string;
+  field: string;  // Changed from schedule to field (Pure Lazy Creation)
+  date: Date;     // Added date field to replace schedule dependency
   startTime: string;
   endTime: string;
   totalPrice: number;
@@ -8,8 +9,9 @@ export interface CreateFieldBookingPayload {
 
 export interface CreateSessionBookingPayload {
   user: string;
-  fieldSchedule: string;
-  coachSchedule: string;
+  field: string;       // Changed from fieldSchedule to field (Pure Lazy Creation)
+  coach: string;       // Changed from coachSchedule to coach (Pure Lazy Creation)
+  date: Date;          // Added date field to replace schedule dependency
   fieldStartTime: string;
   fieldEndTime: string;
   coachStartTime: string;

@@ -1,0 +1,42 @@
+Required Changes (Pure Lazy Creation)
+Based on the analysis:
+
+Entity Adjustments:
+
+Schedule: Add 'version' field (Number, default 0) for optimistic locking.
+Booking: Remove required schedule reference; add date (Date) for tracing; keep fieldId.
+Field: No changes, but ensure indexes for queries.
+
+
+Service Layer Flows:
+
+Availability (GET): Input fieldId, startDate, endDate. Fetch Field config. Query Schedules in range (may be empty). For each day: Generate virtual slots from Field.operatingHours/slotDuration; if Schedule exists, apply bookedSlots/isHoliday; else all available. Calculate prices from Field.priceRanges/basePrice. Return unified list.
+Booking (CREATE): Input fieldId, date, startTime, endTime. Start transaction: Validate Field; upsert Schedule (findOneAndUpdate with upsert=true, init bookedSlots=[]); validate no conflict/isHoliday; calculate numSlots/price (snapshot); create Booking; push to bookedSlots; increment version; commit.
+Holiday Marking: Input fieldId, date, reason. Upsert Schedule; set isHoliday/true; query affected Bookings; apply policy (cancel/notify); clear bookedSlots if needed; commit transaction.
+Use Mongoose sessions for transactions. Implement retry for optimistic locking (if version mismatch).
+
+
+Controller Layer:
+
+Update endpoints: Availability -> GET /fields/:fieldId/availability?startDate=&endDate=; Booking -> POST /bookings {fieldId, date, startTime, endTime, ...}; Holiday -> PATCH /fields/:fieldId/schedules/:date/holiday {reason}.
+Validate inputs, handle errors (e.g., slot unavailable), no scheduleId in requests.
+
+
+Additional:
+
+Handle edge cases: Bulk/recurring bookings (treat as multiple slots or separate cron).
+Performance: Cache Field config (short TTL). Indexes on Schedule {field:1, date:1}.
+Migration: Support old flows temporarily; background cleanup empty Schedules.
+
+
+
+Output Requirements
+
+Write updated entity files (if changed) with SchemaFactory.export.
+Write service classes (e.g., BookingService, ScheduleService, FieldService) with methods for the flows.
+Write controller classes (e.g., BookingController, FieldController) with endpoints.
+Include transaction handling, error management, and DTOs if needed.
+Use TypeScript, NestJS decorators.
+Do not include unrelated code (e.g., auth, payments).
+Explain changes in comments.
+Output as separate code blocks for each file/class.

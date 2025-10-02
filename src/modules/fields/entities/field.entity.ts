@@ -100,3 +100,5 @@ export class Field extends Document {
   }>;
 }
 
+export const FieldSchema = SchemaFactory.createForClass(Field);
+

@@ -28,5 +28,13 @@ export class Schedule extends Document {
 
   @Prop({ type: String })
   holidayReason?: string;
+
+  // Added for optimistic locking in Pure Lazy Creation pattern
+  @Prop({ type: Number, default: 0 })
+  version: number;
 }
+
+// Create compound index for efficient queries and upserts
+export const ScheduleSchema = SchemaFactory.createForClass(Schedule);
+ScheduleSchema.index({ field: 1, date: 1 }, { unique: true });
 

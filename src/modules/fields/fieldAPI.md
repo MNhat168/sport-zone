@@ -1,169 +1,462 @@
-# Field API Documentation
+# Field API Documentation (Updated for Pure Lazy Creation)
 
-This document outlines the API endpoints for field-related operations in the system.
+This document outlines the API endpoints for field-related operations in the SportZone system.
 
 ## Base URL
 ```
-/api/fields
+/fields
+```
+
+**Important**: Use `/fields` (plural), not `/field/` (singular)
+
+## Authentication
+
+Most endpoints require authentication using JWT tokens:
+```
+Authorization: Bearer <access_token>
 ```
 
 ## Endpoints
 
-### 1. Get All Fields
-- **Method:** `GET`
-- **Endpoint:** `/`
-- **Description:** Retrieve a list of all available fields
-- **Query Parameters:**
-  - `page` (optional): Page number for pagination
-  - `limit` (optional): Number of items per page
-  - `location` (optional): Filter by location
-  - `type` (optional): Filter by field type
-- **Response:**
+### Get All Fields
+
+- **Method**: `GET`
+- **Path**: `/`
+- **Auth**: Public
+- **Description**: Retrieve a list of all available fields with filtering
+
+**Query Parameters**:
+- `name` (optional): Filter by field name
+- `location` (optional): Filter by location  
+- `sportType` (optional): Filter by sport type (FOOTBALL, BASKETBALL, TENNIS, etc.)
+
+**Success 200**:
+
+```json
+[
+  {
+    "_id": "string",
+    "owner": "string", 
+    "name": "string",
+    "sportType": "FOOTBALL",
+    "description": "string",
+    "images": ["string"],
+    "operatingHours": {
+      "start": "06:00",
+      "end": "22:00"
+    },
+    "slotDuration": 60,
+    "minSlots": 1,
+    "maxSlots": 4,
+    "priceRanges": [
+      {
+        "start": "06:00",
+        "end": "10:00", 
+        "multiplier": 1.0
+      },
+      {
+        "start": "18:00",
+        "end": "22:00",
+        "multiplier": 1.5
+      }
+    ],
+    "basePrice": 150000,
+    "isActive": true,
+    "rating": 4.5,
+    "totalReviews": 128,
+    "location": "District 1, Ho Chi Minh City"
+  }
+]
+```
+
+### Get Field by ID
+
+- **Method**: `GET`
+- **Path**: `/:id`
+- **Auth**: Public
+- **Description**: Retrieve detailed information about a specific field
+
+**Parameters**:
+- `id`: Field ID (ObjectId)
+
+**Success 200**:
+
 ```json
 {
-  "success": true,
-  "data": [
+  "_id": "string",
+  "owner": {
+    "_id": "string",
+    "businessName": "string",
+    "contactInfo": {
+      "phone": "string",
+      "email": "string"
+    }
+  },
+  "name": "string",
+  "sportType": "FOOTBALL",
+  "description": "string",
+  "images": ["string"],
+  "operatingHours": {
+    "start": "06:00",
+    "end": "22:00"
+  },
+  "slotDuration": 60,
+  "minSlots": 1,
+  "maxSlots": 4,
+  "priceRanges": [
     {
-      "id": "string",
-      "name": "string",
-      "description": "string",
-      "location": "string",
-      "type": "string",
-      "pricePerHour": "number",
-      "availability": "boolean",
-      "images": ["string"],
-      "owner": {
-        "id": "string",
-        "name": "string"
-      }
+      "start": "06:00",
+      "end": "10:00",
+      "multiplier": 1.0
+    },
+    {
+      "start": "18:00", 
+      "end": "22:00",
+      "multiplier": 1.5
     }
   ],
-  "pagination": {
-    "page": "number",
-    "limit": "number",
-    "total": "number"
-  }
+  "basePrice": 150000,
+  "isActive": true,
+  "maintenanceNote": "string",
+  "maintenanceUntil": "2025-10-15T00:00:00.000Z",
+  "rating": 4.5,
+  "totalReviews": 128,
+  "location": "District 1, Ho Chi Minh City",
+  "createdAt": "2025-01-15T00:00:00.000Z",
+  "updatedAt": "2025-10-01T00:00:00.000Z"
 }
 ```
 
-### 2. Get Field by ID
-- **Method:** `GET`
-- **Endpoint:** `/:id`
-- **Description:** Retrieve detailed information about a specific field
-- **Parameters:**
-  - `id`: Field ID
-- **Response:**
+### Get Field Availability (Pure Lazy Creation)
+
+- **Method**: `GET`
+- **Path**: `/:id/availability`
+- **Auth**: Public
+- **Description**: Check field availability for date range with dynamic pricing
+
+**Parameters**:
+- `id`: Field ID (ObjectId)
+
+**Query Parameters**:
+- `startDate`: Start date (YYYY-MM-DD) - required
+- `endDate`: End date (YYYY-MM-DD) - required
+
+**Example**: `GET /fields/507f1f77bcf86cd799439011/availability?startDate=2025-10-01&endDate=2025-10-31`
+
+**Success 200**:
+
 ```json
-{
-  "success": true,
-  "data": {
-    "id": "string",
-    "name": "string",
-    "description": "string",
-    "location": "string",
-    "type": "string",
-    "pricePerHour": "number",
-    "availability": "boolean",
-    "images": ["string"],
-    "facilities": ["string"],
-    "owner": {
-      "id": "string",
-      "name": "string",
-      "contact": "string"
-    },
-    "bookings": [
+[
+  {
+    "date": "2025-10-15",
+    "isHoliday": false,
+    "slots": [
       {
-        "id": "string",
-        "startTime": "datetime",
-        "endTime": "datetime",
-        "status": "string"
+        "startTime": "09:00",
+        "endTime": "10:00",
+        "available": true,
+        "price": 150000,
+        "priceBreakdown": "09:00-10:00: 1.0x base price"
+      },
+      {
+        "startTime": "19:00", 
+        "endTime": "20:00",
+        "available": false,
+        "price": 225000,
+        "priceBreakdown": "19:00-20:00: 1.5x base price (booked)"
       }
     ]
   }
+]
+```
+
+### Schedule Price Update
+
+- **Method**: `POST`
+- **Path**: `/:id/schedule-price-update`
+- **Auth**: Required (Field Owner)
+- **Description**: Schedule future price changes for a field
+
+**Parameters**:
+- `id`: Field ID (ObjectId)
+
+**Request Body**:
+
+```json
+{
+  "newPriceRanges": [
+    {
+      "start": "06:00",
+      "end": "10:00", 
+      "multiplier": 1.2
+    },
+    {
+      "start": "18:00",
+      "end": "22:00",
+      "multiplier": 1.8
+    }
+  ],
+  "newBasePrice": 200000,
+  "effectiveDate": "2025-11-01",
+  "ownerId": "string"
 }
 ```
 
-### 3. Create New Field
-- **Method:** `POST`
-- **Endpoint:** `/`
-- **Description:** Create a new field (Owner only)
-- **Authentication:** Required (Owner role)
-- **Request Body:**
+**Success 200**:
+
 ```json
 {
-  "name": "string",
-  "description": "string",
-  "location": "string",
-  "type": "string",
-  "pricePerHour": "number",
-  "facilities": ["string"],
-  "images": ["string"]
+  "_id": "string",
+  "message": "Price update scheduled successfully",
+  "effectiveDate": "2025-11-01T00:00:00.000Z"
 }
 ```
-- **Response:**
+
+### Cancel Scheduled Price Update
+
+- **Method**: `DELETE`
+- **Path**: `/:id/scheduled-price-update`
+- **Auth**: Required (Field Owner)
+- **Description**: Cancel a pending price update
+
+**Parameters**:
+- `id`: Field ID (ObjectId)
+
+**Request Body**:
+
+```json
+{
+  "effectiveDate": "2025-11-01"
+}
+```
+
+**Success 200**:
+
 ```json
 {
   "success": true,
-  "message": "Field created successfully",
-  "data": {
-    "id": "string",
-    "name": "string",
-    "description": "string",
-    "location": "string",
-    "type": "string",
-    "pricePerHour": "number",
-    "availability": "boolean",
-    "createdAt": "datetime"
-  }
+  "message": "Scheduled price update cancelled"
 }
 ```
 
-### 4. Update Field
-- **Method:** `PUT`
-- **Endpoint:** `/:id`
-- **Description:** Update field information (Owner only)
-- **Authentication:** Required (Owner role)
-- **Parameters:**
-  - `id`: Field ID
-- **Request Body:**
+### Get Scheduled Price Updates
+
+- **Method**: `GET`
+- **Path**: `/:id/scheduled-price-updates`
+- **Auth**: Required (Field Owner)
+- **Description**: Get all pending price updates for a field
+
+**Parameters**:
+- `id`: Field ID (ObjectId)
+
+**Success 200**:
+
 ```json
-{
-  "name": "string",
-  "description": "string",
-  "location": "string",
-  "type": "string",
-  "pricePerHour": "number",
-  "facilities": ["string"],
-  "images": ["string"],
-  "availability": "boolean"
-}
-```
-- **Response:**
-```json
-{
-  "success": true,
-  "message": "Field updated successfully",
-  "data": {
-    "id": "string",
-    "name": "string",
-    "description": "string",
-    "location": "string",
-    "type": "string",
-    "pricePerHour": "number",
-    "availability": "boolean",
-    "updatedAt": "datetime"
+[
+  {
+    "newPriceRanges": [
+      {
+        "start": "06:00",
+        "end": "10:00",
+        "multiplier": 1.2
+      }
+    ],
+    "newBasePrice": 200000,
+    "effectiveDate": "2025-11-01T00:00:00.000Z",
+    "applied": false,
+    "createdBy": "string",
+    "createdAt": "2025-10-01T10:30:00.000Z"
   }
+]
+```
+
+### Create New Field
+
+- **Method**: `POST`
+- **Path**: `/`
+- **Auth**: Required (Field Owner)
+- **Description**: Create a new field
+
+**Request Body**:
+
+```json
+{
+  "name": "Sân bóng Phú Nhuận",
+  "sportType": "FOOTBALL",
+  "description": "Sân bóng đá 11 người, có đèn chiếu sáng",
+  "images": [
+    "https://example.com/field1.jpg",
+    "https://example.com/field2.jpg"
+  ],
+  "operatingHours": {
+    "start": "06:00",
+    "end": "22:00"
+  },
+  "slotDuration": 60,
+  "minSlots": 1,
+  "maxSlots": 4,
+  "priceRanges": [
+    {
+      "start": "06:00",
+      "end": "10:00",
+      "multiplier": 1.0
+    },
+    {
+      "start": "10:00",
+      "end": "18:00",
+      "multiplier": 1.2
+    },
+    {
+      "start": "18:00",
+      "end": "22:00", 
+      "multiplier": 1.5
+    }
+  ],
+  "basePrice": 150000,
+  "location": "District 3, Ho Chi Minh City"
 }
 ```
 
-### 5. Delete Field
-- **Method:** `DELETE`
-- **Endpoint:** `/:id`
-- **Description:** Delete a field (Owner only)
-- **Authentication:** Required (Owner role)
-- **Parameters:**
-  - `id`: Field ID
-- **Response:**
+**Success 201**:
+
+```json
+{
+  "id": "string",
+  "owner": "string",
+  "name": "Sân bóng Phú Nhuận",
+  "sportType": "FOOTBALL",
+  "description": "Sân bóng đá 11 người, có đèn chiếu sáng",
+  "location": "District 3, Ho Chi Minh City",
+  "images": [
+    "https://example.com/field1.jpg",
+    "https://example.com/field2.jpg"
+  ],
+  "operatingHours": {
+    "start": "06:00",
+    "end": "22:00"
+  },
+  "slotDuration": 60,
+  "minSlots": 1,
+  "maxSlots": 4,
+  "priceRanges": [
+    {
+      "start": "06:00",
+      "end": "10:00",
+      "multiplier": 1.0
+    },
+    {
+      "start": "10:00",
+      "end": "18:00",
+      "multiplier": 1.2
+    },
+    {
+      "start": "18:00",
+      "end": "22:00",
+      "multiplier": 1.5
+    }
+  ],
+  "basePrice": 150000,
+  "isActive": true,
+  "rating": 0,
+  "totalReviews": 0
+}
+```
+
+### Update Field Information
+
+- **Method**: `PUT`
+- **Path**: `/:id`
+- **Auth**: Required (Field Owner)
+- **Description**: Update field information (only owner can update)
+
+**Parameters**:
+- `id`: Field ID (ObjectId)
+
+**Request Body** (all fields optional):
+
+```json
+{
+  "name": "Updated Field Name",
+  "description": "Updated description",
+  "images": ["https://example.com/new-image.jpg"],
+  "operatingHours": {
+    "start": "05:00",
+    "end": "23:00"
+  },
+  "slotDuration": 90,
+  "minSlots": 2,
+  "maxSlots": 6,
+  "priceRanges": [
+    {
+      "start": "05:00",
+      "end": "08:00",
+      "multiplier": 0.8
+    },
+    {
+      "start": "18:00", 
+      "end": "23:00",
+      "multiplier": 2.0
+    }
+  ],
+  "basePrice": 200000,
+  "isActive": true,
+  "maintenanceNote": "Maintenance scheduled",
+  "maintenanceUntil": "2025-10-20",
+  "location": "Updated location"
+}
+```
+
+**Success 200**:
+
+```json
+{
+  "id": "string",
+  "owner": "string", 
+  "name": "Updated Field Name",
+  "sportType": "FOOTBALL",
+  "description": "Updated description",
+  "location": "Updated location",
+  "images": ["https://example.com/new-image.jpg"],
+  "operatingHours": {
+    "start": "05:00",
+    "end": "23:00"
+  },
+  "slotDuration": 90,
+  "minSlots": 2,
+  "maxSlots": 6,
+  "priceRanges": [
+    {
+      "start": "05:00",
+      "end": "08:00",
+      "multiplier": 0.8
+    },
+    {
+      "start": "18:00",
+      "end": "23:00", 
+      "multiplier": 2.0
+    }
+  ],
+  "basePrice": 200000,
+  "isActive": true,
+  "maintenanceNote": "Maintenance scheduled",
+  "maintenanceUntil": "2025-10-20T00:00:00.000Z",
+  "rating": 4.5,
+  "totalReviews": 128
+}
+```
+
+### Delete Field
+
+- **Method**: `DELETE`
+- **Path**: `/:id`
+- **Auth**: Required (Field Owner)
+- **Description**: Delete a field (only owner can delete)
+
+**Parameters**:
+- `id`: Field ID (ObjectId)
+
+**Success 200**:
+
 ```json
 {
   "success": true,
@@ -171,122 +464,82 @@ This document outlines the API endpoints for field-related operations in the sys
 }
 ```
 
-### 6. Get Fields by Owner
-- **Method:** `GET`
-- **Endpoint:** `/owner/:ownerId`
-- **Description:** Get all fields owned by a specific owner
-- **Parameters:**
-  - `ownerId`: Owner ID
-- **Response:**
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "string",
-      "name": "string",
-      "description": "string",
-      "location": "string",
-      "type": "string",
-      "pricePerHour": "number",
-      "availability": "boolean",
-      "totalBookings": "number"
-    }
-  ]
-}
-```
-
-### 7. Check Field Availability
-- **Method:** `GET`
-- **Endpoint:** `/:id/availability`
-- **Description:** Check field availability for specific date/time
-- **Parameters:**
-  - `id`: Field ID
-- **Query Parameters:**
-  - `date`: Date to check (YYYY-MM-DD)
-  - `startTime`: Start time (HH:MM)
-  - `endTime`: End time (HH:MM)
-- **Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "available": "boolean",
-    "conflictingBookings": [
-      {
-        "id": "string",
-        "startTime": "datetime",
-        "endTime": "datetime"
-      }
-    ]
-  }
-}
-```
-
 ## Error Responses
 
-### 400 Bad Request
+All errors follow standard NestJS format:
+
+**400 Bad Request**:
+
 ```json
 {
-  "success": false,
-  "message": "Validation error",
-  "errors": [
-    {
-      "field": "string",
-      "message": "string"
-    }
-  ]
+  "statusCode": 400,
+  "message": "Validation failed",
+  "error": "Bad Request"
 }
 ```
 
-### 401 Unauthorized
+**401 Unauthorized**:
+
 ```json
 {
-  "success": false,
-  "message": "Unauthorized access"
+  "statusCode": 401,
+  "message": "Unauthorized",
+  "error": "Unauthorized"
 }
 ```
 
-### 403 Forbidden
+**403 Forbidden**:
+
 ```json
 {
-  "success": false,
-  "message": "Access denied. Owner role required."
+  "statusCode": 403,
+  "message": "Access denied. Field owner role required.",
+  "error": "Forbidden"
 }
 ```
 
-### 404 Not Found
+**404 Not Found**:
+
 ```json
 {
-  "success": false,
-  "message": "Field not found"
+  "statusCode": 404,
+  "message": "Field not found",
+  "error": "Not Found"
 }
 ```
 
-### 500 Internal Server Error
-```json
-{
-  "success": false,
-  "message": "Internal server error"
-}
-```
+## Pure Lazy Creation Features
 
-## Authentication
+**Dynamic Availability**:
+- No pre-created schedules required
+- Availability computed in real-time based on existing bookings
+- Supports complex pricing multipliers by time ranges
 
-Most endpoints require authentication using JWT tokens. Include the token in the Authorization header:
+**Price Scheduling**:
+- Field owners can schedule future price changes
+- Automatic price updates at midnight on effective date
+- Pending updates can be cancelled before being applied
 
-```
-Authorization: Bearer <your_jwt_token>
-```
-
-## Rate Limiting
-
-- Rate limit: 100 requests per minute per IP
-- Burst limit: 10 requests per second
+**Slot Management**:
+- Configurable slot duration (minimum 30 minutes)
+- Min/max slots per booking to control reservation sizes
+- Operating hours enforcement
 
 ## Notes
 
-- All datetime fields follow ISO 8601 format
-- Image uploads should be handled through a separate media upload endpoint
-- Field types include: "football", "basketball", "tennis", "badminton", etc.
-- Prices are in the system's base currency
+**SportType Enum**:
+- FOOTBALL, BASKETBALL, TENNIS, BADMINTON, VOLLEYBALL, FUTSAL
+
+**Time Format**:
+- All times use HH:mm format (24-hour)
+- Dates use YYYY-MM-DD format
+- Timestamps follow ISO 8601 format
+
+**Pricing Structure**:
+- Base price + time-based multipliers
+- Prices in VND (Vietnamese Dong)
+- Dynamic pricing based on time slots
+
+**Authentication**:
+- JWT tokens required for owner-specific operations
+- Public access for field listing and availability checks

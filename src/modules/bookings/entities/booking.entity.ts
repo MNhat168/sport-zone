@@ -19,11 +19,13 @@ export class Booking extends Document {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   user: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Schedule', required: true })
-  schedule: Types.ObjectId;
-
+  // Pure Lazy Creation: Remove schedule reference, use fieldId + date instead
   @Prop({ type: Types.ObjectId, ref: 'Field', required: true })
   field: Types.ObjectId;
+
+  // Add date field for tracing and easier queries (replaces schedule dependency)
+  @Prop({ required: true, type: Date })
+  date: Date;
 
   @Prop({ required: true, enum: BookingType })
   type: BookingType;
@@ -78,5 +80,24 @@ export class Booking extends Document {
 
   @Prop({ type: Boolean, default: false })
   holidayNotified?: boolean;
+
+  // Snapshot pricing data from Field at booking time (Pure Lazy Creation principle)
+  @Prop({
+    type: {
+      basePrice: { type: Number, required: true },
+      appliedMultiplier: { type: Number, required: true },
+      priceBreakdown: { type: String } // Optional explanation of pricing calculation
+    }
+  })
+  pricingSnapshot?: {
+    basePrice: number;
+    appliedMultiplier: number;
+    priceBreakdown?: string;
+  };
 }
+
+export const BookingSchema = SchemaFactory.createForClass(Booking);
+// Add compound index for efficient field + date queries
+BookingSchema.index({ field: 1, date: 1 });
+BookingSchema.index({ user: 1, status: 1 });
 
