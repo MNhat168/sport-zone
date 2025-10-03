@@ -51,4 +51,7 @@ export class ProfilesController {
     ) {
         return this.profileService.updateSports(userId, sports);
     }
+
+    
+
 }
