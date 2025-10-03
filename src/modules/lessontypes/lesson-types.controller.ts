@@ -1,8 +1,11 @@
 import { Controller, Post, Body, UseGuards, Request } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { LessonTypesService } from './lesson-types.service';
 import { AuthGuard } from '@nestjs/passport';
 import { LessonType } from './entities/lesson-type.entity';
+import { CreateLessonTypeDto } from './dto/create-lesson-type.dto';
 
+@ApiTags('Lesson Types')
 @Controller('lesson-types')
 export class LessonTypesController {
 	constructor(private readonly lessonTypesService: LessonTypesService) {}
@@ -10,10 +13,20 @@ export class LessonTypesController {
 	/**
 	 * Create a new lesson type for the current user
 	 */
-	@UseGuards(AuthGuard('jwt'))
 	@Post()
-	async createLessonType(@Request() req, @Body() body: { type: string; name: string; description: string }): Promise<LessonType> {
-		const userId = req.user._id;
-		return this.lessonTypesService.createLessonType({ ...body, user: userId });
+	@UseGuards(AuthGuard('jwt'))
+	@ApiBearerAuth()
+	@ApiOperation({ summary: 'Create a new lesson type' })
+	@ApiResponse({ status: 201, description: 'Lesson type created successfully' })
+	@ApiResponse({ status: 401, description: 'Unauthorized' })
+	async createLessonType(
+		@Request() req, 
+		@Body() createLessonTypeDto: CreateLessonTypeDto
+	): Promise<LessonType> {
+		const userId = req.user._id || req.user.id;
+		return this.lessonTypesService.createLessonType({ 
+			...createLessonTypeDto, 
+			user: userId 
+		});
 	}
 }
