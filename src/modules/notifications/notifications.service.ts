@@ -1,32 +1,51 @@
-import { Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { Types } from 'mongoose';
 import { CreateNotificationDto } from './dtos/create-notification.dto';
 import { Notification } from './entities/notification.entity';
+import { NotificationRepositoryInterface, NOTIFICATION_REPOSITORY } from './interfaces/notifications.interface';
+import { NotificationType } from 'src/common/enums/notification-type.enum';
 
 @Injectable()
 export class NotificationsService {
     constructor(
-        @InjectModel(Notification.name) private notificationModel: Model<Notification>
-    ) { }
+        @Inject(NOTIFICATION_REPOSITORY)
+        private readonly notificationRepository: NotificationRepositoryInterface,
+    ) {}
 
     async create(dto: CreateNotificationDto): Promise<Notification> {
-        const notification = new this.notificationModel(dto);
-        return notification.save();
+        return this.notificationRepository.create(dto);
     }
 
     async getUserNotifications(userId: string): Promise<Notification[]> {
-        return this.notificationModel
-            .find({ recipient: new Types.ObjectId(userId) })
-            .sort({ createdAt: -1 })
-            .exec();
+        const notifications = await this.notificationRepository.findByCondition({
+            recipient: new Types.ObjectId(userId)
+        });
+        // Sort by createdAt descending, handle undefined
+        return notifications.sort((a, b) => {
+            const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            return bTime - aTime;
+        });
     }
 
-    async markAsRead(notificationId: string): Promise<Notification | null> {
-        return this.notificationModel.findByIdAndUpdate(
+    async markAsRead(notificationId: string): Promise<Notification> {
+        const notification = await this.notificationRepository.update(
             notificationId,
-            { isRead: true },
-            { new: true }
+            { isRead: true }
         );
+        
+        if (!notification) {
+            throw new NotFoundException('Notification not found');
+        }
+        
+        return notification;
+    }
+
+    async findById(id: string): Promise<Notification> {
+        const notification = await this.notificationRepository.findById(id);
+        if (!notification) {
+            throw new NotFoundException('Notification not found');
+        }
+        return notification;
     }
 }

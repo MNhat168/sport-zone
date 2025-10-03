@@ -1,0 +1,71 @@
+### PHÂN TÍCH CẢI TIẾN: CHUYỂN SANG PURE LAZY CREATION CHO HỆ THỐNG ĐẶT SÂN
+
+Dựa trên phân tích nghiên cứu trong tài liệu, thiết kế hiện tại chưa đạt được Pure Lazy Creation hoàn chỉnh do một số giả định về sự tồn tại của Schedule trước khi thực hiện các hành động. Update BA này tập trung vào việc áp dụng Pure Lazy Creation một cách thuần túy, nơi Schedule chỉ được tạo "just in time" khi có sự kiện (booking đầu tiên hoặc đánh dấu ngày đặc biệt), giúp tối ưu hóa lưu trữ, tăng tính linh hoạt và đảm bảo tính nhất quán dữ liệu. Các hướng sửa sẽ nhấn mạnh vào việc loại bỏ phụ thuộc vào Schedule tồn tại trước, điều chỉnh flow của entity, service và controller mà không cần pre-create hoặc background job.
+
+#### 1. VẤN ĐỀ HIỆN TẠI TRONG THIẾT KẾ
+Thiết kế hiện tại chưa phải Pure Lazy Creation vì:
+- FE phải gửi scheduleId khi đặt sân, ngầm định rằng Schedule đã tồn tại trước (có thể từ pre-creation hoặc tạo qua view lịch).
+- Luồng hiển thị lịch phụ thuộc vào việc query trực tiếp Schedule theo date, dẫn đến không hỗ trợ tốt cho các ngày chưa có Schedule (ví dụ: ngày tương lai hoặc ngày vắng khách).
+- Không rõ ràng lifecycle của Schedule: khi nào chính xác nó được tạo (có thể là pre-create cho một khoảng ngày, hoặc tạo ngầm qua API xem lịch).
+- Entity Booking reference trực tiếp scheduleId, tạo dependency chặt chẽ và không linh hoạt nếu Schedule chưa tồn tại.
+- Service layer chưa sử dụng upsert atomic để tạo Schedule on-the-fly, dẫn đến rủi ro race condition cao hơn và thiếu tối ưu lưu trữ cho các sân có utilization thấp (type B và C).
+- Controller layer chưa xử lý fieldId + date làm input chính, làm FE phức tạp hơn và không tận dụng được tính lazy.
+
+Kết quả: Mặc dù có ý tưởng lazy (generate virtual slots), nhưng implementation chưa thuần túy, dẫn đến tiềm ẩn zombie data, query phức tạp cho ngày không có Schedule, và không tiết kiệm lưu trữ tối đa (giảm 70-80% cho sân vắng).
+
+#### 2. THAY ĐỔI KIẾN TRÚC - PURE LAZY CREATION
+##### 2.1 Nguyên tắc cốt lõi
+- Schedule chỉ được tạo khi có "sự kiện": booking đầu tiên trong ngày hoặc owner đánh dấu ngày đặc biệt (holiday/maintenance). Không tạo sẵn cho tương lai hoặc khi chỉ xem lịch.
+- FE không cần biết hoặc gửi scheduleId; chỉ gửi fieldId + date để BE tự xử lý upsert.
+- Tất cả config (operatingHours, slotDuration, priceRanges) lấy fresh từ Field mỗi lần, đảm bảo consistency mà không cần update bulk Schedule.
+- Không sử dụng background job để generate Schedule; mọi thứ on-the-fly trong transaction.
+- Ưu tiên storage saving cho type B/C sân (utilization trung bình/thấp), nhưng vẫn lợi ích cho type A (hot) bằng cách tránh zombie data và linh hoạt config changes.
+
+##### 2.2 Điều chỉnh Entity
+- **Schedule Entity**: Giữ cấu trúc tối giản (date, field, bookedSlots, isHoliday/specialStatus). Thêm index compound {field: 1, date: 1} để hỗ trợ query và upsert nhanh. Thêm field version (optional) cho optimistic locking. Không lưu availableSlots cứng; chỉ generate ảo từ Field. Lifecycle: Tạo chỉ qua upsert trong transaction, không pre-create.
+- **Booking Entity**: Bỏ reference trực tiếp đến scheduleId để tránh dependency. Thay bằng reference fieldId + date làm khóa chính để trace back. Giữ snapshot đầy đủ (startTime, endTime, numSlots, totalPrice, pricing breakdown) từ Field tại thời điểm đặt. Thêm status để xử lý affected bookings (ví dụ: pending reschedule nếu holiday).
+- **Field Entity**: Giữ nguyên vai trò master config (operatingHours, slotDuration, basePrice, priceRanges, pendingPriceUpdates). Không thay đổi, nhưng đảm bảo service luôn lấy latest config mà không cache lâu dài để tránh inconsistency.
+
+#### 3. LUỒNG NGHIỆP VỤ MỚI
+##### 3.1 Luồng Hiển Thị Lịch (GET Availability)
+- **API Change**: Từ GET /schedules?fieldId=X&startDate=Y&endDate=Z thành GET /fields/:fieldId/availability?startDate=Y&endDate=Z (nhận fieldId từ URL param để rõ ràng hơn).
+- **Service Layer Flow**: Lấy Field config từ fieldId. Query Schedules trong date range (có thể empty). Loop qua mọi ngày trong range: Generate virtual slots từ Field.operatingHours + slotDuration; nếu Schedule tồn tại thì apply bookedSlots để mark unavailable và check isHoliday; nếu không tồn tại thì tất cả slots available và isHoliday=false. Tính giá real-time từ Field.priceRanges cho từng slot. Merge và return unified danh sách {date, isHoliday, slots: [{startTime, endTime, available, price}]}.
+- **Controller Adjustment**: Validate fieldId và date range (max 30 ngày để tránh overload). Không tạo Schedule trong flow này (pure read-only). Handle empty Schedules mà không error, đảm bảo response consistent.
+
+##### 3.2 Luồng Đặt Sân (CREATE Booking)
+- **API Change**: Từ POST /bookings {scheduleId, startTime, endTime, ...} thành POST /bookings {fieldId, date, startTime, endTime, ...} (FE chỉ cần fieldId + date, không scheduleId).
+- **Service Layer Flow**: Start transaction. Validate Field existence và operating status. Upsert Schedule atomic: Sử dụng findOneAndUpdate với upsert=true để tìm hoặc tạo mới (init bookedSlots=[] nếu mới). Validate slot trong operatingHours, không conflict bookedSlots, và không isHoliday. Tính numSlots và totalPrice từ Field config hiện tại (snapshot breakdown). Tạo Booking với full snapshot. Push slot mới vào Schedule.bookedSlots. Commit transaction; rollback nếu conflict.
+- **Controller Adjustment**: Nhận fieldId + date làm input chính. Áp dụng transaction middleware để ensure atomicity. Handle error gracefully (ví dụ: "Slot unavailable" với retry suggestion cho FE).
+
+##### 3.3 Luồng Đánh Dấu Ngày Đặc Biệt (Holiday/Maintenance)
+- **API Change**: Giữ nguyên nhưng nhận fieldId + date thay vì scheduleId nếu cần.
+- **Service Layer Flow**: Upsert Schedule cho ngày cụ thể (tạo nếu chưa có). Update isHoliday/specialStatus. Query affected Bookings (dựa fieldId + date). Áp dụng policy: auto-cancel/notify/reschedule (ví dụ: clear bookedSlots nếu cancel all). Commit trong transaction để avoid partial updates.
+- **Controller Adjustment**: Validate owner permission. Return updated status và list affected bookings để FE hiển thị.
+
+##### 3.4 Luồng Cập Nhật Giá (Field Owner)
+- Giữ nguyên flow hiện tại (pendingPriceUpdates + cron apply), vì nó không phụ thuộc Schedule và phù hợp Pure Lazy (giá tính real-time từ Field, không affect Schedule cũ).
+
+#### 4. XỬ LÝ EDGE CASES VÀ CONCURRENCY
+- **Race Condition Prevention**: Sử dụng optimistic locking với version field trong Schedule (check và increment version trong update). Kết hợp transaction isolation (Read Committed) và retry logic nếu mismatch. Đối với upsert, database tự handle atomicity để reject conflict.
+- **Edge Cases**: Ngày tương lai xa: Generate virtual slots từ Field mà không tạo Schedule. Booking bulk/recurring: Xử lý như multiple slots trong transaction, hoặc cron generate individual bookings. Config changes: Không affect Schedule chưa tồn tại, chỉ apply cho bookings mới.
+- **Performance Optimization**: Cache Field config ngắn hạn (TTL 5-10 mins). Index tốt cho Schedule và Booking. Limit range queries. Không cache Schedule để ensure real-time.
+
+#### 5. MIGRATION STRATEGY
+- **Backward Compatibility Phase (2-4 tuần)**: Support dual API (old với scheduleId, new với fieldId+date). Old API internally map sang new logic. Log warnings cho old usage. Migrate Booking schema dần (add fieldId + date nếu thiếu) qua background job.
+- **Cleanup Phase**: Remove old endpoints sau khi FE migrate. Delete empty pre-created Schedules (nếu có). Test full flow trước rollout.
+
+#### 6. MONITORING VÀ METRICS
+- **Key Metrics**: Schedule creation rate, storage saving (% days with Schedule vs total), API response time (availability/booking), transaction rollback rate, cache hit ratio.
+- **Alert Conditions**: Rollback >5%, abnormal creation patterns, performance drop. Sử dụng tools như Prometheus để track.
+
+#### 7. BENEFITS SUMMARY
+- Storage: Giảm 60-80% documents cho sân low/medium utilization.
+- Flexibility: Config changes apply immediately cho tương lai mà không update bulk.
+- Simplicity: Không background jobs, FE đơn giản hơn (không scheduleId).
+- Consistency: Luôn fresh config từ Field.
+- Scalability: Growth theo actual usage, không potential.
+
+#### 8. IMPLEMENTATION PRIORITIES
+- **Phase 1 (Sprint 1)**: Điều chỉnh entity (add indexes/version). Update booking flow với upsert và fieldId+date. Sửa availability API để generate virtual cho ngày không Schedule.
+- **Phase 2 (Sprint 2)**: Implement holiday flow với upsert. Add optimistic locking và retry. Optimize performance với caching.
+- **Phase 3 (Sprint 3)**: Migration data và API. Setup monitoring. Documentation flow mới cho team và FE.

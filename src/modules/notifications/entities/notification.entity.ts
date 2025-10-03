@@ -1,18 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Types } from 'mongoose';
+import { NotificationType } from 'src/common/enums/notification-type.enum';
+import { BaseEntity } from 'src/common/entities/base.entity';
 
-export enum NotificationType {
-  BOOKING_CONFIRMED = 'booking_confirmed',
-  BOOKING_CANCELLED = 'booking_cancelled',
-  NEW_TOURNAMENT = 'new_tournament',
-  PAYMENT_SUCCESS = 'payment_success',
-  NEW_REVIEW = 'new_review',
-  COACH_REQUEST = 'coach_request',
-  FIELD_APPROVAL = 'field_approval',
-}
-
-@Schema({ timestamps: true })
-export class Notification extends Document {
+@Schema()
+export class Notification extends BaseEntity {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   recipient: Types.ObjectId;
 
@@ -32,4 +24,5 @@ export class Notification extends Document {
   metadata?: Record<string, any>;
 }
 
+export type NotificationDocument = Notification & Document;
 export const NotificationSchema = SchemaFactory.createForClass(Notification);

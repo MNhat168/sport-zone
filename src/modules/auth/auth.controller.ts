@@ -1,49 +1,130 @@
-import { Controller, Post, Body, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Body, BadRequestException, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { Inject } from '@nestjs/common';
 import { SignInTokenDto } from './dto/sign-in-token.dto';
+import { RegisterDto, LoginDto, VerifyAccountDto, ForgotPasswordDto, ResetPasswordDto } from './dto/auth.dto';
 import { HttpStatus } from '@nestjs/common';
+import { JwtRefreshTokenGuard } from './guards/jwt-refresh-token.guard';
+import { Req } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 
 @Controller('auth')
+@ApiTags('Authentication')
 export class AuthController {
   constructor(private readonly authService: AuthService) { }
-  // Register a new user
+  
+  /**
+   * Đăng ký tài khoản mới
+   * @param registerDto - Thông tin đăng ký
+   * @returns Thông báo kết quả đăng ký
+   */
   @Post('register')
-  async register(
-    @Body()
-    body: {
-      fullName: string;
-      email: string;
-      phone: string;
-      password: string;
-    },
-  ) {
-    return this.authService.register(body);
+  @ApiOperation({ summary: 'Đăng ký tài khoản mới' })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'Đăng ký thành công. Mã xác thực đã được gửi qua email.' 
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Dữ liệu không hợp lệ hoặc email đã tồn tại' 
+  })
+  async register(@Body() registerDto: RegisterDto) {
+    return this.authService.register(registerDto);
   }
 
+  /**
+   * Xác thực tài khoản bằng mã được gửi qua email
+   * @param verifyDto - Email và mã xác thực
+   * @returns Thông báo kết quả xác thực
+   */
   @Post('verify')
-  async verify(@Body() body: { email: string; verificationToken: string }) {
-    return this.authService.verify(body.email, body.verificationToken);
+  @ApiOperation({ summary: 'Xác thực tài khoản' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Xác thực thành công' 
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Mã xác thực không hợp lệ hoặc tài khoản không tìm thấy' 
+  })
+  async verify(@Body() verifyDto: VerifyAccountDto) {
+    return this.authService.verify(verifyDto.email, verifyDto.verificationToken);
   }
 
-  //Login with current user
+  /**
+   * Đăng nhập bằng email và mật khẩu
+   * @param loginDto - Email và mật khẩu
+   * @returns Token và thông tin người dùng
+   */
   @Post('login')
-  async login(@Body() body: { email: string; password: string }) {
-    return this.authService.login(body);
+  @ApiOperation({ summary: 'Đăng nhập' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Đăng nhập thành công',
+    schema: {
+      type: 'object',
+      properties: {
+        access_token: { type: 'string' },
+        refresh_token: { type: 'string' },
+        user: {
+          type: 'object',
+          properties: {
+            _id: { type: 'string' },
+            email: { type: 'string' },
+            fullName: { type: 'string' },
+            role: { type: 'string' },
+            avatarUrl: { type: 'string' },
+            isActive: { type: 'boolean' },
+            isVerified: { type: 'boolean' }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Email hoặc mật khẩu không đúng' 
+  })
+  async login(@Body() loginDto: LoginDto) {
+    return this.authService.login(loginDto);
   }
 
-  //Forgot password
+  /**
+   * Quên mật khẩu - gửi mã đặt lại qua email
+   * @param forgotPasswordDto - Email cần đặt lại mật khẩu
+   * @returns Thông báo kết quả gửi mã
+   */
   @Post('forgot-password')
-  async forgotPassword(@Body() body: { email: string }) {
-    return this.authService.forgotPassword(body.email);
+  @ApiOperation({ summary: 'Quên mật khẩu' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Mã đặt lại mật khẩu đã được gửi qua email' 
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Email không tồn tại' 
+  })
+  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(forgotPasswordDto.email);
   }
 
-  //Reset password
+  /**
+   * Đặt lại mật khẩu bằng mã xác thực
+   * @param resetPasswordDto - Thông tin đặt lại mật khẩu
+   * @returns Thông báo kết quả đặt lại
+   */
   @Post('reset-password')
-  async resetPassword(
-    @Body() body: { email: string; resetPasswordToken: string; password: string; confirmPassword: string }
-  ) {
-    return this.authService.resetPassword(body);
+  @ApiOperation({ summary: 'Đặt lại mật khẩu' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Đặt lại mật khẩu thành công' 
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Mã xác thực không hợp lệ hoặc đã hết hạn' 
+  })
+  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+    return this.authService.resetPassword(resetPasswordDto);
   }
 
   // //Login with Google OAuth
@@ -52,6 +133,21 @@ export class AuthController {
   async authWithGoogle(@Body() sign_in_token: SignInTokenDto) {
     const result = await this.authService.authenticateWithGoogle(sign_in_token);
     return { status: HttpStatus.OK, message: 'Đăng nhập Google thành công', data: result };
+  }
+
+  // Refresh token endpoint
+  @Post('refresh')
+  @UseGuards(JwtRefreshTokenGuard)
+  async refreshToken(@Req() req: any) {
+    const { userId, email, role } = req.user;
+    const newAccessToken = this.authService.generateAccessToken({ userId, email, role });
+    const newRefreshToken = this.authService.generateRefreshToken({ userId, email, role });
+    
+    return {
+      access_token: newAccessToken,
+      refresh_token: newRefreshToken,
+      message: 'Token refreshed successfully'
+    };
   }
 
   // Google OAuth callback handler

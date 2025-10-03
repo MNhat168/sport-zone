@@ -1,11 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-
-export enum PaymentMethod {
-  CREDIT_CARD = 'credit_card',
-  PAYPAL = 'paypal',
-  BANK_TRANSFER = 'bank_transfer',
-}
+import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 
 export enum PaymentStatus {
   PENDING = 'pending',
@@ -37,6 +32,12 @@ export class Payment extends Document {
 
   @Prop({ type: String })
   receiptUrl?: string;
+
+  @Prop({ type: String })
+  paymentNote?: string; // Ghi chú thanh toán
+
+  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  paidBy: Types.ObjectId; // Người thanh toán
 }
 
 export const PaymentSchema = SchemaFactory.createForClass(Payment);

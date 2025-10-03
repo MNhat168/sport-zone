@@ -22,13 +22,13 @@ export class AuthService {
 
   generateAccessToken(payload: TokenPayload) {
     return this.jwt_service.sign(payload, {
-      expiresIn: `${this.config_service.get<string>('JWT_ACCESS_TOKEN_EXPIRATION_TIME')}s`,
+      expiresIn: this.config_service.get<string>('JWT_ACCESS_TOKEN_EXPIRATION_TIME') || '15m',
     });
   }
 
   generateRefreshToken(payload: TokenPayload) {
     return this.jwt_service.sign(payload, {
-      expiresIn: `${this.config_service.get<string>('JWT_REFRESH_TOKEN_EXPIRATION_TIME')}s`,
+      expiresIn: this.config_service.get<string>('JWT_REFRESH_TOKEN_EXPIRATION_TIME') || '7d',
     });
   }
   // Register a new user
@@ -36,9 +36,29 @@ export class AuthService {
     fullName: string;
     email: string;
     phone: string;
+    date_of_birth: string;
     password: string;
   }) {
-    const { fullName, email, phone, password } = body;
+    const { fullName, email, phone, date_of_birth, password } = body;
+    
+    // Validate phone number format (Vietnamese phone number)
+    const phoneRegex = /^[0-9]{10}$/;
+    if (!phoneRegex.test(phone)) {
+      throw new BadRequestException('Số điện thoại không hợp lệ. Vui lòng nhập 10 chữ số.');
+    }
+
+    // Validate age (minimum 12 years old)
+    const birthDate = new Date(date_of_birth);
+    const today = new Date();
+    const age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      // Chưa đến sinh nhật trong năm này
+    }
+    
+    if (age < 12) {
+      throw new BadRequestException('Tuổi phải lớn hơn hoặc bằng 12.');
+    }
     const existing = await this.userModel.findOne({ email });
     if (existing) throw new BadRequestException('Email already registered');
     const hashed = await bcrypt.hash(password, 10);
@@ -52,6 +72,7 @@ export class AuthService {
       fullName,
       email,
       phone,
+      date_of_birth: new Date(date_of_birth),
       password: hashed,
       role: UserRole.USER,
       isVerified: false,
@@ -103,12 +124,20 @@ export class AuthService {
     if (!user.isVerified) throw new BadRequestException('Account not verified');
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) throw new BadRequestException('Invalid credentials');
-    const token = this.jwt_service.sign(
-      { sub: user._id, email: user.email, role: user.role },
-      { expiresIn: process.env.JWT_ACCESS_TOKEN_EXPIRATION_TIME || '1h' },
-    );
+    const accessToken = this.generateAccessToken({
+      userId: (user._id as any).toString(),
+      email: user.email,
+      role: user.role
+    });
+    const refreshToken = this.generateRefreshToken({
+      userId: (user._id as any).toString(),
+      email: user.email,
+      role: user.role
+    });
     return {
-      access_token: token, user: {
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      user: {
         _id: user._id,
         email: user.email,
         fullName: user.fullName,
@@ -157,7 +186,7 @@ export class AuthService {
 
   async resetPassword(body: { email: string; resetPasswordToken: string; password: string; confirmPassword: string }) {
     const { email, resetPasswordToken, password, confirmPassword } = body;
-    if (password !== confirmPassword) throw new BadRequestException('Passwords do not match');
+    if (password !== confirmPassword) throw new BadRequestException('Mật khẩu xác nhận không khớp');
     const user = await this.userModel.findOne({ email });
     if (!user) throw new BadRequestException('User not found');
     if (!user.resetPasswordToken || !user.resetPasswordExpires) throw new BadRequestException('No reset token');
@@ -193,11 +222,20 @@ export class AuthService {
       });
       await user.save();
     }
-    const token = this.jwt_service.sign(
-      { sub: user._id, email: user.email, role: user.role },
-      { expiresIn: process.env.JWT_ACCESS_TOKEN_EXPIRATION_TIME! },
-    );
-    return { access_token: token };
+    const accessToken = this.generateAccessToken({ 
+      userId: (user._id as any).toString(), 
+      email: user.email, 
+      role: user.role 
+    });
+    const refreshToken = this.generateRefreshToken({ 
+      userId: (user._id as any).toString(), 
+      email: user.email, 
+      role: user.role 
+    });
+    return { 
+      access_token: accessToken,
+      refresh_token: refreshToken 
+    };
   }
   async authenticateWithGoogle(sign_in_token: SignInTokenDto) {
     const { token, avatar } = sign_in_token;
@@ -229,8 +267,16 @@ export class AuthService {
     if (!user.isActive) throw new HttpException({ message: 'Tài khoản đã bị khóa' }, HttpStatus.UNAUTHORIZED);
     if (avatar && user.avatarUrl !== avatar) await this.user_repository.update(user.id, { avatarUrl: avatar });
 
-    const accessToken = this.generateAccessToken({ userId: user.id, role: user.role });
-    const refreshToken = this.generateRefreshToken({ userId: user.id, role: user.role });
+    const accessToken = this.generateAccessToken({ 
+      userId: (user._id as any).toString(), 
+      email: user.email, 
+      role: user.role 
+    });
+    const refreshToken = this.generateRefreshToken({ 
+      userId: (user._id as any).toString(), 
+      email: user.email, 
+      role: user.role 
+    });
 
     return {
       access_token: accessToken,

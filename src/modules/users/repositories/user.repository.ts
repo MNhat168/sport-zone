@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, FilterQuery } from 'mongoose';
-import { User, UserDocument } from '../entities/user.entity';
-import { UserRepositoryInterface } from '../interface/users.interface';
+import { User, UserDocument } from '@modules/users/entities/user.entity';
+import { UserRepositoryInterface } from '@modules/users/interface/users.interface';
 
 @Injectable()
 export class UserRepository implements UserRepositoryInterface {
@@ -11,36 +11,37 @@ export class UserRepository implements UserRepositoryInterface {
     private readonly userModel: Model<UserDocument>,
   ) { }
 
-  async findAll(): Promise<User[]> {
+  findAll(): Promise<User[]> {
     return this.userModel.find().exec();
   }
 
-  async findById(id: string): Promise<User | null> {
+  findById(id: string): Promise<User | null> {
     return this.userModel.findById(id).exec();
   }
 
-  async findByCondition(condition: FilterQuery<User>): Promise<User[]> {
-    return this.userModel.find(condition).exec();
+  create(data: Partial<User>): Promise<User> {
+    const created = new this.userModel(data);
+    return created.save();
   }
 
-  async findOne(condition: FilterQuery<User>): Promise<User | null> {
-    return this.userModel.findOne(condition).exec();
-  }
-
-  async create(data: Partial<User>): Promise<User> {
-    const createdUser = new this.userModel(data);
-    return createdUser.save();
-  }
-
-  async update(id: string, data: Partial<User>): Promise<User | null> {
+  update(id: string, data: Partial<User>): Promise<User | null> {
     return this.userModel.findByIdAndUpdate(id, data, { new: true }).exec();
   }
 
-  async delete(id: string): Promise<User | null> {
+  delete(id: string): Promise<User | null> {
     return this.userModel.findByIdAndDelete(id).exec();
   }
 
-  async findOneByCondition(condition: FilterQuery<User>): Promise<User | null> {
+  findOne(condition: FilterQuery<User>): Promise<User | null> {
     return this.userModel.findOne(condition).exec();
   }
+
+  findOneByCondition(condition: FilterQuery<User>): Promise<User | null> {
+    return this.userModel.findOne(condition);
+  }
+
+  findByCondition(condition: FilterQuery<User>): Promise<User[]> {
+    return this.userModel.find(condition).exec();
+  }
+
 }

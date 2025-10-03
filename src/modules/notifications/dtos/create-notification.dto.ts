@@ -1,6 +1,6 @@
 import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { Types } from 'mongoose';
-import { NotificationType } from '../entities/notification.entity';
+import { NotificationType } from 'src/common/enums/notification-type.enum';
 
 export class CreateNotificationDto {
     @IsNotEmpty()
