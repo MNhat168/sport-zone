@@ -7,7 +7,7 @@ import { CoachProfile, CoachProfileSchema } from 'src/modules/coaches/entities/c
 import {
   Schedule,
   ScheduleSchema,
-} from 'src/modules/bookings/entities/schedule.entity';
+} from 'src/modules/schedules/entities/schedule.entity';
 import {
   LessonType,
   LessonTypeSchema,

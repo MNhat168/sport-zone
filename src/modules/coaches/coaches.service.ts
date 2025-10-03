@@ -5,7 +5,7 @@ import { User, UserRole } from 'src/modules/users/entities/user.entity';
 import { CoachProfile } from 'src/modules/coaches/entities/coach-profile.entity';
 import { CoachesDto } from './dtos/coaches.dto';
 import { SportType } from 'src/common/enums/sport-type.enum';
-import { Schedule } from 'src/modules/bookings/entities/schedule.entity';
+import { Schedule } from 'src/modules/schedules/entities/schedule.entity';
 import { LessonType } from 'src/modules/lessontypes/entities/lesson-type.entity';
 @Injectable()
 export class CoachesService {
@@ -108,7 +108,7 @@ export class CoachesService {
     const schedule = await this.scheduleModel
       ?.findOne({ coach: profile?._id })
       .lean();
-    const availableSlots = schedule?.availableSlots ?? [];
+    const availableSlots = schedule?.bookedSlots ?? [];
 
     // Fetch lesson types from LessonType entity
     const lessonTypes = await this.lessonTypeModel
