@@ -110,10 +110,13 @@ export class CoachesService {
       .lean();
     const availableSlots = schedule?.bookedSlots ?? [];
 
-    // Fetch lesson types from LessonType entity
+    // Fetch lesson types from LessonType entity (user as string)
     const lessonTypes = await this.lessonTypeModel
-      .find({ user: user._id })
+      .find({ user: user._id.toString() })
       .lean();
+    // Logging for debugging lessonTypes fetch
+    console.log('getCoachById - user._id:', user._id);
+    console.log('getCoachById - lessonTypes:', lessonTypes);
 
     return {
       id: user._id.toString(),
