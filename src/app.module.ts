@@ -1,3 +1,4 @@
+import { LessonTypesModule } from './modules/lessontypes/lesson-types.module';
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -18,6 +19,7 @@ import { SchedulesModule } from './modules/bookings/schedules.module';
 import { CoachesModule } from './modules/coaches/coaches.module';
 @Module({
   imports: [
+        LessonTypesModule, 
     ConfigModule.forRoot({
       isGlobal: true, // ← cho phép dùng ở mọi module
       envFilePath: '.env',

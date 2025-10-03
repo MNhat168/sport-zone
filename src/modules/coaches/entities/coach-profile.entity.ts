@@ -20,6 +20,12 @@ export class CoachProfile extends Document {
   @Prop({ required: true })
   bio: string;
 
+  @Prop({ type: Number, default: 0, min: 0 })
+  completedSessions: number;
+
+  @Prop({ type: String, default: '' })
+  experience: string;
+
   @Prop({ type: Number, default: 0, min: 0, max: 5 })
   rating: number;
 

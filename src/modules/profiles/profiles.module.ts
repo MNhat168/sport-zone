@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ProfilesController } from './profiles.controller';
 import { ProfilesService } from './profiles.service';
 import { MongooseModule } from '@nestjs/mongoose';
-import { CoachProfile, CoachProfileSchema } from '../profiles/entities/coach-profile.entity';
+import { CoachProfile, CoachProfileSchema } from '../coaches/entities/coach-profile.entity';
 
 @Module({
   imports: [

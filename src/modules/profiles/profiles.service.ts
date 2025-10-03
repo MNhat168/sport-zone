@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { CoachProfile } from './entities/coach-profile.entity';
+import { CoachProfile } from '../coaches/entities/coach-profile.entity';
 import { SportType } from 'src/common/enums/sport-type.enum';
 
 @Injectable()
