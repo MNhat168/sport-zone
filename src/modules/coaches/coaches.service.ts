@@ -83,7 +83,7 @@ export class CoachesService {
       return {
         id: user._id.toString(),
         name: user.fullName,
-        location: (user as any).location ?? '', // fallback for missing location field
+        location: profile?.location ?? '', // fallback for missing location field
         description: profile?.bio ?? '',
         rating: profile?.rating ?? 0,
         totalReviews: profile?.totalReviews ?? 0, // TODO: fetch recent reviews
@@ -125,7 +125,7 @@ export class CoachesService {
       description: profile?.bio ?? '',
       rating: profile?.rating ?? 0,
       reviewCount: profile?.totalReviews ?? 0,
-      location: (user as any).location ?? '',
+      location: profile?.location ?? '',
       level: profile?.certification ?? '',
       completedSessions: profile?.completedSessions ?? 0,
       createdAt: (profile as any)?.createdAt ?? '',
