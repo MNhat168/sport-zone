@@ -83,7 +83,7 @@ export class CoachesService {
       return {
         id: user._id.toString(),
         name: user.fullName,
-        location: (user as any).location ?? '', // fallback for missing location field
+        location: profile?.location ?? '', // fallback for missing location field
         description: profile?.bio ?? '',
         rating: profile?.rating ?? 0,
         totalReviews: profile?.totalReviews ?? 0, // TODO: fetch recent reviews
@@ -110,10 +110,13 @@ export class CoachesService {
       .lean();
     const availableSlots = schedule?.bookedSlots ?? [];
 
-    // Fetch lesson types from LessonType entity
+    // Fetch lesson types from LessonType entity (user as string)
     const lessonTypes = await this.lessonTypeModel
-      .find({ user: user._id })
+      .find({ user: user._id.toString() })
       .lean();
+    // Logging for debugging lessonTypes fetch
+    console.log('getCoachById - user._id:', user._id);
+    console.log('getCoachById - lessonTypes:', lessonTypes);
 
     return {
       id: user._id.toString(),
@@ -122,7 +125,7 @@ export class CoachesService {
       description: profile?.bio ?? '',
       rating: profile?.rating ?? 0,
       reviewCount: profile?.totalReviews ?? 0,
-      location: (user as any).location ?? '',
+      location: profile?.location ?? '',
       level: profile?.certification ?? '',
       completedSessions: profile?.completedSessions ?? 0,
       createdAt: (profile as any)?.createdAt ?? '',

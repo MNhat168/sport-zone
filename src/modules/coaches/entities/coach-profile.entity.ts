@@ -31,6 +31,9 @@ export class CoachProfile extends Document {
 
   @Prop({ type: Number, default: 0 })
   totalReviews: number;
+
+  @Prop({ type: String, default: '', required: false })
+  location?: string;
 }
 
 export const CoachProfileSchema = SchemaFactory.createForClass(CoachProfile);
