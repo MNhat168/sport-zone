@@ -1,3 +1,4 @@
+import { LessonTypesModule } from './modules/lessontypes/lesson-types.module';
 import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
@@ -22,6 +23,7 @@ import { CoachesModule } from './modules/coaches/coaches.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 @Module({
   imports: [
+        LessonTypesModule, 
     ConfigModule.forRoot({
       isGlobal: true, // ← cho phép dùng ở mọi module
       envFilePath: '.env',
