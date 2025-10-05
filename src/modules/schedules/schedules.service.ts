@@ -50,15 +50,15 @@ export class SchedulesService {
             };
 
             const schedule = await this.scheduleModel.findOneAndUpdate(
-                { 
-                    field: new Types.ObjectId(fieldId), 
-                    date 
+                {
+                    field: new Types.ObjectId(fieldId),
+                    date
                 },
                 updateData,
-                { 
-                    upsert: true, 
-                    new: true, 
-                    session 
+                {
+                    upsert: true,
+                    new: true,
+                    session
                 }
             ).exec();
 
@@ -85,14 +85,14 @@ export class SchedulesService {
             const schedule = await this.scheduleModel.findByIdAndUpdate(
                 scheduleId,
                 {
-                    $push: { 
-                        bookedSlots: { startTime, endTime } 
+                    $push: {
+                        bookedSlots: { startTime, endTime }
                     },
                     $inc: { version: 1 }
                 },
-                { 
-                    new: true, 
-                    session 
+                {
+                    new: true,
+                    session
                 }
             ).exec();
 
@@ -122,14 +122,14 @@ export class SchedulesService {
             const schedule = await this.scheduleModel.findByIdAndUpdate(
                 scheduleId,
                 {
-                    $pull: { 
-                        bookedSlots: { startTime, endTime } 
+                    $pull: {
+                        bookedSlots: { startTime, endTime }
                     },
                     $inc: { version: 1 }
                 },
-                { 
-                    new: true, 
-                    session 
+                {
+                    new: true,
+                    session
                 }
             ).exec();
 
@@ -148,6 +148,7 @@ export class SchedulesService {
 
     /**
      * Mark schedule as holiday with optimistic locking
+     * For Field owner
      */
     async markScheduleHoliday(
         fieldId: string,
@@ -157,9 +158,9 @@ export class SchedulesService {
     ): Promise<Schedule> {
         try {
             const schedule = await this.scheduleModel.findOneAndUpdate(
-                { 
-                    field: new Types.ObjectId(fieldId), 
-                    date 
+                {
+                    field: new Types.ObjectId(fieldId),
+                    date
                 },
                 {
                     $set: {
@@ -174,10 +175,10 @@ export class SchedulesService {
                     },
                     $inc: { version: 1 }
                 },
-                { 
-                    upsert: true, 
-                    new: true, 
-                    session 
+                {
+                    upsert: true,
+                    new: true,
+                    session
                 }
             ).exec();
 
@@ -238,8 +239,8 @@ export class SchedulesService {
                 field: new Types.ObjectId(fieldId),
                 date: { $gte: startDate, $lte: endDate }
             })
-            .sort({ date: 1 })
-            .exec();
+                .sort({ date: 1 })
+                .exec();
 
             this.logger.log(`Retrieved ${schedules.length} schedules for field ${fieldId} from ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`);
             return schedules;
@@ -264,10 +265,27 @@ export class SchedulesService {
         return bookedSlots.some(slot => {
             const bookedStart = this.timeStringToMinutes(slot.startTime);
             const bookedEnd = this.timeStringToMinutes(slot.endTime);
-            
+
             // Check for overlap: newStart < bookedEnd && newEnd > bookedStart
             return newStart < bookedEnd && newEnd > bookedStart;
         });
+    }
+
+    /**
+     * Get schedule for coach
+     */
+    async getCoachSchedules(
+        coachId: string,
+        startDate: Date,
+        endDate: Date,
+    ): Promise<Schedule[]> {
+        return this.scheduleModel
+            .find({
+                coach: new Types.ObjectId(coachId),
+                date: { $gte: startDate, $lte: endDate },
+            })
+            .sort({ date: 1 })
+            .exec();
     }
 
     /**
@@ -293,7 +311,7 @@ export class SchedulesService {
             }
 
             const result = await this.scheduleModel.deleteMany(filter).exec();
-            
+
             this.logger.log(`Cleaned up ${result.deletedCount} empty schedules`);
             return { deletedCount: result.deletedCount };
 
@@ -320,19 +338,19 @@ export class SchedulesService {
 
             const [totalSchedules, emptySchedules, holidaySchedules] = await Promise.all([
                 this.scheduleModel.countDocuments(filter),
-                this.scheduleModel.countDocuments({ 
-                    ...filter, 
-                    bookedSlots: { $size: 0 }, 
-                    isHoliday: false 
+                this.scheduleModel.countDocuments({
+                    ...filter,
+                    bookedSlots: { $size: 0 },
+                    isHoliday: false
                 }),
-                this.scheduleModel.countDocuments({ 
-                    ...filter, 
-                    isHoliday: true 
+                this.scheduleModel.countDocuments({
+                    ...filter,
+                    isHoliday: true
                 })
             ]);
 
-            const utilizationRate = totalSchedules > 0 
-                ? ((totalSchedules - emptySchedules - holidaySchedules) / totalSchedules) * 100 
+            const utilizationRate = totalSchedules > 0
+                ? ((totalSchedules - emptySchedules - holidaySchedules) / totalSchedules) * 100
                 : 0;
 
             return {
@@ -433,7 +451,7 @@ export class SchedulesService {
 
         // Find affected bookings by matching field and date from schedules (Pure Lazy Creation)
         const scheduleFieldDates = schedules.map(s => ({ field: s.field, date: s.date }));
-        
+
         const affectedBookings = await this.bookingModel.find({
             $or: scheduleFieldDates.map(sfd => ({ field: sfd.field, date: sfd.date })),
             requestedCoach: new Types.ObjectId(coachId),
@@ -450,37 +468,6 @@ export class SchedulesService {
             },
         );
 
-        //create notification for affected users
-        for (const booking of affectedBookings) {
-            const b = booking as Booking & { _id: Types.ObjectId };
-            if (booking.coachStatus === 'pending') {
-                await this.bookingsService.updateCoachStatus(
-                    b._id.toString(),
-                    coachId,
-                    'declined'
-                );
-            } else {
-                if (!booking.holidayNotified) {
-                    // Find the corresponding schedule for this booking by field and date
-                    const correspondingSchedule = schedules.find(s => 
-                        s.field.toString() === booking.field.toString() && 
-                        s.date.getTime() === booking.date.getTime()
-                    );
-                    
-                    this.eventEmitter.emit('schedule.holiday.set', {
-                        bookingId: booking._id,
-                        userId: booking.user,
-                        scheduleId: correspondingSchedule?._id,
-                        startTime: booking.startTime,
-                        endTime: booking.endTime,
-                        date: booking.date,
-                        coachStatus: booking.coachStatus,
-                    });
-                    booking.holidayNotified = true;
-                    await booking.save();
-                }
-            }
-        }
         return { modifiedCount: result.modifiedCount };
     }
 

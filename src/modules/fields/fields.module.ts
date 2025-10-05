@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ScheduleModule } from '@nestjs/schedule'; 
+import { ScheduleModule } from '@nestjs/schedule';
 import { FieldsController } from './fields.controller';
 import { FieldsService } from './fields.service';
 import { PriceSchedulerService } from './services/price-scheduler.service';
@@ -13,7 +13,7 @@ import { FieldOwnerProfileSchema } from './schema/field-owner-schema';
 
 @Module({
   imports: [
-    ScheduleModule.forRoot(), 
+    ScheduleModule.forRoot(),
     MongooseModule.forFeature([
       { name: Field.name, schema: FieldSchema },
       { name: FieldOwnerProfile.name, schema: FieldOwnerProfileSchema },
@@ -21,5 +21,6 @@ import { FieldOwnerProfileSchema } from './schema/field-owner-schema';
   ],
   controllers: [FieldsController],
   providers: [FieldsService, PriceSchedulerService],
+  exports: [FieldsService],
 })
-export class FieldsModule {}
+export class FieldsModule { }

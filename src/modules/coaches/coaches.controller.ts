@@ -5,16 +5,11 @@ import { SportType } from 'src/common/enums/sport-type.enum';
 
 @Controller('coaches')
 export class CoachesController {
+  constructor(private readonly coachesService: CoachesService) { }
   @Get('all')
   async getAllCoaches(): Promise<any[]> {
     return this.coachesService.getAllCoaches();
   }
-
-  @Get(':id')
-  async getCoachById(@Param('id') id: string): Promise<any> {
-    return this.coachesService.getCoachById(id);
-  }
-  constructor(private readonly coachesService: CoachesService) {}
 
   @Get()
   async findAll(
@@ -29,5 +24,11 @@ export class CoachesController {
       minRate: minRate ? Number(minRate) : undefined,
       maxRate: maxRate ? Number(maxRate) : undefined,
     });
+  }
+
+  // GET /coaches/:id
+  @Get(':id')
+  async getCoachById(@Param('id') coachId: string): Promise<CoachesDto> {
+    return this.coachesService.getCoachById(coachId);
   }
 }

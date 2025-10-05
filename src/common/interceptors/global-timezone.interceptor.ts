@@ -14,7 +14,7 @@ export class GlobalTimezoneInterceptor implements NestInterceptor {
   constructor(
     private readonly timezoneService: TimezoneService,
     private readonly reflector: Reflector,
-  ) {}
+  ) { }
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     // Check if this endpoint should skip timezone conversion
@@ -35,30 +35,32 @@ export class GlobalTimezoneInterceptor implements NestInterceptor {
   /**
    * Recursively transform all timestamp fields to Vietnam timezone
    */
-  private transformTimestamps(data: any): any {
+  private transformTimestamps(data: any, seen = new WeakSet()): any {
     if (!data) return data;
+
+    // Prevent circular references
+    if (typeof data === 'object') {
+      if (seen.has(data)) return data;
+      seen.add(data);
+    }
 
     // Handle arrays
     if (Array.isArray(data)) {
-      return data.map(item => this.transformTimestamps(item));
+      return data.map(item => this.transformTimestamps(item, seen));
     }
 
     // Handle objects
     if (typeof data === 'object' && data !== null) {
-      // Check if it's a Date object
       if (data instanceof Date) {
         return this.timezoneService.toVietnamTime(data);
       }
 
-      // Transform object properties
-      const transformed = {};
+      const transformed: any = {};
       for (const [key, value] of Object.entries(data)) {
-        // Transform timestamp fields
         if ((key === 'createdAt' || key === 'updatedAt') && value instanceof Date) {
           transformed[key] = this.timezoneService.toVietnamTime(value);
         } else if (value && typeof value === 'object') {
-          // Recursively transform nested objects
-          transformed[key] = this.transformTimestamps(value);
+          transformed[key] = this.transformTimestamps(value, seen);
         } else {
           transformed[key] = value;
         }

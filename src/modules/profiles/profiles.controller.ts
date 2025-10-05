@@ -52,6 +52,9 @@ export class ProfilesController {
         return this.profileService.updateSports(userId, sports);
     }
 
-    
-
+    @Get('coach-id/:userId')
+    async getCoachId(@Param('userId') userId: string): Promise<{ coachId: string }> {
+        const coachId = await this.profileService.getCoachIdByUserId(userId);
+        return { coachId };
+    }
 }

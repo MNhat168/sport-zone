@@ -6,36 +6,96 @@ import { Types } from 'mongoose';
 
 @Injectable()
 export class NotificationListener {
-  constructor(private readonly notificationsService: NotificationsService) { }
+  constructor(
+    private readonly notificationsService: NotificationsService,
+  ) { }
 
-  //accept/decline booking
-  @OnEvent('booking.status.updated')
-  async handleBookingStatusUpdated(payload: {
+  @OnEvent('booking.coach.accept')
+  async handleBookingAccepted(payload: {
     bookingId: string;
     userId: string;
     coachId: string;
-    status: 'accepted' | 'declined';
+    coachName?: string;
+    fieldId?: string;
+    fieldName?: string;
+    fieldLocation?: string;
+    date?: string;     
+    startTime?: string;
+    endTime?: string;
   }) {
-    const type =
-      payload.status === 'accepted'
-        ? NotificationType.BOOKING_CONFIRMED
-        : NotificationType.BOOKING_CANCELLED;
-    const title =
-      payload.status === 'accepted'
-        ? 'Booking Accepted'
-        : 'Booking Declined';
+    const messageParts = [
+      payload.coachName ? `${payload.coachName}` : 'Your coach',
+      'has accepted your booking request',
+    ];
 
-    const message =
-      payload.status === 'accepted'
-        ? 'Your coach has accepted your booking.'
-        : 'Your coach has declined your booking.';
+    if (payload.startTime && payload.endTime && payload.date) {
+      messageParts.push(`from ${payload.startTime} to ${payload.endTime} on ${payload.date}`);
+    }
+
+    if (payload.fieldName && payload.fieldLocation) {
+      messageParts.push(`at ${payload.fieldName} (${payload.fieldLocation})`);
+    }
+
+    const message = messageParts.join(' ') + '.';
 
     await this.notificationsService.create({
       recipient: new Types.ObjectId(payload.userId),
-      type,
-      title,
+      type: NotificationType.BOOKING_CONFIRMED,
+      title: 'Booking Accepted',
       message,
-      metadata: { bookingId: payload.bookingId, coachId: payload.coachId },
+      metadata: {
+        bookingId: payload.bookingId,
+        coachId: payload.coachId,
+        fieldId: payload.fieldId || null,
+      },
+    });
+  }
+
+  // Handle coach declining a booking
+  @OnEvent('booking.coach.decline')
+  async handleBookingDeclined(payload: {
+    bookingId: string;
+    userId: string;
+    coachId: string;
+    coachName?: string;
+    fieldId?: string;
+    fieldName?: string;
+    fieldLocation?: string;
+    date?: string;
+    startTime?: string;
+    endTime?: string;
+    reason?: string;
+  }) {
+    const messageParts = [
+      payload.coachName ? `${payload.coachName}` : 'Your coach',
+      'has declined your booking request',
+    ];
+
+    if (payload.startTime && payload.endTime && payload.date) {
+      messageParts.push(`from ${payload.startTime} to ${payload.endTime} on ${payload.date}`);
+    }
+
+    if (payload.fieldName && payload.fieldLocation) {
+      messageParts.push(`at ${payload.fieldName} (${payload.fieldLocation})`);
+    }
+
+    if (payload.reason) {
+      messageParts.push(`Reason: ${payload.reason}`);
+    }
+
+    const message = messageParts.join(' ') + '.';
+
+    await this.notificationsService.create({
+      recipient: new Types.ObjectId(payload.userId),
+      type: NotificationType.BOOKING_CANCELLED,
+      title: 'Booking Declined',
+      message,
+      metadata: {
+        bookingId: payload.bookingId,
+        coachId: payload.coachId,
+        fieldId: payload.fieldId || null,
+        reason: payload.reason || null,
+      },
     });
   }
 

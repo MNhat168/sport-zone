@@ -24,5 +24,6 @@ import {
   ],
   controllers: [CoachesController],
   providers: [CoachesService],
+  exports: [CoachesService],
 })
-export class CoachesModule {}
+export class CoachesModule { }

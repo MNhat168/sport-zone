@@ -6,7 +6,8 @@ import { Schedule } from '../schedules/entities/schedule.entity';
 import { Field } from '../fields/entities/field.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PaymentsService } from '../payments/payments.service';
-
+import { FieldsService } from '../fields/fields.service';
+import { CoachesService } from '../coaches/coaches.service';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 import { CreateFieldBookingLazyDto, FieldAvailabilityQueryDto } from './dto/create-field-booking-lazy.dto';
 import {
@@ -48,8 +49,10 @@ export class BookingsService {
     @InjectConnection() private readonly connection: Connection,
     private eventEmitter: EventEmitter2,
     private readonly paymentsService: PaymentsService,
+    private readonly fieldsService: FieldsService,
+    private readonly coachesService: CoachesService,
 
-  ) {}
+  ) { }
 
 
 
@@ -62,7 +65,7 @@ export class BookingsService {
    * Generates virtual slots from Field config, applies Schedule constraints if exists
    */
   async getFieldAvailability(
-    fieldId: string, 
+    fieldId: string,
     query: FieldAvailabilityQueryDto
   ): Promise<DailyAvailability[]> {
     try {
@@ -79,7 +82,7 @@ export class BookingsService {
 
       const startDate = new Date(query.startDate);
       const endDate = new Date(query.endDate);
-      
+
       // Validate date range (max 30 days to prevent overload)
       const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
       if (daysDiff > 30) {
@@ -110,9 +113,9 @@ export class BookingsService {
 
         // Generate virtual slots from Field config
         const virtualSlots = this.generateVirtualSlots(field);
-        
+
         // Apply schedule constraints if exists
-        const availableSlots = schedule 
+        const availableSlots = schedule
           ? this.applyScheduleConstraints(virtualSlots, schedule, field)
           : virtualSlots.map(slot => ({ ...slot, available: true }));
 
@@ -141,11 +144,11 @@ export class BookingsService {
    * Uses atomic upsert for Schedule creation
    */
   async createFieldBookingLazy(
-    userId: string, 
+    userId: string,
     bookingData: CreateFieldBookingLazyDto
   ): Promise<Booking> {
     const session: ClientSession = await this.connection.startSession();
-    
+
     try {
       return await session.withTransaction(async () => {
         // Validate field
@@ -156,19 +159,19 @@ export class BookingsService {
 
         // Parse booking date
         const bookingDate = new Date(bookingData.date);
-        
+
         // Validate time slots
         this.validateTimeSlots(bookingData.startTime, bookingData.endTime, field);
-        
+
         // Calculate slots and pricing
         const numSlots = this.calculateNumSlots(bookingData.startTime, bookingData.endTime, field.slotDuration);
         const pricingInfo = this.calculatePricing(bookingData.startTime, bookingData.endTime, field);
 
         // Atomic upsert Schedule (Pure Lazy Creation)
         const scheduleUpdate = await this.scheduleModel.findOneAndUpdate(
-          { 
-            field: new Types.ObjectId(bookingData.fieldId), 
-            date: bookingDate 
+          {
+            field: new Types.ObjectId(bookingData.fieldId),
+            date: bookingDate
           },
           {
             $setOnInsert: {
@@ -179,10 +182,10 @@ export class BookingsService {
               version: 0
             }
           },
-          { 
-            upsert: true, 
-            new: true, 
-            session 
+          {
+            upsert: true,
+            new: true,
+            session
           }
         ).exec();
 
@@ -193,8 +196,8 @@ export class BookingsService {
 
         // Check slot conflicts
         const hasConflict = this.checkSlotConflict(
-          bookingData.startTime, 
-          bookingData.endTime, 
+          bookingData.startTime,
+          bookingData.endTime,
           scheduleUpdate.bookedSlots
         );
 
@@ -248,11 +251,11 @@ export class BookingsService {
         await this.scheduleModel.findByIdAndUpdate(
           scheduleUpdate._id,
           {
-            $push: { 
-              bookedSlots: { 
-                startTime: bookingData.startTime, 
-                endTime: bookingData.endTime 
-              } 
+            $push: {
+              bookedSlots: {
+                startTime: bookingData.startTime,
+                endTime: bookingData.endTime
+              }
             },
             $inc: { version: 1 }
           },
@@ -290,12 +293,12 @@ export class BookingsService {
    * Upserts Schedule and handles affected bookings
    */
   async markHoliday(
-    fieldId: string, 
-    date: string, 
+    fieldId: string,
+    date: string,
     reason: string
   ): Promise<{ schedule: Schedule; affectedBookings: Booking[] }> {
     const session: ClientSession = await this.connection.startSession();
-    
+
     try {
       return await session.withTransaction(async () => {
         // Validate field
@@ -308,9 +311,9 @@ export class BookingsService {
 
         // Atomic upsert Schedule for holiday
         const schedule = await this.scheduleModel.findOneAndUpdate(
-          { 
-            field: new Types.ObjectId(fieldId), 
-            date: holidayDate 
+          {
+            field: new Types.ObjectId(fieldId),
+            date: holidayDate
           },
           {
             $set: {
@@ -325,10 +328,10 @@ export class BookingsService {
             },
             $inc: { version: 1 }
           },
-          { 
-            upsert: true, 
-            new: true, 
-            session 
+          {
+            upsert: true,
+            new: true,
+            session
           }
         ).exec();
 
@@ -378,44 +381,90 @@ export class BookingsService {
     }
   }
 
-  // ============================================================================
-  // LEGACY/BACKWARD COMPATIBILITY METHODS
-  // ============================================================================
 
-  async updateCoachStatus(
-    bookingId: string,
-    coachId: string,
-    newStatus: 'accepted' | 'declined',
-  ) {
-    if (!Types.ObjectId.isValid(bookingId) || !Types.ObjectId.isValid(coachId)) {
-      throw new BadRequestException('Invalid ID format');
+  /**
+   * Accept a booking request for a coach
+   */
+  async acceptCoachRequest(coachId: string, bookingId: string): Promise<Booking> {
+    const booking = await this.bookingModel.findOne({
+      _id: new Types.ObjectId(bookingId),
+      requestedCoach: new Types.ObjectId(coachId),
+    });
+
+    if (!booking) throw new NotFoundException('Booking not found or not assigned to this coach');
+    if (booking.coachStatus !== 'pending') throw new BadRequestException('Booking already responded');
+
+    const coach = await this.coachesService.getCoachById(coachId);
+    const field = booking.field ? await this.fieldsService.findOne(booking.field.toString()) : null;
+
+    try {
+      this.eventEmitter.emit('booking.coach.accept', {
+        bookingId: booking.id.toString(),
+        userId: booking.user.toString(),
+        coachId,
+        fieldId: booking.field?.toString(),
+        date: booking.date.toISOString().split('T')[0],
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        coachName: coach?.fullName,
+        fieldName: field?.name,
+        fieldLocation: field?.location,
+      });
+
+      booking.coachStatus = 'accepted';
+      await booking.save();
+    } catch (err) {
+      throw new InternalServerErrorException('Failed to process booking acceptance');
     }
 
+    return booking;
+  }
+
+  /**
+   * Decline a booking request for a coach
+   */
+  async declineCoachRequest(
+    coachId: string,
+    bookingId: string,
+    reason?: string,
+  ): Promise<Booking> {
     const booking = await this.bookingModel.findOne({
       _id: new Types.ObjectId(bookingId),
       requestedCoach: new Types.ObjectId(coachId),
     });
 
     if (!booking) {
-      throw new NotFoundException('Booking not found for this coach');
+      throw new NotFoundException('Booking not found or not assigned to this coach');
     }
 
     if (booking.coachStatus !== 'pending') {
-      throw new BadRequestException(
-        `Coach status is already "${booking.coachStatus}"`,
-      );
+      throw new BadRequestException('Booking already responded');
     }
 
-    booking.coachStatus = newStatus;
-    await booking.save();
+    const coach = await this.coachesService.getCoachById(coachId);
+    const field = booking.field ? await this.fieldsService.findOne(booking.field.toString()) : null;
 
-    //create notification event
-    this.eventEmitter.emit('booking.status.updated', {
-      bookingId,
-      userId: booking.user,
-      coachId,
-      status: newStatus,
-    });
+    try {
+      this.eventEmitter.emit('booking.coach.decline', {
+        bookingId: booking.id.toString(),
+        userId: booking.user.toString(),
+        coachId,
+        fieldId: booking.field?.toString(),
+        date: booking.date.toISOString().split('T')[0],
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        reason,
+        coachName: coach?.fullName,
+        fieldName: field?.name,
+        fieldLocation: field?.location,
+      });
+
+      booking.coachStatus = 'declined';
+      if (reason) booking.cancellationReason = reason;
+      await booking.save();
+    } catch (err) {
+      throw new InternalServerErrorException('Failed to process booking decline');
+    }
 
     return booking;
   }
@@ -424,13 +473,16 @@ export class BookingsService {
     const bookings = await this.bookingModel
       .find({ requestedCoach: new Types.ObjectId(coachId) })
       .populate('user')
-      .populate('schedule')
-      //.populate('payment')
-      .populate('requestedCoach')
+      .populate('field')
+      .lean()
       .exec();
-      
+
     return bookings;
   }
+
+  // ============================================================================
+  // LEGACY/BACKWARD COMPATIBILITY METHODS
+  // ============================================================================
 
   //Create field booking service (legacy - updated for Pure Lazy Creation)
   async createFieldBooking(data: CreateFieldBookingPayload) {
@@ -559,9 +611,9 @@ export class BookingsService {
 
       const startTime = this.minutesToTimeString(currentMinutes);
       const endTime = this.minutesToTimeString(slotEndMinutes);
-      
+
       const pricing = this.calculateSlotPricing(startTime, endTime, field);
-      
+
       slots.push({
         startTime,
         endTime,
@@ -577,8 +629,8 @@ export class BookingsService {
    * Apply schedule constraints to virtual slots
    */
   private applyScheduleConstraints(
-    virtualSlots: Omit<AvailabilitySlot, 'available'>[], 
-    schedule: Schedule, 
+    virtualSlots: Omit<AvailabilitySlot, 'available'>[],
+    schedule: Schedule,
     field: Field
   ): AvailabilitySlot[] {
     if (schedule.isHoliday) {
@@ -595,8 +647,8 @@ export class BookingsService {
    * Check if time slot conflicts with booked slots
    */
   private checkSlotConflict(
-    startTime: string, 
-    endTime: string, 
+    startTime: string,
+    endTime: string,
     bookedSlots: { startTime: string; endTime: string }[]
   ): boolean {
     const newStart = this.timeStringToMinutes(startTime);
@@ -605,7 +657,7 @@ export class BookingsService {
     return bookedSlots.some(slot => {
       const bookedStart = this.timeStringToMinutes(slot.startTime);
       const bookedEnd = this.timeStringToMinutes(slot.endTime);
-      
+
       // Check for overlap
       return newStart < bookedEnd && newEnd > bookedStart;
     });
@@ -618,17 +670,17 @@ export class BookingsService {
     const startMinutes = this.timeStringToMinutes(startTime);
     const endMinutes = this.timeStringToMinutes(endTime);
     const durationMinutes = endMinutes - startMinutes;
-    
+
     return Math.ceil(durationMinutes / slotDuration);
   }
 
   /**
    * Calculate pricing for booking
    */
-  private calculatePricing(startTime: string, endTime: string, field: Field): { 
-    totalPrice: number; 
-    multiplier: number; 
-    breakdown: string 
+  private calculatePricing(startTime: string, endTime: string, field: Field): {
+    totalPrice: number;
+    multiplier: number;
+    breakdown: string
   } {
     const startMinutes = this.timeStringToMinutes(startTime);
     const endMinutes = this.timeStringToMinutes(endTime);
@@ -640,10 +692,10 @@ export class BookingsService {
       const slotEndMinutes = Math.min(currentMinutes + field.slotDuration, endMinutes);
       const slotStart = this.minutesToTimeString(currentMinutes);
       const slotEnd = this.minutesToTimeString(slotEndMinutes);
-      
+
       const slotPricing = this.calculateSlotPricing(slotStart, slotEnd, field);
       totalPrice += slotPricing.price;
-      
+
       if (breakdown) breakdown += ', ';
       breakdown += `${slotStart}-${slotEnd}: ${slotPricing.price}đ (${slotPricing.multiplier}x)`;
     }
@@ -662,17 +714,17 @@ export class BookingsService {
   /**
    * Calculate pricing for a single slot
    */
-  private calculateSlotPricing(startTime: string, endTime: string, field: Field): { 
-    price: number; 
-    multiplier: number; 
-    breakdown: string 
+  private calculateSlotPricing(startTime: string, endTime: string, field: Field): {
+    price: number;
+    multiplier: number;
+    breakdown: string
   } {
     // Find applicable price range
     const applicableRange = field.priceRanges.find(range => {
       const rangeStart = this.timeStringToMinutes(range.start);
       const rangeEnd = this.timeStringToMinutes(range.end);
       const slotStart = this.timeStringToMinutes(startTime);
-      
+
       return slotStart >= rangeStart && slotStart < rangeEnd;
     });
 
