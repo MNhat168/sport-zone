@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { CoachesService } from './coaches.service';
 import { CoachesDto } from './dtos/coaches.dto';
 import { SportType } from 'src/common/enums/sport-type.enum';
@@ -20,5 +20,11 @@ export class CoachesController {
             minRate: minRate ? Number(minRate) : undefined,
             maxRate: maxRate ? Number(maxRate) : undefined,
         });
+    }
+
+    // GET /coaches/:id
+    @Get(':id')
+    async getCoachById(@Param('id') coachId: string): Promise<CoachesDto> {
+        return this.coachesService.getCoachById(coachId);
     }
 }

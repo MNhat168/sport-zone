@@ -11,7 +11,8 @@ import { Field, FieldSchema } from '../fields/entities/field.entity';
 import { BookingsService } from './bookings.service';
 import { BookingsController } from './bookings.controller';
 import { PaymentsModule } from '../payments/payments.module';
-
+import { FieldsModule } from '../fields/fields.module';
+import { CoachesModule } from '../coaches/coaches.module';
 
 /**
  * Bookings Module with Pure Lazy Creation pattern
@@ -26,9 +27,11 @@ import { PaymentsModule } from '../payments/payments.module';
     ]),
     EventEmitterModule,
     PaymentsModule,
+    FieldsModule,
+    CoachesModule,
   ],
   controllers: [BookingsController],
   providers: [BookingsService],
   exports: [BookingsService],
 })
-export class BookingsModule {}
+export class BookingsModule { }

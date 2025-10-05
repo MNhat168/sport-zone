@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { User, UserRole } from 'src/modules/users/entities/user.entity';
@@ -47,5 +47,37 @@ export class CoachesService {
             .filter((coach): coach is CoachesDto => !!coach);
 
         return result;
+    }
+
+    async getCoachById(coachId: string): Promise<CoachesDto> {
+        if (!Types.ObjectId.isValid(coachId)) {
+            throw new BadRequestException('Invalid coach ID');
+        }
+
+        const coach = await this.coachProfileModel
+            .findById(new Types.ObjectId(coachId))
+            .populate<{ user: User }>('user', 'fullName email avatarUrl isVerified')
+            .exec();
+
+        if (!coach) {
+            throw new NotFoundException('Coach not found');
+        }
+        const user: any = coach.user;
+
+        const dto: CoachesDto = {
+            id: user._id.toString(),
+            fullName: user.fullName,
+            email: user.email,
+            avatarUrl: user.avatarUrl,
+            isVerified: user.isVerified,
+            sports: coach.sports,
+            certification: coach.certification,
+            hourlyRate: coach.hourlyRate,
+            bio: coach.bio,
+            rating: coach.rating,
+            totalReviews: coach.totalReviews,
+        };
+
+        return dto;
     }
 }

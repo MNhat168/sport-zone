@@ -32,7 +32,7 @@ export class BookingsController {
   constructor(
     private readonly bookingsService: BookingsService,
     @InjectModel(Schedule.name) private readonly scheduleModel: Model<Schedule>,
-  ) {}
+  ) { }
 
   /**
    * Helper method to extract user ID from JWT payload
@@ -54,27 +54,27 @@ export class BookingsController {
    * Tạo virtual slots từ Field config, áp dụng Schedule constraints nếu tồn tại
    */
   @Get('fields/:fieldId/availability')
-  @ApiOperation({ 
-    summary: 'Lấy lịch khả dụng của sân (Pure Lazy)', 
-    description: 'Tạo virtual slots từ Field config, không cần pre-create Schedule' 
+  @ApiOperation({
+    summary: 'Lấy lịch khả dụng của sân (Pure Lazy)',
+    description: 'Tạo virtual slots từ Field config, không cần pre-create Schedule'
   })
-  @ApiParam({ 
-    name: 'fieldId', 
-    description: 'Field ID', 
-    example: '507f1f77bcf86cd799439011' 
+  @ApiParam({
+    name: 'fieldId',
+    description: 'Field ID',
+    example: '507f1f77bcf86cd799439011'
   })
-  @ApiQuery({ 
-    name: 'startDate', 
-    description: 'Ngày bắt đầu (YYYY-MM-DD)', 
-    example: '2025-10-01' 
+  @ApiQuery({
+    name: 'startDate',
+    description: 'Ngày bắt đầu (YYYY-MM-DD)',
+    example: '2025-10-01'
   })
-  @ApiQuery({ 
-    name: 'endDate', 
-    description: 'Ngày kết thúc (YYYY-MM-DD)', 
-    example: '2025-10-31' 
+  @ApiQuery({
+    name: 'endDate',
+    description: 'Ngày kết thúc (YYYY-MM-DD)',
+    example: '2025-10-31'
   })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Lịch khả dụng được tạo thành công'
   })
   @ApiResponse({ status: 400, description: 'Dữ liệu đầu vào không hợp lệ' })
@@ -93,14 +93,14 @@ export class BookingsController {
   @Post('bookings')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
-  @ApiOperation({ 
-    summary: 'Tạo booking sân (Pure Lazy)', 
-    description: 'Tự động tạo Schedule nếu chưa tồn tại, sử dụng fieldId + date' 
+  @ApiOperation({
+    summary: 'Tạo booking sân (Pure Lazy)',
+    description: 'Tự động tạo Schedule nếu chưa tồn tại, sử dụng fieldId + date'
   })
-  @ApiResponse({ 
-    status: 201, 
-    description: 'Booking được tạo thành công', 
-    type: Booking 
+  @ApiResponse({
+    status: 201,
+    description: 'Booking được tạo thành công',
+    type: Booking
   })
   @ApiResponse({ status: 400, description: 'Dữ liệu booking không hợp lệ hoặc slot không khả dụng' })
   @ApiResponse({ status: 404, description: 'Không tìm thấy sân' })
@@ -120,22 +120,22 @@ export class BookingsController {
   @Patch('fields/:fieldId/schedules/:date/holiday')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
-  @ApiOperation({ 
-    summary: 'Đánh dấu ngày đặc biệt cho sân', 
-    description: 'Tự động tạo/cập nhật Schedule và xử lý booking bị ảnh hưởng' 
+  @ApiOperation({
+    summary: 'Đánh dấu ngày đặc biệt cho sân',
+    description: 'Tự động tạo/cập nhật Schedule và xử lý booking bị ảnh hưởng'
   })
-  @ApiParam({ 
-    name: 'fieldId', 
-    description: 'Field ID', 
-    example: '507f1f77bcf86cd799439011' 
+  @ApiParam({
+    name: 'fieldId',
+    description: 'Field ID',
+    example: '507f1f77bcf86cd799439011'
   })
-  @ApiParam({ 
-    name: 'date', 
-    description: 'Ngày đánh dấu (YYYY-MM-DD)', 
-    example: '2025-10-15' 
+  @ApiParam({
+    name: 'date',
+    description: 'Ngày đánh dấu (YYYY-MM-DD)',
+    example: '2025-10-15'
   })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Đánh dấu thành công'
   })
   @ApiResponse({ status: 400, description: 'Dữ liệu không hợp lệ' })
@@ -161,19 +161,19 @@ export class BookingsController {
   @Patch('bookings/:bookingId/cancel')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
-  @ApiOperation({ 
-    summary: 'Hủy booking', 
-    description: 'Hủy booking và cập nhật Schedule tương ứng' 
+  @ApiOperation({
+    summary: 'Hủy booking',
+    description: 'Hủy booking và cập nhật Schedule tương ứng'
   })
-  @ApiParam({ 
-    name: 'bookingId', 
-    description: 'Booking ID', 
-    example: '507f1f77bcf86cd799439011' 
+  @ApiParam({
+    name: 'bookingId',
+    description: 'Booking ID',
+    example: '507f1f77bcf86cd799439011'
   })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Booking đã được hủy', 
-    type: Booking 
+  @ApiResponse({
+    status: 200,
+    description: 'Booking đã được hủy',
+    type: Booking
   })
   @ApiResponse({ status: 400, description: 'Không thể hủy booking' })
   @ApiResponse({ status: 404, description: 'Không tìm thấy booking' })
@@ -191,44 +191,42 @@ export class BookingsController {
     });
   }
 
+  /**
+   * Accept a booking request
+   */
+  @Patch('bookings/accept')
+  async acceptBooking(
+    @Body('coachId') coachId: string,
+    @Body('bookingId') bookingId: string,
+  ): Promise<Booking> {
+    return this.bookingsService.acceptCoachRequest(coachId, bookingId);
+  }
+
+  /**
+   * Decline a booking request
+   */
+  @Patch('bookings/decline')
+  async declineBooking(
+    @Body('coachId') coachId: string,
+    @Body('bookingId') bookingId: string,
+    @Body('reason') reason?: string,
+  ): Promise<Booking> {
+    return this.bookingsService.declineCoachRequest(coachId, bookingId, reason);
+  }
+
+  /**
+   * Get all bookings of a coach
+   */
+  @Get('bookings/coach/:coachId')
+  async getBookingsByCoachId(@Param('coachId') coachId: string): Promise<Booking[]> {
+    return this.bookingsService.getByRequestedCoachId(coachId);
+  }
+
   // ============================================================================
   // LEGACY/BACKWARD COMPATIBILITY ENDPOINTS
   // ============================================================================
 
-  /**
-   * Accept/Decline coaching booking (legacy)
-   */
-  @Patch('bookings/:id/coach-status')
-  @ApiOperation({ 
-    summary: 'Accept/Decline coaching booking (legacy)', 
-    description: 'Coach accepts or declines a booking request' 
-  })
-  async setCoachStatus(
-    @Param('id') bookingId: string,
-    @Body() body: { coachId: string; status: 'accepted' | 'declined' },
-  ) {
-    if (!body || !body.coachId || !body.status) {
-      throw new BadRequestException('coachId and status are required');
-    }
-    
-    return this.bookingsService.updateCoachStatus(
-      bookingId,
-      body.coachId,
-      body.status,
-    );
-  }
 
-  /**
-   * Get all bookings of a coach (legacy)
-   */
-  @Get('bookings/coach/:coachId')
-  @ApiOperation({ 
-    summary: 'Get all bookings for a coach (legacy)', 
-    description: 'Retrieve all bookings associated with a specific coach' 
-  })
-  async getBookingsByCoachId(@Param('coachId') coachId: string): Promise<Booking[]> {
-    return this.bookingsService.getByRequestedCoachId(coachId);
-  }
 
   /**
    * Create field booking (updated to use Pure Lazy Creation)
@@ -237,14 +235,14 @@ export class BookingsController {
   @UseGuards(AuthGuard('jwt'))
   @Post('bookings/field')
   @ApiBearerAuth()
-  @ApiOperation({ 
-    summary: 'Create field booking (Pure Lazy)', 
-    description: 'Create field booking using Pure Lazy Creation pattern with fieldId + date' 
+  @ApiOperation({
+    summary: 'Create field booking (Pure Lazy)',
+    description: 'Create field booking using Pure Lazy Creation pattern with fieldId + date'
   })
-  @ApiResponse({ 
-    status: 201, 
-    description: 'Booking được tạo thành công', 
-    type: Booking 
+  @ApiResponse({
+    status: 201,
+    description: 'Booking được tạo thành công',
+    type: Booking
   })
   @ApiResponse({ status: 400, description: 'Dữ liệu booking không hợp lệ hoặc slot không khả dụng' })
   @ApiResponse({ status: 404, description: 'Không tìm thấy sân' })
@@ -263,9 +261,9 @@ export class BookingsController {
   @UseGuards(AuthGuard('jwt'))
   @Patch('bookings/:id/cancel-legacy')
   @ApiBearerAuth()
-  @ApiOperation({ 
-    summary: 'Cancel field booking (legacy)', 
-    description: 'Legacy cancellation endpoint. Use PATCH /bookings/:bookingId/cancel instead' 
+  @ApiOperation({
+    summary: 'Cancel field booking (legacy)',
+    description: 'Legacy cancellation endpoint. Use PATCH /bookings/:bookingId/cancel instead'
   })
   async cancelBookingLegacy(
     @Request() req,
@@ -287,12 +285,12 @@ export class BookingsController {
   @UseGuards(AuthGuard('jwt'))
   @Post('bookings/session')
   @ApiBearerAuth()
-  @ApiOperation({ 
-    summary: 'Create session booking (Pure Lazy)', 
-    description: 'Create field + coach booking using Pure Lazy Creation pattern' 
+  @ApiOperation({
+    summary: 'Create session booking (Pure Lazy)',
+    description: 'Create field + coach booking using Pure Lazy Creation pattern'
   })
-  @ApiResponse({ 
-    status: 201, 
+  @ApiResponse({
+    status: 201,
     description: 'Session booking được tạo thành công'
   })
   @ApiResponse({ status: 400, description: 'Dữ liệu booking không hợp lệ hoặc slot không khả dụng' })
@@ -303,7 +301,7 @@ export class BookingsController {
     @Body() bookingData: CreateSessionBookingLazyDto,
   ) {
     const userId = this.getUserId(req);
-    
+
     // Convert to legacy format for service compatibility
     // TODO: Update service to support Pure Lazy Creation directly
     return this.bookingsService.createSessionBooking({
@@ -328,9 +326,9 @@ export class BookingsController {
   @UseGuards(AuthGuard('jwt'))
   @Patch('bookings/session/cancel')
   @ApiBearerAuth()
-  @ApiOperation({ 
-    summary: 'Cancel session booking (legacy)', 
-    description: 'Cancel field + coach booking (legacy)' 
+  @ApiOperation({
+    summary: 'Cancel session booking (legacy)',
+    description: 'Cancel field + coach booking (legacy)'
   })
   async cancelSessionBooking(
     @Request() req,

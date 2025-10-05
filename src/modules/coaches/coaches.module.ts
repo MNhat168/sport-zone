@@ -14,5 +14,6 @@ import { CoachProfile, CoachProfileSchema } from 'src/modules/profiles/entities/
     ],
     controllers: [CoachesController],
     providers: [CoachesService],
+    exports: [CoachesService],
 })
 export class CoachesModule { }
