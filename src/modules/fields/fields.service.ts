@@ -2,9 +2,15 @@ import { Injectable, NotFoundException, InternalServerErrorException, Logger, Un
 import { InjectModel } from '@nestjs/mongoose';
 import { Field } from './entities/field.entity';
 import { Model, Types } from 'mongoose';
-import { FieldsDto, CreateFieldDto, UpdateFieldDto } from './dtos/fields.dto';
+import { FieldsDto, CreateFieldDto, UpdateFieldDto, CreateFieldWithFilesDto } from './dtos/fields.dto';
 import { FieldOwnerProfile } from './entities/field-owner-profile.entity';
-import { PriceSchedulerService } from './services/price-scheduler.service';
+import { AwsS3Service } from '../../service/aws-s3.service';
+import type { IFile } from '../../interfaces/file.interface';
+// Import Schedule and Booking models for availability checking
+import { Schedule } from '../schedules/entities/schedule.entity';
+import { Booking } from '../bookings/entities/booking.entity';
+// Import utility function
+import { timeToMinutes } from '../../utils/utils';
 
 
 @Injectable()
@@ -17,8 +23,9 @@ export class FieldsService {
 
     constructor(
         @InjectModel(Field.name) private fieldModel: Model<Field>,
-        private priceSchedulerService: PriceSchedulerService,
-        
+        @InjectModel(Schedule.name) private scheduleModel: Model<Schedule>,
+        @InjectModel(Booking.name) private bookingModel: Model<Booking>,
+        private awsS3Service: AwsS3Service,
     ) {}
 
 
@@ -56,6 +63,8 @@ export class FieldsService {
             maintenanceUntil: field.maintenanceUntil,
             rating: field.rating,
             totalReviews: field.totalReviews,
+            createdAt: field.createdAt,
+            updatedAt: field.updatedAt,
         }));
     }
 
@@ -87,6 +96,8 @@ export class FieldsService {
             maintenanceUntil: field.maintenanceUntil,
             rating: field.rating,
             totalReviews: field.totalReviews,
+            createdAt: field.createdAt,
+            updatedAt: field.updatedAt,
         };
     }
 
@@ -103,9 +114,9 @@ export class FieldsService {
                 location: createFieldDto.location,
                 images: createFieldDto.images || [],
                 operatingHours: createFieldDto.operatingHours,
-                slotDuration: createFieldDto.slotDuration || 60,
-                minSlots: createFieldDto.minSlots || 1,
-                maxSlots: createFieldDto.maxSlots || 4,
+                slotDuration: createFieldDto.slotDuration,
+                minSlots: createFieldDto.minSlots,
+                maxSlots: createFieldDto.maxSlots,
                 priceRanges: createFieldDto.priceRanges,
                 basePrice: createFieldDto.basePrice,
                 isActive: true,
@@ -136,11 +147,153 @@ export class FieldsService {
                 maintenanceUntil: savedField.maintenanceUntil,
                 rating: savedField.rating,
                 totalReviews: savedField.totalReviews,
+                createdAt: savedField.createdAt,
+                updatedAt: savedField.updatedAt,
             };
 
         } catch (error) {
             this.logger.error('Error creating field', error);
             throw new InternalServerErrorException('Failed to create field');
+        }
+    }
+
+    /**
+     * Create new field with image upload support
+     * @param createFieldDto Field data from form
+     * @param files Uploaded image files
+     * @param ownerId Field owner ID from JWT
+     * @returns Created field DTO
+     */
+    async createWithFiles(createFieldDto: CreateFieldWithFilesDto, files: IFile[], ownerId: string): Promise<FieldsDto> {
+        try {
+            this.logger.log(`Creating field with ${files?.length || 0} images for owner: ${ownerId}`);
+
+            // Upload images to S3 if files are provided
+            let imageUrls: string[] = [];
+            if (files && files.length > 0) {
+                this.logger.log(`Uploading ${files.length} images to S3...`);
+                
+                const uploadPromises = files.map(file => this.awsS3Service.uploadImage(file));
+                imageUrls = await Promise.all(uploadPromises);
+                
+                this.logger.log(`Successfully uploaded ${imageUrls.length} images to S3`);
+            }
+
+            // Parse JSON strings from form data
+            const operatingHours = JSON.parse(createFieldDto.operatingHours);
+            let priceRanges = JSON.parse(createFieldDto.priceRanges);
+            const slotDuration = parseInt(createFieldDto.slotDuration);
+            const minSlots = parseInt(createFieldDto.minSlots);
+            const maxSlots = parseInt(createFieldDto.maxSlots);
+            const basePrice = parseInt(createFieldDto.basePrice);
+
+            // Validate parsed data for day-based structure
+            if (!Array.isArray(operatingHours) || operatingHours.length === 0) {
+                throw new BadRequestException('Invalid operating hours format - must be array of day objects');
+            }
+            
+            // Validate each provided day has required fields
+            const validDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+            for (const dayHours of operatingHours) {
+                if (!validDays.includes(dayHours.day)) {
+                    throw new BadRequestException(`Invalid day: ${dayHours.day}`);
+                }
+                if (!dayHours.start || !dayHours.end || !dayHours.duration) {
+                    throw new BadRequestException(`Invalid operating hours for ${dayHours.day} - missing start, end, or duration`);
+                }
+            }
+
+            // Price ranges are optional - field can operate with base price only
+            if (priceRanges && Array.isArray(priceRanges) && priceRanges.length > 0) {
+                // Validate each provided price range has required fields
+                for (const range of priceRanges) {
+                    if (!validDays.includes(range.day)) {
+                        throw new BadRequestException(`Invalid day in price range: ${range.day}`);
+                    }
+                    if (!range.start || !range.end || range.multiplier === undefined) {
+                        throw new BadRequestException(`Invalid price range for ${range.day} - missing start, end, or multiplier`);
+                    }
+                }
+                
+                // Ensure all operating days have default pricing if no specific ranges provided
+                for (const dayHours of operatingHours) {
+                    const dayRanges = priceRanges.filter(pr => pr.day === dayHours.day);
+                    if (dayRanges.length === 0) {
+                        // Add default price range for the entire operating hours
+                        priceRanges.push({
+                            day: dayHours.day,
+                            start: dayHours.start,
+                            end: dayHours.end,
+                            multiplier: 1.0
+                        });
+                    }
+                }
+            } else {
+                // No price ranges provided - create default 1.0x multiplier for all operating hours
+                priceRanges = operatingHours.map(dayHours => ({
+                    day: dayHours.day,
+                    start: dayHours.start,
+                    end: dayHours.end,
+                    multiplier: 1.0
+                }));
+            }
+
+            if (isNaN(slotDuration) || isNaN(minSlots) || isNaN(maxSlots) || isNaN(basePrice)) {
+                throw new BadRequestException('Invalid numeric values');
+            }
+
+            // Create new field document using simple structure
+            const newField = new this.fieldModel({
+                owner: new Types.ObjectId(ownerId),
+                name: createFieldDto.name,
+                sportType: createFieldDto.sportType,
+                description: createFieldDto.description,
+                location: createFieldDto.location,
+                images: imageUrls,
+                operatingHours,
+                slotDuration,
+                minSlots,
+                maxSlots,
+                priceRanges,
+                basePrice,
+                isActive: true,
+                rating: 0,
+                totalReviews: 0,
+            });
+
+            const savedField = await newField.save();
+            
+            this.logger.log(`Created new field with images: ${savedField.name} (ID: ${savedField._id})`);
+
+            return {
+                id: (savedField._id as Types.ObjectId).toString(),
+                owner: savedField.owner.toString(),
+                name: savedField.name,
+                sportType: savedField.sportType,
+                description: savedField.description,
+                location: savedField.location,
+                images: savedField.images,
+                operatingHours: savedField.operatingHours,
+                slotDuration: savedField.slotDuration,
+                minSlots: savedField.minSlots,
+                maxSlots: savedField.maxSlots,
+                priceRanges: savedField.priceRanges,
+                basePrice: savedField.basePrice,
+                isActive: savedField.isActive,
+                maintenanceNote: savedField.maintenanceNote,
+                maintenanceUntil: savedField.maintenanceUntil,
+                rating: savedField.rating,
+                totalReviews: savedField.totalReviews,
+                createdAt: savedField.createdAt,
+                updatedAt: savedField.updatedAt,
+            };
+
+        } catch (error) {
+            this.logger.error('Error creating field with files', error);
+            if (error instanceof BadRequestException) {
+                throw error;
+            }
+            throw new InternalServerErrorException('Failed to create field with images');
         }
     }
 
@@ -188,6 +341,8 @@ export class FieldsService {
                 maintenanceUntil: updatedField.maintenanceUntil,
                 rating: updatedField.rating,
                 totalReviews: updatedField.totalReviews,
+                createdAt: updatedField.createdAt,
+                updatedAt: updatedField.updatedAt,
             };
 
         } catch (error) {
@@ -232,8 +387,215 @@ export class FieldsService {
         }
     }
 
+    /**
+     * Get field availability for date range with dynamic pricing
+     * Updated with full booking integration
+     * @param fieldId Field ID
+     * @param startDate Start date
+     * @param endDate End date
+     * @returns Field availability with pricing and booking status
+     */
+    async getFieldAvailability(fieldId: string, startDate: Date, endDate: Date) {
+        try {
+            const field = await this.fieldModel.findById(fieldId);
+            
+            if (!field) {
+                throw new NotFoundException('Field not found');
+            }
+
+            if (!field.isActive) {
+                throw new BadRequestException('Field is currently inactive');
+            }
+
+            const availability: any[] = [];
+            const currentDate = new Date(startDate);
+            
+            while (currentDate <= endDate) {
+                // Get day of week for the current date
+                const dayOfWeek = currentDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+                
+                // Find operating hours for this day
+                const dayOperatingHours = field.operatingHours.find(oh => oh.day === dayOfWeek);
+                
+                if (!dayOperatingHours) {
+                    // Field is not operating on this day
+                    availability.push({
+                        date: currentDate.toISOString().split('T')[0],
+                        isHoliday: this.isHoliday(currentDate),
+                        slots: [],
+                        message: `Field is not operating on ${dayOfWeek}`
+                    });
+                } else {
+                    // Generate virtual slots for the field
+                    const allSlots = this.generateTimeSlots(
+                        dayOperatingHours.start,
+                        dayOperatingHours.end,
+                        field.slotDuration
+                    );
+                    
+                    // Get existing bookings for this date
+                    const existingBookings = await this.getExistingBookingsForDate(fieldId, currentDate);
+                    
+                    // Apply pricing and availability logic
+                    const slotsWithPricing = allSlots.map(slot => {
+                        const pricing = this.calculateSlotPricing(field, slot.startTime, slot.endTime, dayOfWeek);
+                        
+                        // Check if slot is booked
+                        const isBooked = existingBookings.some(booking => 
+                            this.slotsOverlap(
+                                { start: slot.startTime, end: slot.endTime },
+                                { start: booking.startTime, end: booking.endTime }
+                            )
+                        );
+                        
+                        return {
+                            startTime: slot.startTime,
+                            endTime: slot.endTime,
+                            available: !isBooked,
+                            price: pricing.totalPrice,
+                            priceBreakdown: pricing.breakdown
+                        };
+                    });
+                    
+                    availability.push({
+                        date: currentDate.toISOString().split('T')[0],
+                        isHoliday: this.isHoliday(currentDate),
+                        slots: slotsWithPricing
+                    });
+                }
+                
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+
+            return availability;
+        } catch (error) {
+            if (error instanceof NotFoundException || error instanceof BadRequestException) {
+                throw error;
+            }
+            this.logger.error('Error getting field availability', error);
+            throw new InternalServerErrorException('Failed to get field availability');
+        }
+    }
+
+    /**
+     * Get existing bookings for a specific field and date
+     */
+    private async getExistingBookingsForDate(fieldId: string, date: Date) {
+        try {
+            // Normalize date to start/end of day in Vietnam timezone (UTC+7)
+            const startOfDay = new Date(date);
+            startOfDay.setUTCHours(-7, 0, 0, 0); // Start of day in Vietnam = UTC-7
+
+            const endOfDay = new Date(date);
+            endOfDay.setUTCHours(16, 59, 59, 999); // End of day in Vietnam = UTC+17-1ms
+
+            this.logger.log(`Searching bookings for field ${fieldId} on ${date.toISOString().split('T')[0]}`);
+
+            // Get bookings from Booking collection (Pure Lazy Creation pattern)
+            const bookings = await this.bookingModel.find({
+                field: new Types.ObjectId(fieldId),
+                date: {
+                    $gte: startOfDay,
+                    $lte: endOfDay
+                },
+                status: { $in: ['confirmed', 'pending'] } // Include both confirmed and pending bookings
+            }).exec();
+
+            this.logger.log(`Found ${bookings.length} bookings in Booking collection`);
+
+            // Also check Schedule collection for legacy booked slots
+            const schedule = await this.scheduleModel.findOne({
+                field: new Types.ObjectId(fieldId),
+                date: {
+                    $gte: startOfDay,
+                    $lte: endOfDay
+                }
+            }).exec();
+
+            const scheduleSlots = schedule?.bookedSlots || [];
+            this.logger.log(`Found ${scheduleSlots.length} booked slots in Schedule collection`);
+
+            // Combine both sources
+            const allBookedSlots = [
+                // From Booking collection
+                ...bookings.map(booking => ({
+                    startTime: booking.startTime,
+                    endTime: booking.endTime,
+                    bookedBy: booking.user,
+                    status: booking.status,
+                    source: 'booking'
+                })),
+                // From Schedule collection
+                ...scheduleSlots.map(slot => ({
+                    startTime: slot.startTime,
+                    endTime: slot.endTime,
+                    bookedBy: null,
+                    status: 'confirmed',
+                    source: 'schedule'
+                }))
+            ];
+
+            this.logger.log(`Total booked slots found: ${allBookedSlots.length}`);
+            return allBookedSlots;
+
+        } catch (error) {
+            this.logger.error('Error getting existing bookings', error);
+            return [];
+        }
+    }
+
+    /**
+     * Calculate pricing for a specific slot
+     */
+    private calculateSlotPricing(field: Field, startTime: string, endTime: string, dayOfWeek: string) {
+        // Find price range for this time slot and day
+        const priceRange = field.priceRanges.find(pr => {
+            if (pr.day !== dayOfWeek) return false;
+            
+            const slotStart = timeToMinutes(startTime);
+            const prStart = timeToMinutes(pr.start);
+            const prEnd = timeToMinutes(pr.end);
+            
+            return slotStart >= prStart && slotStart < prEnd;
+        });
+        
+        const basePrice = field.basePrice;
+        const multiplier = priceRange?.multiplier || 1;
+        const totalPrice = basePrice * multiplier;
+        
+        return {
+            totalPrice,
+            multiplier,
+            breakdown: `${startTime}-${endTime}: ${multiplier}x base price (${basePrice})`
+        };
+    }
+
+    /**
+     * Check if two time slots overlap
+     */
+    private slotsOverlap(slot1: { start: string, end: string }, slot2: { start: string, end: string }): boolean {
+        const slot1Start = timeToMinutes(slot1.start);
+        const slot1End = timeToMinutes(slot1.end);
+        const slot2Start = timeToMinutes(slot2.start);
+        const slot2End = timeToMinutes(slot2.end);
+
+        // Two slots overlap if one starts before the other ends
+        return slot1Start < slot2End && slot2Start < slot1End;
+    }
+
+    /**
+     * Check if a date is a holiday
+     * @param date Date to check
+     * @returns True if holiday
+     */
+    private isHoliday(date: Date): boolean {
+        // Simple implementation - can be extended with actual holiday data
+        const dayOfWeek = date.getDay();
+        return dayOfWeek === 0 || dayOfWeek === 6; // Weekend as holidays for now
+    }
+
     // ============================================================================
-    // PURE LAZY CREATION HELPER METHODS
+    // PURE LAZY CREATION HELPER METHODS - CẦN SỬA LẠI
     // ============================================================================
 
     /**
@@ -341,12 +703,13 @@ export class FieldsService {
      * Generate virtual time slots from field configuration
      * Core method for Pure Lazy Creation pattern
      */
-    generateVirtualSlots(field: Field): Array<{
+    generateVirtualSlots(field: Field, date?: Date): Array<{
         startTime: string;
         endTime: string;
         basePrice: number;
         multiplier: number;
         finalPrice: number;
+        day: string;
     }> {
         try {
             const slots: Array<{
@@ -355,10 +718,24 @@ export class FieldsService {
                 basePrice: number;
                 multiplier: number;
                 finalPrice: number;
+                day: string;
             }> = [];
 
-            const startMinutes = this.timeStringToMinutes(field.operatingHours.start);
-            const endMinutes = this.timeStringToMinutes(field.operatingHours.end);
+            if (!field.operatingHours || !field.slotDuration) {
+                return slots; // No operating hours defined
+            }
+
+            // Get day of week for the date (default to monday if no date provided)
+            const dayOfWeek = date ? this.getDayOfWeek(date) : 'monday';
+            
+            // Find operating hours for the specific day
+            const dayOperatingHours = field.operatingHours.find(oh => oh.day === dayOfWeek);
+            if (!dayOperatingHours) {
+                return slots; // No operating hours for this day
+            }
+
+            const startMinutes = this.timeStringToMinutes(dayOperatingHours.start);
+            const endMinutes = this.timeStringToMinutes(dayOperatingHours.end);
 
             for (let currentMinutes = startMinutes; currentMinutes < endMinutes; currentMinutes += field.slotDuration) {
                 const slotEndMinutes = currentMinutes + field.slotDuration;
@@ -367,8 +744,8 @@ export class FieldsService {
                 const startTime = this.minutesToTimeString(currentMinutes);
                 const endTime = this.minutesToTimeString(slotEndMinutes);
                 
-                // Find applicable price range
-                const multiplier = this.getPriceMultiplier(startTime, field.priceRanges);
+                // Find applicable price range for this day
+                const multiplier = this.getPriceMultiplierForDay(startTime, field.priceRanges, dayOfWeek);
                 const finalPrice = field.basePrice * multiplier;
 
                 slots.push({
@@ -376,7 +753,8 @@ export class FieldsService {
                     endTime,
                     basePrice: field.basePrice,
                     multiplier,
-                    finalPrice
+                    finalPrice,
+                    day: dayOfWeek
                 });
             }
 
@@ -394,7 +772,8 @@ export class FieldsService {
     validateBookingConstraints(
         startTime: string,
         endTime: string,
-        field: Field
+        field: Field,
+        date?: Date
     ): {
         isValid: boolean;
         errors: string[];
@@ -404,14 +783,39 @@ export class FieldsService {
         const errors: string[] = [];
         
         try {
+            if (!field.operatingHours || !field.slotDuration) {
+                errors.push('Field operating hours or slot duration not configured');
+                return {
+                    isValid: false,
+                    errors,
+                    numSlots: 0,
+                    duration: 0
+                };
+            }
+
+            // Get day of week for the date (default to monday if no date provided)
+            const dayOfWeek = date ? this.getDayOfWeek(date) : 'monday';
+            
+            // Find operating hours for the specific day
+            const dayOperatingHours = field.operatingHours.find(oh => oh.day === dayOfWeek);
+            if (!dayOperatingHours) {
+                errors.push(`No operating hours defined for ${dayOfWeek}`);
+                return {
+                    isValid: false,
+                    errors,
+                    numSlots: 0,
+                    duration: 0
+                };
+            }
+
             const startMinutes = this.timeStringToMinutes(startTime);
             const endMinutes = this.timeStringToMinutes(endTime);
-            const operatingStart = this.timeStringToMinutes(field.operatingHours.start);
-            const operatingEnd = this.timeStringToMinutes(field.operatingHours.end);
+            const operatingStart = this.timeStringToMinutes(dayOperatingHours.start);
+            const operatingEnd = this.timeStringToMinutes(dayOperatingHours.end);
 
             // Check if within operating hours
             if (startMinutes < operatingStart || endMinutes > operatingEnd) {
-                errors.push(`Booking time must be within operating hours ${field.operatingHours.start} - ${field.operatingHours.end}`);
+                errors.push(`Booking time must be within operating hours ${dayOperatingHours.start} - ${dayOperatingHours.end} for ${dayOfWeek}`);
             }
 
             // Check if end time is after start time
@@ -465,7 +869,8 @@ export class FieldsService {
     calculateBookingPrice(
         startTime: string,
         endTime: string,
-        field: Field
+        field: Field,
+        date?: Date
     ): {
         totalPrice: number;
         breakdown: Array<{
@@ -486,6 +891,13 @@ export class FieldsService {
                 slotPrice: number;
             }> = [];
 
+            if (!field.operatingHours || !field.slotDuration || !field.basePrice) {
+                throw new BadRequestException('Field configuration incomplete');
+            }
+
+            // Get day of week for the date (default to monday if no date provided)
+            const dayOfWeek = date ? this.getDayOfWeek(date) : 'monday';
+
             const startMinutes = this.timeStringToMinutes(startTime);
             const endMinutes = this.timeStringToMinutes(endTime);
             let totalPrice = 0;
@@ -498,7 +910,7 @@ export class FieldsService {
                 const slotStart = this.minutesToTimeString(currentMinutes);
                 const slotEnd = this.minutesToTimeString(slotEndMinutes);
                 
-                const multiplier = this.getPriceMultiplier(slotStart, field.priceRanges);
+                const multiplier = this.getPriceMultiplierForDay(slotStart, field.priceRanges, dayOfWeek);
                 const slotPrice = field.basePrice * multiplier;
                 
                 breakdown.push({
@@ -567,13 +979,14 @@ export class FieldsService {
     }
 
     // ============================================================================
-    // PRICE SCHEDULING OPERATIONS
+    // PRICE SCHEDULING OPERATIONS - SỬA LẠI
     // ============================================================================
 
     // Schedule price update cho field
     async schedulePriceUpdate(
         fieldId: string,
-        newPriceRanges: { start: string; end: string; multiplier: number }[],
+        newOperatingHours: { day: string; start: string; end: string; duration: number }[],
+        newPriceRanges: { day: string; start: string; end: string; multiplier: number }[],
         newBasePrice: number,
         effectiveDate: Date,
         ownerId: string,
@@ -584,7 +997,7 @@ export class FieldsService {
             throw new NotFoundException(`Field with ID ${fieldId} not found`);
         }
 
-        // TODO: Thêm kiểm tra quyền owner nếu cần
+        // Kiểm tra quyền owner
         if (field.owner.toString() !== ownerId) {
             throw new UnauthorizedException('You are not the owner of this field');
         }
@@ -596,27 +1009,35 @@ export class FieldsService {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         if (effectiveDateMidnight <= today) {
-            throw new NotFoundException('effectiveDate must be in the future (after today)');
+            throw new BadRequestException('effectiveDate must be in the future (after today)');
+        }
+
+        // Khởi tạo pendingPriceUpdates nếu chưa có
+        if (!field.pendingPriceUpdates) {
+            field.pendingPriceUpdates = [];
         }
 
         // Xóa các pending cùng effectiveDate (chưa applied)
-        field.pendingPriceUpdates = (field.pendingPriceUpdates || []).filter(u => !(u.effectiveDate && new Date(u.effectiveDate).getTime() === effectiveDateMidnight.getTime() && !u.applied));
+        field.pendingPriceUpdates = field.pendingPriceUpdates.filter(
+            u => !(u.effectiveDate && new Date(u.effectiveDate).getTime() === effectiveDateMidnight.getTime() && !u.applied)
+        );
 
         // Thêm pending mới
         field.pendingPriceUpdates.push({
+            newOperatingHours,
             newPriceRanges,
             newBasePrice,
             effectiveDate: effectiveDateMidnight,
             applied: false,
-            createdBy: field.owner,
-        } as any);
+            createdBy: new Types.ObjectId(ownerId),
+        });
 
         await field.save();
         
         // Clear cache for this field
         this.clearCache(fieldId);
         
-        return { success: true } as any;
+        return { success: true };
     }
 
     // Cancel scheduled price update
@@ -627,8 +1048,15 @@ export class FieldsService {
         const effectiveDateMidnight = new Date(effectiveDate);
         effectiveDateMidnight.setHours(0, 0, 0, 0);
 
-        const before = field.pendingPriceUpdates?.length || 0;
-        field.pendingPriceUpdates = (field.pendingPriceUpdates || []).filter(u => new Date(u.effectiveDate).getTime() !== effectiveDateMidnight.getTime() || u.applied);
+        // Khởi tạo pendingPriceUpdates nếu chưa có
+        if (!field.pendingPriceUpdates) {
+            field.pendingPriceUpdates = [];
+        }
+
+        const before = field.pendingPriceUpdates.length;
+        field.pendingPriceUpdates = field.pendingPriceUpdates.filter(
+            u => new Date(u.effectiveDate).getTime() !== effectiveDateMidnight.getTime() || u.applied
+        );
         await field.save();
         const after = field.pendingPriceUpdates.length;
         
@@ -643,7 +1071,8 @@ export class FieldsService {
     // Get scheduled price updates cho field
     async getScheduledPriceUpdates(fieldId: string) {
         const field = await this.fieldModel.findById(fieldId).lean();
-        return field?.pendingPriceUpdates?.filter(u => !u.applied).sort((a, b) => new Date(a.effectiveDate).getTime() - new Date(b.effectiveDate).getTime()) || [];
+        return field?.pendingPriceUpdates?.filter(u => !u.applied)
+            .sort((a, b) => new Date(a.effectiveDate).getTime() - new Date(b.effectiveDate).getTime()) || [];
     }
 
     // ============================================================================
@@ -651,15 +1080,17 @@ export class FieldsService {
     // ============================================================================
 
     /**
-     * Get price multiplier for a specific time
+     * Get price multiplier for a specific time and day
      */
-    private getPriceMultiplier(
+    private getPriceMultiplierForDay(
         time: string,
-        priceRanges: Array<{ start: string; end: string; multiplier: number }>
+        priceRanges: Array<{ day: string; start: string; end: string; multiplier: number }>,
+        day: string
     ): number {
         const timeMinutes = this.timeStringToMinutes(time);
 
         const applicableRange = priceRanges.find(range => {
+            if (range.day !== day) return false;
             const rangeStart = this.timeStringToMinutes(range.start);
             const rangeEnd = this.timeStringToMinutes(range.end);
             return timeMinutes >= rangeStart && timeMinutes < rangeEnd;
@@ -669,11 +1100,39 @@ export class FieldsService {
     }
 
     /**
+     * Get day of week from date
+     */
+    private getDayOfWeek(date: Date): string {
+        const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+        return days[date.getDay()];
+    }
+
+    /**
      * Convert time string (HH:MM) to minutes since midnight
      */
     private timeStringToMinutes(timeString: string): number {
         const [hours, minutes] = timeString.split(':').map(Number);
         return hours * 60 + minutes;
+    }
+
+    /**
+     * Generate time slots for a specific time range
+     */
+    private generateTimeSlots(startTime: string, endTime: string, slotDuration: number): Array<{ startTime: string; endTime: string }> {
+        const slots: Array<{ startTime: string; endTime: string }> = [];
+        const startMinutes = timeToMinutes(startTime);
+        const endMinutes = timeToMinutes(endTime);
+
+        for (let currentMinutes = startMinutes; currentMinutes < endMinutes; currentMinutes += slotDuration) {
+            const slotEndMinutes = Math.min(currentMinutes + slotDuration, endMinutes);
+            
+            slots.push({
+                startTime: this.minutesToTimeString(currentMinutes),
+                endTime: this.minutesToTimeString(slotEndMinutes)
+            });
+        }
+
+        return slots;
     }
 
     /**

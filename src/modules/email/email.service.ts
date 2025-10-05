@@ -1,6 +1,7 @@
 import { MailerService } from '@nestjs-modules/mailer';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { PaymentMethod, PaymentMethodLabels } from 'src/common/enums/payment-method.enum';
 
 @Injectable()
 export class EmailService {
@@ -39,9 +40,22 @@ export class EmailService {
 		courseName: string,
 		paymentLink: string,
 		amount?: number,
-		paymentMethod?: string,
+		paymentMethod?: PaymentMethod | string,
 	) {
 		const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+		
+		// Convert payment method to display label
+		let paymentMethodLabel = 'Chưa chọn';
+		if (paymentMethod) {
+			if (typeof paymentMethod === 'number') {
+				// If it's a PaymentMethod enum value
+				paymentMethodLabel = PaymentMethodLabels[paymentMethod] || 'Unknown';
+			} else {
+				// If it's already a string label
+				paymentMethodLabel = paymentMethod;
+			}
+		}
+
 		await this.mailerService.sendMail({
 			to: email,
 			subject: 'Thông báo thanh toán SportZone',
@@ -51,7 +65,7 @@ export class EmailService {
 				courseName,
 				paymentLink,
 				amount: amount ? amount.toLocaleString('vi-VN') : 'N/A',
-				paymentMethod: paymentMethod || 'Chưa chọn',
+				paymentMethod: paymentMethodLabel,
 			},
 		});
 	}

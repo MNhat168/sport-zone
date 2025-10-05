@@ -2,6 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { SportType } from 'src/common/enums/sport-type.enum';
 import { BaseEntity } from 'src/common/entities/base.entity';
+import { FieldSchedulePricing } from '../schema/field-schedule-pricing.schema';
 
 @Schema()
 export class Field extends BaseEntity {
@@ -21,13 +22,22 @@ export class Field extends BaseEntity {
   images: string[];
 
   @Prop({
-    type: {
-      start: { type: String, required: true },
-      end: { type: String, required: true },
-    },
+    type: [
+      {
+        day: {
+          type: String,
+          enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
+          required: true,
+        },
+        start: { type: String, required: true },
+        end: { type: String, required: true },
+        duration: { type: Number, required: true, min: 30 },
+      },
+    ],
     required: true,
+    default: undefined,
   })
-  operatingHours: { start: string; end: string };
+  operatingHours: { day: string; start: string; end: string; duration: number }[];
 
   @Prop({ type: Number, required: true, min: 30, default: 60 })
   slotDuration: number;
@@ -41,6 +51,11 @@ export class Field extends BaseEntity {
   @Prop({
     type: [
       {
+        day: {
+          type: String,
+          enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
+          required: true,
+        },
         start: { type: String, required: true },
         end: { type: String, required: true },
         multiplier: { type: Number, required: true, min: 0 },
@@ -48,7 +63,7 @@ export class Field extends BaseEntity {
     ],
     required: true,
   })
-  priceRanges: { start: string; end: string; multiplier: number }[];
+  priceRanges: { day: string; start: string; end: string; multiplier: number }[];
 
   @Prop({ type: Number, required: true, min: 0 })
   basePrice: number;
@@ -74,9 +89,29 @@ export class Field extends BaseEntity {
   @Prop({
     type: [
       {
+        newOperatingHours: {
+          type: [
+            {
+              day: {
+                type: String,
+                enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
+                required: true,
+              },
+              start: { type: String, required: true },
+              end: { type: String, required: true },
+              duration: { type: Number, required: true, min: 30 },
+            },
+          ],
+          required: true,
+        },
         newPriceRanges: {
           type: [
             {
+              day: {
+                type: String,
+                enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
+                required: true,
+              },
               start: { type: String, required: true },
               end: { type: String, required: true },
               multiplier: { type: Number, required: true, min: 0 },
@@ -93,7 +128,8 @@ export class Field extends BaseEntity {
     default: [],
   })
   pendingPriceUpdates: Array<{
-    newPriceRanges: { start: string; end: string; multiplier: number }[];
+    newOperatingHours: { day: string; start: string; end: string; duration: number }[];
+    newPriceRanges: { day: string; start: string; end: string; multiplier: number }[];
     newBasePrice: number;
     effectiveDate: Date;
     applied: boolean;

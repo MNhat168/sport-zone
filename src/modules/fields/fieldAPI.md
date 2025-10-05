@@ -27,7 +27,7 @@ Authorization: Bearer <access_token>
 
 **Query Parameters**:
 - `name` (optional): Filter by field name
-- `location` (optional): Filter by location  
+- `location` (optional): Filter by location
 - `sportType` (optional): Filter by sport type (FOOTBALL, BASKETBALL, TENNIS, etc.)
 
 **Success 200**:
@@ -35,35 +35,42 @@ Authorization: Bearer <access_token>
 ```json
 [
   {
-    "id": "string",
-    "owner": {
-      "id": "string",
-      "name": "string",
-      "contact": "string"
-    },
-    "name": "string",
-    "type": "tennis",
-    "description": "string", 
-    "location": "267G+533, Đ. 29 Tháng 3, Hoà Xuân, Cẩm Lệ, Đà Nẵng 550000, Việt Nam",
-    "images": ["string"],
-    "pricePerHour": 150000,
-    "availability": true,
-    "facilities": ["string"],
-    "totalBookings": 0,
-    "operatingHours": {
-      "start": "06:00",
-      "end": "22:00"
-    },
+    "id": "507f1f77bcf86cd799439011",
+    "owner": "507f1f77bcf86cd799439012",
+    "name": "Sân bóng Phú Nhuận",
+    "sportType": "FOOTBALL",
+    "description": "Sân bóng đá 11 người, có đèn chiếu sáng",
+    "location": "District 3, Ho Chi Minh City",
+    "images": [
+      "https://example.com/field1.jpg",
+      "https://example.com/field2.jpg"
+    ],
+    "operatingHours": [
+      {
+        "day": "monday",
+        "start": "06:00",
+        "end": "22:00",
+        "duration": 60
+      },
+      {
+        "day": "tuesday",
+        "start": "06:00",
+        "end": "22:00",
+        "duration": 60
+      }
+    ],
     "slotDuration": 60,
     "minSlots": 1,
     "maxSlots": 4,
     "priceRanges": [
       {
+        "day": "monday",
         "start": "06:00",
-        "end": "10:00", 
+        "end": "10:00",
         "multiplier": 1.0
       },
       {
+        "day": "monday",
         "start": "18:00",
         "end": "22:00",
         "multiplier": 1.5
@@ -71,6 +78,8 @@ Authorization: Bearer <access_token>
     ],
     "basePrice": 150000,
     "isActive": true,
+    "maintenanceNote": null,
+    "maintenanceUntil": null,
     "rating": 4.5,
     "totalReviews": 128,
     "createdAt": "2025-01-15T00:00:00.000Z",
@@ -93,45 +102,53 @@ Authorization: Bearer <access_token>
 
 ```json
 {
-  "_id": "string",
-  "owner": {
-    "_id": "string",
-    "businessName": "string",
-    "contactInfo": {
-      "phone": "string",
-      "email": "string"
-    }
-  },
-  "name": "string",
+  "id": "507f1f77bcf86cd799439011",
+  "owner": "507f1f77bcf86cd799439012",
+  "name": "Sân bóng Phú Nhuận",
   "sportType": "FOOTBALL",
-  "description": "string",
-  "images": ["string"],
-  "operatingHours": {
-    "start": "06:00",
-    "end": "22:00"
-  },
+  "description": "Sân bóng đá 11 người, có đèn chiếu sáng",
+  "location": "District 3, Ho Chi Minh City",
+  "images": [
+    "https://example.com/field1.jpg",
+    "https://example.com/field2.jpg"
+  ],
+  "operatingHours": [
+    {
+      "day": "monday",
+      "start": "06:00",
+      "end": "22:00",
+      "duration": 60
+    },
+    {
+      "day": "tuesday",
+      "start": "06:00",
+      "end": "22:00",
+      "duration": 60
+    }
+  ],
   "slotDuration": 60,
   "minSlots": 1,
   "maxSlots": 4,
   "priceRanges": [
     {
+      "day": "monday",
       "start": "06:00",
       "end": "10:00",
       "multiplier": 1.0
     },
     {
-      "start": "18:00", 
+      "day": "monday",
+      "start": "18:00",
       "end": "22:00",
       "multiplier": 1.5
     }
   ],
   "basePrice": 150000,
   "isActive": true,
-  "maintenanceNote": "string",
-  "maintenanceUntil": "2025-10-15T00:00:00.000Z",
+  "maintenanceNote": null,
+  "maintenanceUntil": null,
   "rating": 4.5,
   "totalReviews": 128,
-  "location": "District 1, Ho Chi Minh City",
   "createdAt": "2025-01-15T00:00:00.000Z",
   "updatedAt": "2025-10-01T00:00:00.000Z"
 }
@@ -169,7 +186,7 @@ Authorization: Bearer <access_token>
         "priceBreakdown": "09:00-10:00: 1.0x base price"
       },
       {
-        "startTime": "19:00", 
+        "startTime": "19:00",
         "endTime": "20:00",
         "available": false,
         "price": 225000,
@@ -197,7 +214,7 @@ Authorization: Bearer <access_token>
   "newPriceRanges": [
     {
       "start": "06:00",
-      "end": "10:00", 
+      "end": "10:00",
       "multiplier": 1.2
     },
     {
@@ -207,8 +224,7 @@ Authorization: Bearer <access_token>
     }
   ],
   "newBasePrice": 200000,
-  "effectiveDate": "2025-11-01",
-  "ownerId": "string"
+  "effectiveDate": "2025-11-01T00:00:00.000Z"
 }
 ```
 
@@ -216,9 +232,10 @@ Authorization: Bearer <access_token>
 
 ```json
 {
-  "_id": "string",
+  "success": true,
   "message": "Price update scheduled successfully",
-  "effectiveDate": "2025-11-01T00:00:00.000Z"
+  "effectiveDate": "2025-11-01T00:00:00.000Z",
+  "updateId": "string"
 }
 ```
 
@@ -298,27 +315,40 @@ Authorization: Bearer <access_token>
     "https://example.com/field1.jpg",
     "https://example.com/field2.jpg"
   ],
-  "operatingHours": {
-    "start": "06:00",
-    "end": "22:00"
-  },
+  "operatingHours": [
+    {
+      "day": "monday",
+      "start": "06:00",
+      "end": "22:00",
+      "duration": 60
+    },
+    {
+      "day": "tuesday",
+      "start": "06:00",
+      "end": "22:00",
+      "duration": 60
+    }
+  ],
   "slotDuration": 60,
   "minSlots": 1,
   "maxSlots": 4,
   "priceRanges": [
     {
+      "day": "monday",
       "start": "06:00",
       "end": "10:00",
       "multiplier": 1.0
     },
     {
+      "day": "monday",
       "start": "10:00",
       "end": "18:00",
       "multiplier": 1.2
     },
     {
+      "day": "monday",
       "start": "18:00",
-      "end": "22:00", 
+      "end": "22:00",
       "multiplier": 1.5
     }
   ],
@@ -331,8 +361,8 @@ Authorization: Bearer <access_token>
 
 ```json
 {
-  "id": "string",
-  "owner": "string",
+  "id": "507f1f77bcf86cd799439011",
+  "owner": "507f1f77bcf86cd799439012",
   "name": "Sân bóng Phú Nhuận",
   "sportType": "FOOTBALL",
   "description": "Sân bóng đá 11 người, có đèn chiếu sáng",
@@ -367,10 +397,103 @@ Authorization: Bearer <access_token>
   ],
   "basePrice": 150000,
   "isActive": true,
+  "maintenanceNote": null,
+  "maintenanceUntil": null,
   "rating": 0,
-  "totalReviews": 0
+  "totalReviews": 0,
+  "createdAt": "2025-10-05T00:00:00.000Z",
+  "updatedAt": "2025-10-05T00:00:00.000Z"
 }
 ```
+
+### Create New Field with Image Upload
+
+- **Method**: `POST`
+- **Path**: `/with-images`
+- **Auth**: Required (Field Owner)
+- **Description**: Create a new field with image upload support using AWS S3
+- **Content-Type**: `multipart/form-data`
+
+**Form Data**:
+- `name`: "Sân bóng Phú Nhuận" (string)
+- `sportType`: "FOOTBALL" (string)
+- `description`: "Sân bóng đá 11 người, có đèn chiếu sáng" (string)
+- `operatingHours`: '[{"day":"monday","start":"06:00","end":"22:00","duration":60},{"day":"tuesday","start":"06:00","end":"22:00","duration":60}]' (JSON string)
+- `slotDuration`: "60" (string)
+- `minSlots`: "1" (string)
+- `maxSlots`: "4" (string)
+- `priceRanges`: '[{"day":"monday","start":"06:00","end":"10:00","multiplier":1.0},{"day":"monday","start":"18:00","end":"22:00","multiplier":1.5}]' (JSON string)
+- `basePrice`: "150000" (string)
+- `location`: "District 3, Ho Chi Minh City" (string)
+- `images`: Multiple image files (max 10 files)
+
+**Success 201**:
+
+```json
+{
+  "id": "507f1f77bcf86cd799439011",
+  "owner": "507f1f77bcf86cd799439012",
+  "name": "Sân bóng Phú Nhuận",
+  "sportType": "FOOTBALL",
+  "description": "Sân bóng đá 11 người, có đèn chiếu sáng",
+  "location": "District 3, Ho Chi Minh City",
+  "images": [
+    "https://sport-zone-bucket.s3.region.amazonaws.com/images/unique-filename-1.jpg",
+    "https://sport-zone-bucket.s3.region.amazonaws.com/images/unique-filename-2.jpg"
+  ],
+  "operatingHours": [
+    {
+      "day": "monday",
+      "start": "06:00",
+      "end": "22:00",
+      "duration": 60
+    },
+    {
+      "day": "tuesday",
+      "start": "06:00",
+      "end": "22:00",
+      "duration": 60
+    }
+  ],
+  "slotDuration": 60,
+  "minSlots": 1,
+  "maxSlots": 4,
+  "priceRanges": [
+    {
+      "day": "monday",
+      "start": "06:00",
+      "end": "10:00",
+      "multiplier": 1.0
+    },
+    {
+      "day": "monday",
+      "start": "18:00",
+      "end": "22:00",
+      "multiplier": 1.5
+    }
+  ],
+  "basePrice": 150000,
+  "isActive": true,
+  "maintenanceNote": null,
+  "maintenanceUntil": null,
+  "rating": 0,
+  "totalReviews": 0,
+  "createdAt": "2025-10-05T00:00:00.000Z",
+  "updatedAt": "2025-10-05T00:00:00.000Z"
+}
+```
+
+**Error Responses**:
+- **400**: Validation failed, invalid JSON format, or file upload error
+- **401**: Unauthorized - JWT token required
+- **500**: Server error - failed to upload images or create field
+
+**Notes**:
+- Images are automatically uploaded to AWS S3 and URLs are stored in the database
+- Supports common image formats (JPEG, PNG, WebP)
+- Maximum file size and count limits apply
+- All numeric fields must be sent as strings in form data
+- JSON fields (operatingHours, priceRanges) must be valid JSON strings
 
 ### Update Field Information
 
@@ -403,7 +526,7 @@ Authorization: Bearer <access_token>
       "multiplier": 0.8
     },
     {
-      "start": "18:00", 
+      "start": "18:00",
       "end": "23:00",
       "multiplier": 2.0
     }
@@ -420,29 +543,41 @@ Authorization: Bearer <access_token>
 
 ```json
 {
-  "id": "string",
-  "owner": "string", 
+  "id": "507f1f77bcf86cd799439011",
+  "owner": "507f1f77bcf86cd799439012",
   "name": "Updated Field Name",
   "sportType": "FOOTBALL",
   "description": "Updated description",
   "location": "Updated location",
   "images": ["https://example.com/new-image.jpg"],
-  "operatingHours": {
-    "start": "05:00",
-    "end": "23:00"
-  },
+  "operatingHours": [
+    {
+      "day": "monday",
+      "start": "05:00",
+      "end": "23:00",
+      "duration": 90
+    },
+    {
+      "day": "tuesday",
+      "start": "05:00",
+      "end": "23:00",
+      "duration": 90
+    }
+  ],
   "slotDuration": 90,
   "minSlots": 2,
   "maxSlots": 6,
   "priceRanges": [
     {
+      "day": "monday",
       "start": "05:00",
       "end": "08:00",
       "multiplier": 0.8
     },
     {
+      "day": "monday",
       "start": "18:00",
-      "end": "23:00", 
+      "end": "23:00",
       "multiplier": 2.0
     }
   ],
@@ -451,7 +586,9 @@ Authorization: Bearer <access_token>
   "maintenanceNote": "Maintenance scheduled",
   "maintenanceUntil": "2025-10-20T00:00:00.000Z",
   "rating": 4.5,
-  "totalReviews": 128
+  "totalReviews": 128,
+  "createdAt": "2025-01-15T00:00:00.000Z",
+  "updatedAt": "2025-10-05T00:00:00.000Z"
 }
 ```
 
@@ -538,18 +675,98 @@ All errors follow standard NestJS format:
 ## Notes
 
 **SportType Enum**:
+
 - FOOTBALL, BASKETBALL, TENNIS, BADMINTON, VOLLEYBALL, FUTSAL
 
 **Time Format**:
+
 - All times use HH:mm format (24-hour)
 - Dates use YYYY-MM-DD format
 - Timestamps follow ISO 8601 format
 
 **Pricing Structure**:
+
 - Base price + time-based multipliers
 - Prices in VND (Vietnamese Dong)
 - Dynamic pricing based on time slots
 
 **Authentication**:
+
 - JWT tokens required for owner-specific operations
 - Public access for field listing and availability checks
+
+## Updated Field Entity Structure
+
+The field entity has been simplified to use direct properties instead of complex nested structures:
+
+**Operating Hours**: Array of daily schedules with day-specific timing
+
+```json
+[
+  {
+    "day": "monday",
+    "start": "06:00",
+    "end": "22:00",
+    "duration": 60
+  },
+  {
+    "day": "tuesday",
+    "start": "06:00",
+    "end": "22:00",
+    "duration": 60
+  }
+]
+```
+
+**Price Ranges**: Array of day and time-based multipliers
+
+```json
+[
+  {
+    "day": "monday",
+    "start": "06:00",
+    "end": "10:00",
+    "multiplier": 1.0
+  },
+  {
+    "day": "monday",
+    "start": "18:00",
+    "end": "22:00",
+    "multiplier": 1.5
+  }
+]
+```
+
+**Slot Configuration**: Direct properties
+
+- `slotDuration`: Duration in minutes (30-180)
+- `minSlots`: Minimum bookable slots
+- `maxSlots`: Maximum bookable slots
+- `basePrice`: Base price per slot in VND
+
+**Pending Price Updates**: Embedded array for scheduled updates
+
+```json
+[
+  {
+    "newPriceRanges": [...],
+    "newBasePrice": 200000,
+    "effectiveDate": "2025-11-01T00:00:00.000Z",
+    "applied": false,
+    "createdBy": "ownerId",
+    "createdAt": "2025-10-01T10:30:00.000Z"
+  }
+]
+```
+
+## AWS S3 Integration
+
+The `/with-images` endpoint supports automatic image upload to AWS S3:
+
+- **Upload Process**: Images are uploaded to S3 with unique filenames
+- **Storage Location**: `https://bucket-name.s3.region.amazonaws.com/images/unique-filename.ext`
+- **Supported Formats**: JPEG, PNG, WebP
+- **File Limits**: Maximum 10 images per field
+- **Form Data**: All field data sent as form-data with images as file uploads
+ 
+ 

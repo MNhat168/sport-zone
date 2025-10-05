@@ -112,12 +112,12 @@ export class BookingsService {
         const schedule = scheduleMap.get(dateKey);
 
         // Generate virtual slots from Field config
-        const virtualSlots = this.generateVirtualSlots(field);
-
+        const virtualSlots = this.generateVirtualSlots(field, currentDate);
+        
         // Apply schedule constraints if exists
-        const availableSlots = schedule
-          ? this.applyScheduleConstraints(virtualSlots, schedule, field)
-          : virtualSlots.map(slot => ({ ...slot, available: true }));
+        const availableSlots = schedule 
+          ? await this.applyScheduleConstraints(virtualSlots, schedule, field, currentDate)
+          : await this.getAvailabilityWithBookings(virtualSlots, field, currentDate);
 
         result.push({
           date: dateKey,
@@ -161,11 +161,11 @@ export class BookingsService {
         const bookingDate = new Date(bookingData.date);
 
         // Validate time slots
-        this.validateTimeSlots(bookingData.startTime, bookingData.endTime, field);
-
+        this.validateTimeSlots(bookingData.startTime, bookingData.endTime, field, bookingDate);
+        
         // Calculate slots and pricing
         const numSlots = this.calculateNumSlots(bookingData.startTime, bookingData.endTime, field.slotDuration);
-        const pricingInfo = this.calculatePricing(bookingData.startTime, bookingData.endTime, field);
+        const pricingInfo = this.calculatePricing(bookingData.startTime, bookingData.endTime, field, bookingDate);
 
         // Atomic upsert Schedule (Pure Lazy Creation)
         const scheduleUpdate = await this.scheduleModel.findOneAndUpdate(
@@ -595,12 +595,22 @@ export class BookingsService {
   /**
    * Generate virtual slots from Field configuration
    */
-  private generateVirtualSlots(field: Field): Omit<AvailabilitySlot, 'available'>[] {
+  private generateVirtualSlots(field: Field, date?: Date): Omit<AvailabilitySlot, 'available'>[] {
     const slots: Omit<AvailabilitySlot, 'available'>[] = [];
-    const startHour = parseInt(field.operatingHours.start.split(':')[0]);
-    const startMinute = parseInt(field.operatingHours.start.split(':')[1]);
-    const endHour = parseInt(field.operatingHours.end.split(':')[0]);
-    const endMinute = parseInt(field.operatingHours.end.split(':')[1]);
+    
+    // Get day of week for the date (default to monday if no date provided)
+    const dayOfWeek = date ? this.getDayOfWeek(date) : 'monday';
+    
+    // Find operating hours for the specific day
+    const dayOperatingHours = field.operatingHours.find(oh => oh.day === dayOfWeek);
+    if (!dayOperatingHours) {
+      return slots; // No operating hours for this day
+    }
+
+    const startHour = parseInt(dayOperatingHours.start.split(':')[0]);
+    const startMinute = parseInt(dayOperatingHours.start.split(':')[1]);
+    const endHour = parseInt(dayOperatingHours.end.split(':')[0]);
+    const endMinute = parseInt(dayOperatingHours.end.split(':')[1]);
 
     const startMinutes = startHour * 60 + startMinute;
     const endMinutes = endHour * 60 + endMinute;
@@ -611,9 +621,9 @@ export class BookingsService {
 
       const startTime = this.minutesToTimeString(currentMinutes);
       const endTime = this.minutesToTimeString(slotEndMinutes);
-
-      const pricing = this.calculateSlotPricing(startTime, endTime, field);
-
+      
+      const pricing = this.calculateSlotPricing(startTime, endTime, field, date);
+      
       slots.push({
         startTime,
         endTime,
@@ -627,19 +637,89 @@ export class BookingsService {
 
   /**
    * Apply schedule constraints to virtual slots
+   * Updated for Pure Lazy Creation: Check both Schedule bookedSlots AND Booking records
    */
-  private applyScheduleConstraints(
-    virtualSlots: Omit<AvailabilitySlot, 'available'>[],
-    schedule: Schedule,
-    field: Field
-  ): AvailabilitySlot[] {
+  private async applyScheduleConstraints(
+    virtualSlots: Omit<AvailabilitySlot, 'available'>[], 
+    schedule: Schedule, 
+    field: Field,
+    date: Date
+  ): Promise<AvailabilitySlot[]> {
     if (schedule.isHoliday) {
       return virtualSlots.map(slot => ({ ...slot, available: false }));
     }
 
+    // Get actual bookings for this date
+    const actualBookings = await this.getExistingBookingsForDate((field as any)._id.toString(), date);
+    
+    // Combine schedule bookedSlots with actual booking records
+    const allBookedSlots = [
+      ...schedule.bookedSlots,
+      ...actualBookings.map(booking => ({
+        startTime: booking.startTime,
+        endTime: booking.endTime
+      }))
+    ];
+
     return virtualSlots.map(slot => ({
       ...slot,
-      available: !this.checkSlotConflict(slot.startTime, slot.endTime, schedule.bookedSlots)
+      available: !this.checkSlotConflict(slot.startTime, slot.endTime, allBookedSlots)
+    }));
+  }
+
+  /**
+   * Get existing bookings for a specific field and date
+   */
+  private async getExistingBookingsForDate(fieldId: string, date: Date) {
+    try {
+      // Normalize date to start/end of day in Vietnam timezone (UTC+7)
+      const startOfDay = new Date(date);
+      startOfDay.setUTCHours(-7, 0, 0, 0); // Start of day in Vietnam = UTC-7
+
+      const endOfDay = new Date(date);
+      endOfDay.setUTCHours(16, 59, 59, 999); // End of day in Vietnam = UTC+17-1ms
+
+      this.logger.log(`Searching bookings for field ${fieldId} on ${date.toISOString().split('T')[0]}`);
+
+      // Query Booking collection for confirmed and pending bookings
+      const bookings = await this.bookingModel.find({
+        field: new Types.ObjectId(fieldId),
+        date: {
+          $gte: startOfDay,
+          $lte: endOfDay
+        },
+        status: { $in: ['confirmed', 'pending'] }
+      }).exec();
+
+      this.logger.log(`Found ${bookings.length} bookings for field ${fieldId}`);
+      
+      return bookings;
+    } catch (error) {
+      this.logger.error('Error getting existing bookings', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get availability with only booking checks (no schedule)
+   */
+  private async getAvailabilityWithBookings(
+    virtualSlots: Omit<AvailabilitySlot, 'available'>[], 
+    field: Field,
+    date: Date
+  ): Promise<AvailabilitySlot[]> {
+    // Get actual bookings for this date
+    const actualBookings = await this.getExistingBookingsForDate((field as any)._id.toString(), date);
+    
+    // Convert bookings to slot format
+    const bookedSlots = actualBookings.map(booking => ({
+      startTime: booking.startTime,
+      endTime: booking.endTime
+    }));
+
+    return virtualSlots.map(slot => ({
+      ...slot,
+      available: !this.checkSlotConflict(slot.startTime, slot.endTime, bookedSlots)
     }));
   }
 
@@ -677,10 +757,10 @@ export class BookingsService {
   /**
    * Calculate pricing for booking
    */
-  private calculatePricing(startTime: string, endTime: string, field: Field): {
-    totalPrice: number;
-    multiplier: number;
-    breakdown: string
+  private calculatePricing(startTime: string, endTime: string, field: Field, date?: Date): { 
+    totalPrice: number; 
+    multiplier: number; 
+    breakdown: string 
   } {
     const startMinutes = this.timeStringToMinutes(startTime);
     const endMinutes = this.timeStringToMinutes(endTime);
@@ -692,8 +772,8 @@ export class BookingsService {
       const slotEndMinutes = Math.min(currentMinutes + field.slotDuration, endMinutes);
       const slotStart = this.minutesToTimeString(currentMinutes);
       const slotEnd = this.minutesToTimeString(slotEndMinutes);
-
-      const slotPricing = this.calculateSlotPricing(slotStart, slotEnd, field);
+      
+      const slotPricing = this.calculateSlotPricing(slotStart, slotEnd, field, date);
       totalPrice += slotPricing.price;
 
       if (breakdown) breakdown += ', ';
@@ -714,13 +794,18 @@ export class BookingsService {
   /**
    * Calculate pricing for a single slot
    */
-  private calculateSlotPricing(startTime: string, endTime: string, field: Field): {
-    price: number;
-    multiplier: number;
-    breakdown: string
+  private calculateSlotPricing(startTime: string, endTime: string, field: Field, date?: Date): { 
+    price: number; 
+    multiplier: number; 
+    breakdown: string 
   } {
-    // Find applicable price range
+    // Get day of week for the date (default to monday if no date provided)
+    const dayOfWeek = date ? this.getDayOfWeek(date) : 'monday';
+    
+    // Find applicable price range for the specific day
     const applicableRange = field.priceRanges.find(range => {
+      if (range.day !== dayOfWeek) return false;
+      
       const rangeStart = this.timeStringToMinutes(range.start);
       const rangeEnd = this.timeStringToMinutes(range.end);
       const slotStart = this.timeStringToMinutes(startTime);
@@ -734,23 +819,33 @@ export class BookingsService {
     return {
       price,
       multiplier,
-      breakdown: `${startTime}-${endTime}: ${multiplier}x base price`
+      breakdown: `${startTime}-${endTime}: ${multiplier}x base price (${dayOfWeek})`
     };
   }
 
   /**
    * Validate time slots against field configuration
    */
-  private validateTimeSlots(startTime: string, endTime: string, field: Field): void {
+  private validateTimeSlots(startTime: string, endTime: string, field: Field, date?: Date): void {
     const startMinutes = this.timeStringToMinutes(startTime);
     const endMinutes = this.timeStringToMinutes(endTime);
-    const operatingStart = this.timeStringToMinutes(field.operatingHours.start);
-    const operatingEnd = this.timeStringToMinutes(field.operatingHours.end);
+    
+    // Get day of week for the date (default to monday if no date provided)
+    const dayOfWeek = date ? this.getDayOfWeek(date) : 'monday';
+    
+    // Find operating hours for the specific day
+    const dayOperatingHours = field.operatingHours.find(oh => oh.day === dayOfWeek);
+    if (!dayOperatingHours) {
+      throw new BadRequestException(`No operating hours defined for ${dayOfWeek}`);
+    }
+
+    const operatingStart = this.timeStringToMinutes(dayOperatingHours.start);
+    const operatingEnd = this.timeStringToMinutes(dayOperatingHours.end);
 
     // Check if within operating hours
     if (startMinutes < operatingStart || endMinutes > operatingEnd) {
       throw new BadRequestException(
-        `Booking time must be within operating hours ${field.operatingHours.start} - ${field.operatingHours.end}`
+        `Booking time must be within operating hours ${dayOperatingHours.start} - ${dayOperatingHours.end} for ${dayOfWeek}`
       );
     }
 
@@ -797,5 +892,13 @@ export class BookingsService {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+  }
+
+  /**
+   * Get day of week from date
+   */
+  private getDayOfWeek(date: Date): string {
+    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    return days[date.getDay()];
   }
 }

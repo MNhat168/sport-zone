@@ -1,0 +1,121 @@
+<html>
+	<head>
+		<meta charset='utf-8' />
+		<title>Payment Notification</title>
+		<style>
+			body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+			.container { max-width: 600px; margin: 0 auto; padding: 20px; }
+			.button {
+				display: inline-block; padding: 12px 24px; background-color: #4CAF50;
+				color: white; text-decoration: none; border-radius: 4px; margin: 20px 0;
+			}
+			.payment-method-selected { 
+				background-color: #e8f5e8; padding: 20px;
+				border-radius: 8px; margin: 20px 0; border-left: 4px solid #4CAF50;
+			}
+			.method-item { 
+				display: flex; align-items: center; margin: 10px 0; padding: 15px; 
+				background-color: white; border-radius: 4px; border-left: 4px solid #4CAF50; 
+			}
+			.method-icon { 
+				width: 24px; height: 24px; margin-right: 10px; background-color: #4CAF50; 
+				border-radius: 50%; display: inline-block; 
+			}
+			.footer { margin-top: 30px; font-size: 12px; color: #666; }
+			.payment-info { background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; }
+			.instructions { background-color: #fff3cd; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #ffc107; }
+		</style>
+	</head>
+	<body>
+		<div class='container'>
+			<h2>Xin chào {{studentName}},</h2>
+			<p>Đăng ký sân của bạn đã được phê duyệt!</p>
+			<p><strong>Sân đặt:</strong> {{courseName}}</p>
+			<p><strong>Số tiền:</strong> {{amount}}₫</p>
+
+			{{#if paymentMethod}}
+			<div class='payment-method-selected'>
+				<h3>Phương thức thanh toán đã chọn</h3>
+				<div class='method-item'>
+					<span class='method-icon'></span>
+					<div>
+						<strong>{{paymentMethod}}</strong>
+						{{#if (eq paymentMethod "Trả tiền mặt")}}
+						<br /><small>Thanh toán trực tiếp tại sân khi đến chơi</small>
+						{{/if}}
+						{{#if (eq paymentMethod "Internet Banking")}}
+						<br /><small>Thanh toán qua ngân hàng trực tuyến</small>
+						{{/if}}
+						{{#if (eq paymentMethod "Thẻ tín dụng")}}
+						<br /><small>Thanh toán bằng thẻ tín dụng Visa, Mastercard</small>
+						{{/if}}
+						{{#if (eq paymentMethod "Thẻ ghi nợ")}}
+						<br /><small>Thanh toán bằng thẻ ghi nợ</small>
+						{{/if}}
+						{{#if (eq paymentMethod "Ví MoMo")}}
+						<br /><small>Thanh toán qua ví điện tử MoMo</small>
+						{{/if}}
+						{{#if (eq paymentMethod "ZaloPay")}}
+						<br /><small>Thanh toán qua ví điện tử ZaloPay</small>
+						{{/if}}
+						{{#if (eq paymentMethod "VNPay")}}
+						<br /><small>Thanh toán qua cổng VNPay</small>
+						{{/if}}
+						{{#if (eq paymentMethod "Chuyển khoản ngân hàng")}}
+						<br /><small>Chuyển khoản trực tiếp vào tài khoản ngân hàng</small>
+						{{/if}}
+						{{#if (eq paymentMethod "QR Code")}}
+						<br /><small>Quét mã QR để thanh toán</small>
+						{{/if}}
+					</div>
+				</div>
+			</div>
+
+			{{#if (eq paymentMethod "Trả tiền mặt")}}
+			<div class='instructions'>
+				<h4>Hướng dẫn thanh toán:</h4>
+				<ul>
+					<li>Bạn sẽ thanh toán trực tiếp tại sân khi đến chơi</li>
+					<li>Vui lòng mang đủ tiền mặt theo số tiền đã đặt</li>
+					<li>Liên hệ với quản lý sân để xác nhận thời gian thanh toán</li>
+				</ul>
+			</div>
+			{{else}}
+			<div class='payment-info'>
+				<h4>Thông tin thanh toán:</h4>
+				<p>Vui lòng click vào nút bên dưới để hoàn tất thanh toán:</p>
+				<a href='{{paymentLink}}' class='button'>Thanh toán ngay</a>
+			</div>
+			{{/if}}
+
+			{{else}}
+			<div class='payment-method-selected'>
+				<h3>Phương thức thanh toán</h3>
+				<p>Bạn chưa chọn phương thức thanh toán. Vui lòng click vào nút bên dưới để chọn và hoàn tất thanh toán:</p>
+				<a href='{{paymentLink}}' class='button'>Chọn phương thức thanh toán</a>
+			</div>
+			{{/if}}
+
+			<p><strong>Lưu ý:</strong></p>
+			<ul>
+				{{#if paymentMethod}}
+				{{#if (eq paymentMethod "Trả tiền mặt")}}
+				<li>Vui lòng đến đúng giờ đã đặt để tránh mất slot</li>
+				<li>Thanh toán tại sân khi check-in</li>
+				{{else}}
+				<li>Link thanh toán này sẽ hết hạn sau 24 giờ</li>
+				<li>Thanh toán được bảo mật bởi các tiêu chuẩn bảo mật cao nhất</li>
+				{{/if}}
+				{{else}}
+				<li>Link thanh toán này sẽ hết hạn sau 24 giờ</li>
+				<li>Bạn có thể chọn phương thức thanh toán phù hợp nhất</li>
+				<li>Thanh toán được bảo mật bởi các tiêu chuẩn bảo mật cao nhất</li>
+				{{/if}}
+			</ul>
+
+			<div class='footer'>
+				<p>Trân trọng,<br />Đội ngũ SportZone</p>
+			</div>
+		</div>
+	</body>
+</html>

@@ -1,9 +1,17 @@
 import { IsString, IsNumber, IsArray, IsBoolean, IsOptional, IsEnum, ValidateNested, IsPositive, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { SportType } from '@common/enums/sport-type.enum';
+import { SportType } from 'src/common/enums/sport-type.enum';
 
-class OperatingHoursDto {
+class DayOperatingHoursDto {
+    @ApiProperty({ 
+        enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
+        example: 'monday', 
+        description: 'Ngày trong tuần' 
+    })
+    @IsString()
+    day: string;
+
     @ApiProperty({ example: '06:00', description: 'Giờ mở cửa (HH:mm)' })
     @IsString()
     start: string;
@@ -11,9 +19,22 @@ class OperatingHoursDto {
     @ApiProperty({ example: '22:00', description: 'Giờ đóng cửa (HH:mm)' })
     @IsString()
     end: string;
+
+    @ApiProperty({ example: 60, description: 'Thời lượng slot (phút)', minimum: 30 })
+    @IsNumber()
+    @Min(30)
+    duration: number;
 }
 
-class PriceRangeDto {
+class DayPriceRangeDto {
+    @ApiProperty({ 
+        enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
+        example: 'monday', 
+        description: 'Ngày trong tuần' 
+    })
+    @IsString()
+    day: string;
+
     @ApiProperty({ example: '06:00', description: 'Giờ bắt đầu khung giá (HH:mm)' })
     @IsString()
     start: string;
@@ -53,8 +74,8 @@ export class FieldsDto {
     @ApiProperty({ type: [String], example: ['https://example.com/field1.jpg'], description: 'Danh sách hình ảnh' })
     images: string[];
 
-    @ApiProperty({ type: OperatingHoursDto, description: 'Giờ hoạt động' })
-    operatingHours: { start: string; end: string };
+    @ApiProperty({ type: [DayOperatingHoursDto], description: 'Giờ hoạt động theo ngày' })
+    operatingHours: { day: string; start: string; end: string; duration: number }[];
 
     @ApiProperty({ example: 60, description: 'Thời lượng một slot (phút)' })
     slotDuration: number;
@@ -65,8 +86,8 @@ export class FieldsDto {
     @ApiProperty({ example: 4, description: 'Số slot tối đa có thể đặt' })
     maxSlots: number;
 
-    @ApiProperty({ type: [PriceRangeDto], description: 'Khung giá theo thời gian' })
-    priceRanges: { start: string; end: string; multiplier: number }[];
+    @ApiProperty({ type: [DayPriceRangeDto], description: 'Khung giá theo thời gian và ngày' })
+    priceRanges: { day: string; start: string; end: string; multiplier: number }[];
 
     @ApiProperty({ example: 150000, description: 'Giá cơ bản (VND)' })
     basePrice: number;
@@ -109,19 +130,25 @@ export class CreateFieldDto {
     @IsString()
     description: string;
 
-    @ApiProperty({ 
+    @ApiProperty({ example: 'District 3, Ho Chi Minh City', description: 'Địa điểm của sân' })
+    @IsString()
+    location: string;
+
+    @ApiPropertyOptional({ 
         type: [String], 
         example: ['https://example.com/field1.jpg', 'https://example.com/field2.jpg'], 
-        description: 'Danh sách URL hình ảnh sân' 
+        description: 'Danh sách URL hình ảnh sân (optional - sẽ được upload nếu có files)' 
     })
+    @IsOptional()
     @IsArray()
     @IsString({ each: true })
-    images: string[];
+    images?: string[];
 
-    @ApiProperty({ type: OperatingHoursDto, description: 'Giờ hoạt động của sân' })
-    @ValidateNested()
-    @Type(() => OperatingHoursDto)
-    operatingHours: OperatingHoursDto;
+    @ApiProperty({ type: [DayOperatingHoursDto], description: 'Giờ hoạt động của sân theo ngày' })
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => DayOperatingHoursDto)
+    operatingHours: DayOperatingHoursDto[];
 
     @ApiProperty({ example: 60, description: 'Thời lượng một slot (phút)', minimum: 30, maximum: 180 })
     @IsNumber()
@@ -140,26 +167,22 @@ export class CreateFieldDto {
     maxSlots: number;
 
     @ApiProperty({ 
-        type: [PriceRangeDto], 
-        description: 'Khung giá theo thời gian trong ngày',
+        type: [DayPriceRangeDto], 
+        description: 'Khung giá theo thời gian và ngày',
         example: [
-            { start: '06:00', end: '10:00', multiplier: 1.0 },
-            { start: '18:00', end: '22:00', multiplier: 1.5 }
+            { day: 'monday', start: '06:00', end: '10:00', multiplier: 1.0 },
+            { day: 'monday', start: '18:00', end: '22:00', multiplier: 1.5 }
         ]
     })
     @IsArray()
     @ValidateNested({ each: true })
-    @Type(() => PriceRangeDto)
-    priceRanges: PriceRangeDto[];
+    @Type(() => DayPriceRangeDto)
+    priceRanges: DayPriceRangeDto[];
 
     @ApiProperty({ example: 150000, description: 'Giá cơ bản mỗi slot (VND)', minimum: 1000 })
     @IsNumber()
     @IsPositive()
     basePrice: number;
-
-    @ApiProperty({ example: 'District 3, Ho Chi Minh City', description: 'Địa điểm của sân' })
-    @IsString()
-    location: string;
 }
 
 /**
@@ -186,11 +209,12 @@ export class UpdateFieldDto {
     @IsString({ each: true })
     images?: string[];
 
-    @ApiPropertyOptional({ type: OperatingHoursDto, description: 'Giờ hoạt động mới' })
+    @ApiPropertyOptional({ type: [DayOperatingHoursDto], description: 'Giờ hoạt động mới theo ngày' })
     @IsOptional()
-    @ValidateNested()
-    @Type(() => OperatingHoursDto)
-    operatingHours?: OperatingHoursDto;
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => DayOperatingHoursDto)
+    operatingHours?: DayOperatingHoursDto[];
 
     @ApiPropertyOptional({ example: 90, description: 'Thời lượng slot mới (phút)', minimum: 30, maximum: 180 })
     @IsOptional()
@@ -212,20 +236,20 @@ export class UpdateFieldDto {
     maxSlots?: number;
 
     @ApiPropertyOptional({ 
-        type: [PriceRangeDto], 
-        description: 'Khung giá mới theo thời gian',
+        type: [DayPriceRangeDto], 
+        description: 'Khung giá mới theo thời gian và ngày',
         example: [
-            { start: '05:00', end: '08:00', multiplier: 0.8 },
-            { start: '18:00', end: '23:00', multiplier: 2.0 }
+            { day: 'monday', start: '06:00', end: '12:00', multiplier: 1.0 },
+            { day: 'monday', start: '12:00', end: '22:00', multiplier: 1.3 }
         ]
     })
     @IsOptional()
     @IsArray()
     @ValidateNested({ each: true })
-    @Type(() => PriceRangeDto)
-    priceRanges?: PriceRangeDto[];
+    @Type(() => DayPriceRangeDto)
+    priceRanges?: DayPriceRangeDto[];
 
-    @ApiPropertyOptional({ example: 200000, description: 'Giá cơ bản mới (VND)', minimum: 1000 })
+    @ApiPropertyOptional({ example: 180000, description: 'Giá cơ bản mới (VND)', minimum: 1000 })
     @IsOptional()
     @IsNumber()
     @IsPositive()
@@ -249,4 +273,63 @@ export class UpdateFieldDto {
     @IsOptional()
     @IsString()
     location?: string;
+}
+
+/**
+ * DTO cho việc tạo sân mới với hỗ trợ upload ảnh
+ */
+export class CreateFieldWithFilesDto {
+    @ApiProperty({ example: 'Sân bóng Phú Nhuận', description: 'Tên sân' })
+    @IsString()
+    name: string;
+
+    @ApiProperty({ enum: SportType, example: SportType.FOOTBALL, description: 'Loại thể thao' })
+    @IsString()
+    sportType: string;
+
+    @ApiProperty({ example: 'Sân bóng đá 11 người, có đèn chiếu sáng', description: 'Mô tả sân' })
+    @IsString()
+    description: string;
+
+    @ApiProperty({ example: 'District 3, Ho Chi Minh City', description: 'Địa điểm của sân' })
+    @IsString()
+    location: string;
+
+    @ApiProperty({ 
+        example: '[{"day":"monday","start":"06:00","end":"22:00","duration":60}]',
+        description: 'Giờ hoạt động theo ngày (JSON string)' 
+    })
+    @IsString()
+    operatingHours: string;
+
+    @ApiProperty({ example: '60', description: 'Thời lượng một slot (phút)' })
+    @IsString()
+    slotDuration: string;
+
+    @ApiProperty({ example: '1', description: 'Số slot tối thiểu có thể đặt' })
+    @IsString()
+    minSlots: string;
+
+    @ApiProperty({ example: '4', description: 'Số slot tối đa có thể đặt' })
+    @IsString()
+    maxSlots: string;
+
+    @ApiProperty({ 
+        example: '[{"day":"monday","start":"06:00","end":"10:00","multiplier":1.0},{"day":"monday","start":"18:00","end":"22:00","multiplier":1.5}]',
+        description: 'Khung giá theo thời gian và ngày (JSON string)' 
+    })
+    @IsString()
+    priceRanges: string;
+
+    @ApiProperty({ example: '150000', description: 'Giá cơ bản mỗi slot (VND)' })
+    @IsString()
+    basePrice: string;
+
+    @ApiProperty({ 
+        type: 'array',
+        items: { type: 'string', format: 'binary' },
+        description: 'Danh sách hình ảnh sân (tối đa 10 ảnh)',
+        required: false
+    })
+    images?: Express.Multer.File[];
 }

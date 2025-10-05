@@ -35,36 +35,52 @@ export class GlobalTimezoneInterceptor implements NestInterceptor {
   /**
    * Recursively transform all timestamp fields to Vietnam timezone
    */
-  private transformTimestamps(data: any, seen = new WeakSet()): any {
+  private transformTimestamps(data: any, visited = new WeakSet()): any {
     if (!data) return data;
 
-    // Prevent circular references
-    if (typeof data === 'object') {
-      if (seen.has(data)) return data;
-      seen.add(data);
+    // Handle primitive types
+    if (typeof data !== 'object') return data;
+
+    // Check for circular references
+    if (visited.has(data)) {
+      return data; // Return original to avoid infinite loop
+    }
+
+    // Handle Date objects
+    if (data instanceof Date) {
+      return this.timezoneService.toVietnamTime(data);
     }
 
     // Handle arrays
     if (Array.isArray(data)) {
-      return data.map(item => this.transformTimestamps(item, seen));
+      visited.add(data);
+      const result = data.map(item => this.transformTimestamps(item, visited));
+      visited.delete(data);
+      return result;
     }
 
-    // Handle objects
+    // Handle objects (including Mongoose documents)
     if (typeof data === 'object' && data !== null) {
-      if (data instanceof Date) {
-        return this.timezoneService.toVietnamTime(data);
-      }
+      visited.add(data);
 
-      const transformed: any = {};
-      for (const [key, value] of Object.entries(data)) {
+      // Convert Mongoose document to plain object if needed
+      const plainData = data.toObject ? data.toObject() : data;
+      
+      // Transform object properties
+      const transformed = {};
+      for (const [key, value] of Object.entries(plainData)) {
+        // Transform timestamp fields
         if ((key === 'createdAt' || key === 'updatedAt') && value instanceof Date) {
           transformed[key] = this.timezoneService.toVietnamTime(value);
         } else if (value && typeof value === 'object') {
-          transformed[key] = this.transformTimestamps(value, seen);
+          // Recursively transform nested objects
+          transformed[key] = this.transformTimestamps(value, visited);
         } else {
           transformed[key] = value;
         }
       }
+      
+      visited.delete(data);
       return transformed;
     }
 

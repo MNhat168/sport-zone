@@ -1,0 +1,168 @@
+<html lang='vi'>
+	<head>
+		<meta charset='UTF-8' />
+		<meta name='viewport' content='width=device-width, initial-scale=1.0' />
+		<title>Chào mừng đến với Lingora</title>
+		<style>
+			:root { --primary: #c51928; } body { font-family: 'Segoe UI', Tahoma,
+			Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color:
+			#f5f5f5; color: #333333; } .container { max-width: 600px; margin: 0 auto;
+			padding: 20px; background-color: #ffffff; } .header { text-align: center;
+			padding: 20px 0; border-bottom: 1px solid #eeeeee; } .logo { font-size:
+			24px; font-weight: bold; color: var(--primary); margin-bottom: 10px; }
+			.content { padding: 30px 20px; line-height: 1.6; } .welcome-message {
+			font-size: 16px; color: #333333; margin-bottom: 30px; } .account-info {
+			background: #f9f9f9; padding: 25px; border-radius: 8px; margin: 25px 0;
+			border-left: 4px solid var(--primary); } .account-info h3 { color:
+			var(--primary); margin-top: 0; margin-bottom: 20px; font-size: 18px; }
+			.info-item { display: flex; margin: 15px 0; align-items: center; }
+			.info-label { font-weight: 600; color: #666666; width: 140px; flex-shrink:
+			0; } .info-value { color: #333333; font-family: 'Courier New', monospace;
+			background: #ffffff; padding: 8px 12px; border-radius: 4px; flex: 1;
+			border: 1px solid #dddddd; position: relative; } .show-hide-btn {
+			background: none; border: none; color: var(--primary); font-weight: bold;
+			cursor: pointer; margin-left: 10px; font-size: 13px; } .warning-box {
+			background: #f9f9f9; padding: 20px; border-radius: 6px; border-left: 4px
+			solid var(--primary); margin: 25px 0; } .warning-box h4 { color:
+			var(--primary); margin-top: 0; margin-bottom: 15px; font-size: 16px; }
+			.button-container { text-align: center; margin: 35px 0; } .login-button {
+			background: var(--primary); color: white; padding: 12px 24px;
+			text-decoration: none; border-radius: 4px; display: inline-block;
+			font-weight: bold; font-size: 16px; } .features-info { background:
+			#f9f9f9; padding: 20px; border-radius: 6px; margin: 25px 0; }
+			.features-info h4 { color: var(--primary); margin-top: 0; margin-bottom:
+			15px; } .support-info { background: #f9f9f9; padding: 20px; border-radius:
+			6px; margin: 25px 0; text-align: center; } .support-email { color:
+			var(--primary); text-decoration: none; font-weight: 600; } .footer {
+			background: #f9f9f9; padding: 25px; text-align: center; border-top: 1px
+			solid #eeeeee; } .footer p { margin: 0; color: #777777; font-size: 14px; }
+			.note { font-size: 14px; color: #666666; margin-top: 30px; padding: 15px;
+			background-color: #f9f9f9; border-radius: 4px; } @media (max-width: 600px)
+			{ .container { margin: 0; padding: 10px; } .content { padding: 20px; }
+			.info-item { flex-direction: column; align-items: flex-start; }
+			.info-label { width: auto; margin-bottom: 5px; } .info-value { width:
+			100%; box-sizing: border-box; } }
+		</style>
+	</head>
+	<body>
+		<div class='container'>
+			<!-- Header -->
+			<div class='header'>
+				<div class='logo'>LINGORA</div>
+				<h1 style='color: var(--primary);'>Chào mừng đến với Lingora!</h1>
+			</div>
+
+			<!-- Content -->
+			<div class='content'>
+				<div class='welcome-message'>
+					<strong>Chào {{fullName}},</strong><br />
+					Chúc mừng bạn đã trở thành giáo viên tại
+					<strong>Lingora Education Platform</strong>! Chúng tôi rất vui mừng
+					được chào đón bạn vào đội ngũ giáo viên chuyên nghiệp của chúng tôi.
+				</div>
+
+				<!-- Account Information -->
+				<div class='account-info'>
+					<h3>Thông tin tài khoản của bạn</h3>
+
+					<div class='info-item'>
+						<div class='info-label'>Email đăng nhập:</div>
+						<div class='info-value'>{{loginEmail}}</div>
+					</div>
+
+					<div class='info-item'>
+						<div class='info-label'>Mật khẩu:</div>
+						<div class='info-value' id='password-value'>
+							<span id='password-text'>{{password}}</span>
+							<button
+								class='show-hide-btn'
+								onclick='togglePassword()'
+							>Ẩn/Hiện</button>
+						</div>
+					</div>
+
+					<div class='info-item'>
+						<div class='info-label'>Email thông báo:</div>
+						<div class='info-value'>{{notificationEmail}}</div>
+					</div>
+				</div>
+
+				<!-- Important Notes -->
+				<div class='warning-box'>
+					<h4>Lưu ý quan trọng</h4>
+					<ul>
+						<li><strong>Đăng nhập ngay</strong>
+							và đổi mật khẩu ở lần đầu tiên</li>
+						<li><strong>Email thông báo</strong>
+							sẽ nhận các thông tin về lớp học, lịch dạy, và thông báo quan
+							trọng</li>
+						<li><strong>Email đăng nhập</strong>
+							chỉ dùng để truy cập vào hệ thống Lingora</li>
+						<li><strong>Bảo mật</strong>
+							thông tin đăng nhập và không chia sẻ với người khác</li>
+					</ul>
+				</div>
+
+				<!-- Login Button -->
+				<div class='button-container'>
+					<a href='{{loginUrl}}' class='login-button'>
+						Đăng nhập ngay
+					</a>
+				</div>
+
+				<!-- Features Info -->
+				<div class='features-info'>
+					<h4>Tính năng dành cho giáo viên</h4>
+					<ul>
+						<li>Quản lý lớp học và học sinh</li>
+						<li>Tạo và chấm bài tập, bài kiểm tra</li>
+						<li>Theo dõi tiến độ học tập của học sinh</li>
+						<li>Giao tiếp với học sinh và phụ huynh</li>
+						<li>Truy cập tài liệu giảng dạy phong phú</li>
+					</ul>
+				</div>
+
+				<!-- Support Information -->
+				<div class='support-info'>
+					<p>
+						<strong>Cần hỗ trợ?</strong><br />
+						Liên hệ với chúng tôi qua email:
+						<a
+							href='mailto:{{supportEmail}}'
+							class='support-email'
+						>{{supportEmail}}</a><br />
+						Hoặc hotline:
+						<strong>1900 1234</strong>
+						(8:00 - 17:00, Thứ 2 - Thứ 6)
+					</p>
+				</div>
+
+				<!-- Security Note -->
+				<div class='note'>
+					<p><strong>Lưu ý:</strong>
+						Vì lý do bảo mật, vui lòng không chia sẻ thông tin đăng nhập này với
+						bất kỳ ai. Đội ngũ Lingora sẽ không bao giờ yêu cầu bạn cung cấp mật
+						khẩu qua điện thoại hoặc email.</p>
+				</div>
+			</div>
+
+			<!-- Footer -->
+			<div class='footer'>
+				<p>
+					<strong>© 2024 Lingora Education Platform</strong><br />
+					Nền tảng giáo dục trực tuyến hàng đầu Việt Nam<br />
+					<small>Email này được gửi tự động, vui lòng không trả lời trực tiếp.</small>
+				</p>
+			</div>
+		</div>
+		<script>
+			function togglePassword() { const pwText =
+			document.getElementById('password-text'); if (!pwText) return; if
+			(pwText.textContent.startsWith('•••')) { pwText.textContent = '{{password}}';
+			} else { pwText.textContent = '••••••••••'; } } // Mặc định giấu mật khẩu
+			window.onload = function() { const pwText =
+			document.getElementById('password-text'); if (pwText) pwText.textContent =
+			'••••••••••'; };
+		</script>
+	</body>
+</html>

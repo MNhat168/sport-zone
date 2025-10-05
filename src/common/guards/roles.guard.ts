@@ -7,7 +7,6 @@ import {
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from 'src/decorators/roles.decorator';
 
-
 @Injectable()
 export class RolesGuard implements CanActivate {
 	constructor(private readonly reflector: Reflector) {}
@@ -17,13 +16,12 @@ export class RolesGuard implements CanActivate {
 			ROLES_KEY,
 			[context.getHandler(), context.getClass()],
 		);
-		console.log('requireRoles',requiredRoles)
 		if (!requiredRoles) {
 			return true;
 		}
 
 		const { user } = context.switchToHttp().getRequest();
-	
+
 		if (!user) {
 			throw new UnauthorizedException(
 				'Quyền truy cập bị từ chối: Không tìm thấy người dùng.',
@@ -39,3 +37,5 @@ export class RolesGuard implements CanActivate {
 		return true;
 	}
 }
+
+
