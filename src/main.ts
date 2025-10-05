@@ -3,6 +3,7 @@ import { AppModule } from './app.module';
 import { BadRequestException, Logger, ValidationError, ValidationPipe } from '@nestjs/common';
 import { ERRORS_DICTIONARY } from './constraints/error-dictionary.constraint';
 import { json, urlencoded } from 'express';
+import * as cookieParser from 'cookie-parser';
 import { ResponseInterceptor } from './interceptors/response.interceptor';
 import { ConfigService } from '@nestjs/config';
 
@@ -12,8 +13,8 @@ async function bootstrap() {
 
   app.enableCors({
     origin: ['http://localhost:5173', 'https://sportzone-fe.vercel.app'],
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    allowedHeaders: ['content-type', 'authorization', 'accept'],
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
     credentials: true,
   });
   const config_service = app.get(ConfigService);
@@ -52,6 +53,8 @@ async function bootstrap() {
   // extended: true => cho phép parse nested object
   // limit: '10mb' => giới hạn dung lượng
   app.use(urlencoded({ extended: true, limit: '10mb' }));
+  // 4. Parse cookies for reading refresh_token in guards
+  app.use(cookieParser());
   await app.listen(port, () =>
     logger.log(` Server running on: http://localhost:${port}`),
   );

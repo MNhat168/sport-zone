@@ -12,12 +12,17 @@ export class EmailService {
 
 	async sendEmailVerification(email: string, token: string) {
 		const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+		// Use VITE_API_URL as backend base as requested
+		const backendUrl = this.configService.get<string>('VITE_API_URL') || '';
 		await this.mailerService.sendMail({
 			to: email,
 			subject: 'Xác thực tài khoản SportZone',
 			template: 'verify-email.hbs',
 			context: {
-				link: `${frontendUrl}/verify-email?token=${token}`,
+				// Ưu tiên 1-click xác thực qua BE nếu BACKEND_URL được cấu hình
+				link: backendUrl
+					? `${backendUrl}/auth/verify-email?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`
+					: `${frontendUrl}/verify-email?token=${token}`,
 			},
 		});
 	}

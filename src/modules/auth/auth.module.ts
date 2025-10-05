@@ -7,6 +7,7 @@ import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { User, UserSchema } from '../users/entities/user.entity';
 import { UsersModule } from '../users/users.module';
+import { EmailModule } from '../email/email.module';
 import { HttpModule } from '@nestjs/axios';
 import { USER_REPOSITORY } from '../users/interface/users.interface';
 import { UserRepository } from '../users/repositories/user.repository';
@@ -19,6 +20,7 @@ import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
     PassportModule,
     MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
     UsersModule,
+    EmailModule,
     ServiceModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
