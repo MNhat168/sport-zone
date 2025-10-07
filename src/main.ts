@@ -13,7 +13,7 @@ async function bootstrap() {
   app.enableCors({
     origin: ['http://localhost:5173', 'https://sportzone-fe.vercel.app'],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    allowedHeaders: '*',
+    allowedHeaders: ['content-type', 'authorization', 'accept'],
     credentials: true,
   });
   const config_service = app.get(ConfigService);
