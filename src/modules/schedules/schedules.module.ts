@@ -9,7 +9,7 @@ import { SchedulesService } from './schedules.service';
 import { Booking } from '../bookings/entities/booking.entity';
 import { BookingSchema } from '../bookings/schema/BookingSchema';
 import { Field } from '../fields/entities/field.entity';
-import { FieldSchema } from '../fields/schema/field-schema';
+import { FieldSchema } from '../fields/entities/field.entity';
 import { BookingsModule } from '../bookings/bookings.module';
 
 @Module({

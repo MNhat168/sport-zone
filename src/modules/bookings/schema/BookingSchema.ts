@@ -1,6 +1,7 @@
 import { SchemaFactory } from "@nestjs/mongoose";
 import { HydratedDocument } from "mongoose";
 import { Booking } from "../entities/booking.entity";
+import { timeToMinutes } from "src/utils/utils";
 
 export const BookingSchema = SchemaFactory.createForClass(Booking);
 
@@ -29,9 +30,3 @@ BookingSchema.pre('save', async function (this: HydratedDocument<Booking>, next)
 
     next();
 });
-
-// Helper timeToMinutes (tương tự)
-function timeToMinutes(time: string): number {
-    const [hours, minutes] = time.split(':').map(Number);
-    return hours * 60 + minutes;
-}

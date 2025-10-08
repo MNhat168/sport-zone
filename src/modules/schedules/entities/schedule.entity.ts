@@ -1,8 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Types } from 'mongoose';
+import { BaseEntity } from 'src/common/entities/base.entity';
 
-@Schema({ timestamps: true })
-export class Schedule extends Document {
+@Schema()
+export class Schedule extends BaseEntity {
   @Prop({ type: Types.ObjectId, ref: 'Field', required: true }) // Làm required để tránh conflict thiếu field
   field: Types.ObjectId;
 

@@ -11,6 +11,13 @@ import { Document } from 'mongoose';
     updatedAt: true,
     // Cấu hình timezone cho Việt Nam (UTC+7)
     currentTime: () => new Date(Date.now() + (7 * 60 * 60 * 1000))
+  },
+  toJSON: {
+    transform: (_, ret) => {
+      ret._id = ret._id?.toString() as any;
+      delete (ret as any).__v;
+      return ret;
+    },
   }
 })
 export abstract class BaseEntity extends Document {

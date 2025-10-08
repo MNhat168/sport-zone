@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Types } from 'mongoose';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
+import { BaseEntity } from 'src/common/entities/base.entity';
 
 export enum PaymentStatus {
   PENDING = 'pending',
@@ -9,8 +10,8 @@ export enum PaymentStatus {
   REFUNDED = 'refunded',
 }
 
-@Schema({ timestamps: true })
-export class Payment extends Document {
+@Schema()
+export class Payment extends BaseEntity {
   @Prop({ type: Types.ObjectId, ref: 'Booking', required: true })
   booking: Types.ObjectId;
 

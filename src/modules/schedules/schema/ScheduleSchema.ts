@@ -1,6 +1,7 @@
 import { Schedule } from "../entities/schedule.entity";
 import { SchemaFactory } from "@nestjs/mongoose";
 import { HydratedDocument } from "mongoose";
+import { timeToMinutes } from "src/utils/utils";
 
 export const ScheduleSchema = SchemaFactory.createForClass(Schedule);
 ScheduleSchema.index({ date: 1 });
@@ -27,8 +28,3 @@ ScheduleSchema.pre('save', async function (this: HydratedDocument<Schedule>, nex
 
     next();
 });
-
-function timeToMinutes(time: string): number {
-    const [hours, minutes] = time.split(':').map(Number);
-    return hours * 60 + minutes;
-}
