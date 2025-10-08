@@ -1,9 +1,29 @@
-// field-schedule-pricing.schema.ts
-import { Prop, Schema } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 
-export class FieldSchedulePricing {
-    @Prop({
+/**
+ * Interface định nghĩa cấu trúc pricing cho Field
+ * Sử dụng để tái sử dụng và dễ quản lý
+ */
+export interface FieldSchedulePricing {
+    operatingHours: { day: string; start: string; end: string; duration: number }[];
+    priceRanges: { day: string; start: string; end: string; multiplier: number }[];
+    basePrice: number;
+    pendingPriceUpdates: Array<{
+        newOperatingHours: { day: string; start: string; end: string; duration: number }[];
+        newPriceRanges: { day: string; start: string; end: string; multiplier: number }[];
+        newBasePrice: number;
+        effectiveDate: Date;
+        applied: boolean;
+        createdBy: Types.ObjectId;
+    }>;
+}
+
+/**
+ * Mongoose schema definitions cho pricing properties
+ * Sử dụng để tái sử dụng trong các entity khác
+ */
+export const FieldSchedulePricingSchema = {
+    operatingHours: {
         type: [
             {
                 day: {
@@ -17,11 +37,8 @@ export class FieldSchedulePricing {
             },
         ],
         required: true,
-        default: undefined,
-    })
-    operatingHours: { day: string; start: string; end: string; duration: number }[];
-
-    @Prop({
+    },
+    priceRanges: {
         type: [
             {
                 day: {
@@ -35,13 +52,10 @@ export class FieldSchedulePricing {
             },
         ],
         required: true,
-    })
-    priceRanges: { day: string; start: string; end: string; multiplier: number }[];
-
-    @Prop({ type: Number, required: true, min: 0 })
-    basePrice: number;
-
-    @Prop({
+        default: [],
+    },
+    basePrice: { type: Number, required: true, min: 0 },
+    pendingPriceUpdates: {
         type: [
             {
                 newOperatingHours: {
@@ -81,13 +95,5 @@ export class FieldSchedulePricing {
             },
         ],
         default: [],
-    })
-    pendingPriceUpdates: Array<{
-        newOperatingHours: { day: string; start: string; end: string; duration: number }[];
-        newPriceRanges: { day: string; start: string; end: string; multiplier: number }[];
-        newBasePrice: number;
-        effectiveDate: Date;
-        applied: boolean;
-        createdBy: Types.ObjectId;
-    }>;
-}
+    },
+};

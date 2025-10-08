@@ -45,3 +45,4 @@ export class FieldOwnerProfile extends BaseEntity {
   website?: string;
 }
 
+export const FieldOwnerProfileSchema = SchemaFactory.createForClass(FieldOwnerProfile);

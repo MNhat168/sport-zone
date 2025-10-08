@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Field } from '../entities/field.entity';
+import { getCurrentVietnamTime } from '../../../utils/timezone.utils';
 
 @Injectable()
 export class PriceSchedulerService {
@@ -18,8 +19,8 @@ export class PriceSchedulerService {
   async applyScheduledPriceUpdates() {
     this.logger.log('Starting scheduled price updates application...');
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // 00:00:00 hôm nay
+    const today = getCurrentVietnamTime();
+    today.setHours(0, 0, 0, 0); // 00:00:00 hôm nay (Vietnam timezone)
 
     // Tìm các Field có pendingPriceUpdates đến hạn (effectiveDate <= today và applied=false)
     const fields = await this.fieldModel.find({
@@ -31,13 +32,15 @@ export class PriceSchedulerService {
     for (const field of fields) {
       try {
         // Lấy các update đến hạn, sắp xếp theo effectiveDate tăng dần
-        const dueUpdates = (field as any).pendingPriceUpdates
-          .filter((u: any) => !u.applied && new Date(u.effectiveDate) <= today)
-          .sort((a: any, b: any) => new Date(a.effectiveDate).getTime() - new Date(b.effectiveDate).getTime());
+        const dueUpdates = field.pendingPriceUpdates
+          .filter((u) => !u.applied && new Date(u.effectiveDate) <= today)
+          .sort((a, b) => new Date(a.effectiveDate).getTime() - new Date(b.effectiveDate).getTime());
 
         for (const update of dueUpdates) {
-          (field as any).priceRanges = update.newPriceRanges;
-          (field as any).basePrice = update.newBasePrice;
+          // Cập nhật tất cả các thuộc tính từ pending update
+          field.operatingHours = update.newOperatingHours;
+          field.priceRanges = update.newPriceRanges;
+          field.basePrice = update.newBasePrice;
           update.applied = true;
         }
 

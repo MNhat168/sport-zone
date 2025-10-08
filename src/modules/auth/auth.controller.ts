@@ -109,7 +109,9 @@ export class AuthController {
     description: 'Email hoặc mật khẩu không đúng',
   })
   async login(@Body() loginDto: LoginDto & { rememberMe: boolean }, @Res() res: Response) {
+    console.log('🔐 Login attempt for:', loginDto.email);
     const result = await this.authService.login({ ...loginDto, rememberMe: loginDto.rememberMe });
+    console.log('✅ Login successful, setting cookies');
     res.cookie('access_token', result.accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
