@@ -1,4 +1,4 @@
-import { Controller, Post, Body, BadRequestException, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, BadRequestException, UseGuards, Get, Query, Res } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { Inject } from '@nestjs/common';
 import { SignInTokenDto } from './dto/sign-in-token.dto';
@@ -6,7 +6,8 @@ import { RegisterDto, LoginDto, VerifyAccountDto, ForgotPasswordDto, ResetPasswo
 import { HttpStatus } from '@nestjs/common';
 import { JwtRefreshTokenGuard } from './guards/jwt-refresh-token.guard';
 import { Req } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiQuery } from '@nestjs/swagger';
+import { Response } from 'express';
 
 @Controller('auth')
 @ApiTags('Authentication')
@@ -52,20 +53,42 @@ export class AuthController {
   }
 
   /**
-   * Đăng nhập bằng email và mật khẩu
-   * @param loginDto - Email và mật khẩu
-   * @returns Token và thông tin người dùng
+   * Xác thực 1-click qua link trong email
+   * GET /auth/verify-email?email=...&token=...
+   * - Thành công: redirect về FRONTEND_URL với trạng thái thành công
+   * - Thất bại: redirect về FRONTEND_URL với trạng thái lỗi
    */
+  @Get('verify-email')
+  @ApiOperation({ summary: 'Xác thực 1-click qua link email' })
+  @ApiQuery({ name: 'email', required: false })
+  @ApiQuery({ name: 'token', required: true })
+  async verifyEmail(
+    @Query('email') email: string,
+    @Query('token') token: string,
+    @Res() res: Response,
+  ) {
+    const frontend = process.env.FRONTEND_URL || 'http://localhost:5173';
+    try {
+      if (email) {
+        await this.authService.verify(email, token);
+      } else {
+        await this.authService.verifyByToken(token);
+      }
+      return res.redirect(`${frontend}/verify-email/success`);
+    } catch (err) {
+      return res.redirect(`${frontend}/verify-email/failed`);
+    }
+  }
+
+  // Cập nhật login
   @Post('login')
   @ApiOperation({ summary: 'Đăng nhập' })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Đăng nhập thành công',
     schema: {
       type: 'object',
       properties: {
-        access_token: { type: 'string' },
-        refresh_token: { type: 'string' },
         user: {
           type: 'object',
           properties: {
@@ -75,18 +98,33 @@ export class AuthController {
             role: { type: 'string' },
             avatarUrl: { type: 'string' },
             isActive: { type: 'boolean' },
-            isVerified: { type: 'boolean' }
-          }
-        }
-      }
-    }
+            isVerified: { type: 'boolean' },
+          },
+        },
+      },
+    },
   })
-  @ApiResponse({ 
-    status: 400, 
-    description: 'Email hoặc mật khẩu không đúng' 
+  @ApiResponse({
+    status: 400,
+    description: 'Email hoặc mật khẩu không đúng',
   })
-  async login(@Body() loginDto: LoginDto) {
-    return this.authService.login(loginDto);
+  async login(@Body() loginDto: LoginDto & { rememberMe: boolean }, @Res() res: Response) {
+    const result = await this.authService.login({ ...loginDto, rememberMe: loginDto.rememberMe });
+    res.cookie('access_token', result.accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      expires: loginDto.rememberMe ? new Date(Date.now() + 15 * 60 * 1000) : undefined, // 15m or session
+      path: '/',
+    });
+    res.cookie('refresh_token', result.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      expires: loginDto.rememberMe ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : undefined, // 7d or session
+      path: '/',
+    });
+    return res.status(HttpStatus.OK).json({ user: result.user });
   }
 
   /**
@@ -127,27 +165,60 @@ export class AuthController {
     return this.authService.resetPassword(resetPasswordDto);
   }
 
-  // //Login with Google OAuth
-
+  // Cập nhật authenticateWithGoogle
   @Post('google')
-  async authWithGoogle(@Body() sign_in_token: SignInTokenDto) {
+  async authWithGoogle(@Body() sign_in_token: SignInTokenDto & { rememberMe: boolean }, @Res() res: Response) {
     const result = await this.authService.authenticateWithGoogle(sign_in_token);
-    return { status: HttpStatus.OK, message: 'Đăng nhập Google thành công', data: result };
+    res.cookie('access_token', result.accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      expires: sign_in_token.rememberMe ? new Date(Date.now() + 15 * 60 * 1000) : undefined,
+      path: '/',
+    });
+    res.cookie('refresh_token', result.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      expires: sign_in_token.rememberMe ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : undefined,
+      path: '/',
+    });
+    return res.status(HttpStatus.OK).json({ user: result.user, message: 'Đăng nhập Google thành công' });
   }
 
-  // Refresh token endpoint
+  // Cập nhật refresh token
   @Post('refresh')
   @UseGuards(JwtRefreshTokenGuard)
-  async refreshToken(@Req() req: any) {
+  async refreshToken(@Req() req: any, @Res() res: Response) {
     const { userId, email, role } = req.user;
     const newAccessToken = this.authService.generateAccessToken({ userId, email, role });
     const newRefreshToken = this.authService.generateRefreshToken({ userId, email, role });
-    
-    return {
-      access_token: newAccessToken,
-      refresh_token: newRefreshToken,
-      message: 'Token refreshed successfully'
-    };
+
+    // Giả sử rememberMe=true (hoặc lấy từ user nếu lưu)
+    res.cookie('access_token', newAccessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      expires: new Date(Date.now() + 15 * 60 * 1000), // 15m
+      path: '/',
+    });
+    res.cookie('refresh_token', newRefreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7d
+      path: '/',
+    });
+
+    return res.status(HttpStatus.OK).json({ message: 'Token refreshed successfully' });
+  }
+
+  // Thêm logout endpoint
+  @Post('logout')
+  async logout(@Res() res: Response) {
+    res.clearCookie('access_token', { path: '/' });
+    res.clearCookie('refresh_token', { path: '/' });
+    return res.status(HttpStatus.OK).json({ message: 'Logged out' });
   }
 
   // Google OAuth callback handler

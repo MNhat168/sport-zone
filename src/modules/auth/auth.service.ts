@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { User, UserRole } from '../users/entities/user.entity';
 import * as bcrypt from 'bcrypt';
 import * as nodemailer from 'nodemailer';
+import { EmailService } from '../email/email.service';
 import { ConfigService } from '@nestjs/config';
 import { TokenPayload } from './interfaces/token.interface';
 import { JwtService } from '@nestjs/jwt';
@@ -18,6 +19,7 @@ export class AuthService {
     private readonly config_service: ConfigService,
     private readonly http_service: HttpService,
     @Inject(USER_REPOSITORY) private readonly user_repository: UserRepositoryInterface,
+    private readonly emailService: EmailService,
   ) { }
 
   generateAccessToken(payload: TokenPayload) {
@@ -65,8 +67,8 @@ export class AuthService {
     const verificationToken = Math.floor(
       100000 + Math.random() * 900000,
     ).toString();
-    // Send email
-    await this.sendVerificationEmail(email, verificationToken);
+    // Send email using template verify-email.hbs
+    await this.emailService.sendEmailVerification(email, verificationToken);
     // Save user with isVerified: false
     const user = new this.userModel({
       fullName,
@@ -94,30 +96,24 @@ export class AuthService {
     return { message: 'Account verified and created' };
   }
 
-  async sendVerificationEmail(email: string, code: string) {
-    const transporter = nodemailer.createTransport({
-      host: process.env.MAIL_HOST,
-      port: Number(process.env.MAIL_PORT),
-      secure: Number(process.env.MAIL_PORT) === 465, // true for port 465, false for others
-      auth: {
-        user: process.env.MAIL_USER,
-        pass: process.env.MAIL_PASS,
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
-      family: 4,
-    } as any);
-    await transporter.sendMail({
-      from: process.env.DEFAULT_MAIL_FROM!,
-      to: email,
-      subject: 'SportZone Verification Code',
-      text: `Your verification code is: ${code}`,
-    });
+  /**
+   * Verify account using token only (no email). Intended for one-click flows.
+   */
+  async verifyByToken(verificationToken: string) {
+    const user = await this.userModel.findOne({ verificationToken });
+    if (!user) throw new BadRequestException('Invalid or expired token');
+    if (user.isVerified) return { message: 'Already verified' };
+    user.isVerified = true;
+    user.verificationToken = undefined;
+    await user.save();
+    return { message: 'Account verified and created' };
   }
 
+  // Deprecated: replaced by EmailService.sendEmailVerification
+  // async sendVerificationEmail(email: string, code: string) {}
+
   // Login with current user
-  async login(body: { email: string; password: string }) {
+  async login(body: { email: string; password: string; rememberMe: boolean }) {
     const { email, password } = body;
     const user = await this.userModel.findOne({ email });
     if (!user) throw new BadRequestException('Invalid credentials');
@@ -135,8 +131,6 @@ export class AuthService {
       role: user.role
     });
     return {
-      access_token: accessToken,
-      refresh_token: refreshToken,
       user: {
         _id: user._id,
         email: user.email,
@@ -145,7 +139,10 @@ export class AuthService {
         avatarUrl: user.avatarUrl,
         isActive: user.isActive,
         isVerified: user.isVerified
-      } };
+      },
+      accessToken,
+      refreshToken,
+    };
   }
 
   // Forgot password
@@ -237,7 +234,7 @@ export class AuthService {
       refresh_token: refreshToken 
     };
   }
-  async authenticateWithGoogle(sign_in_token: SignInTokenDto) {
+  async authenticateWithGoogle(sign_in_token: SignInTokenDto & { rememberMe: boolean }) {
     const { token, avatar } = sign_in_token;
     const userInfo = await this.http_service.axiosRef.get(
       'https://www.googleapis.com/oauth2/v3/userinfo',
@@ -279,15 +276,20 @@ export class AuthService {
     });
 
     return {
-      access_token: accessToken,
-      refresh_token: refreshToken,
       user: {
-        _id: user._id, email: user.email, fullName: user.fullName, avatarUrl: user.avatarUrl,
-        role: user.role, 
-        // gender: user.gender || null, phone_number: user.phone_number,
-        // date_of_birth: user.date_of_birth, address: user.address || null, profile: user.profile || {},
-        // status: user.status, favoriteCourses: user.favoriteCourses || [],
-      }
+        _id: user._id,
+        email: user.email,
+        fullName: user.fullName,
+        avatarUrl: user.avatarUrl,
+        role: user.role,
+      },
+      accessToken,
+      refreshToken,
     };
+  }
+
+  // Logout
+  async logout() {
+    return { message: 'Logged out' };
   }
 }

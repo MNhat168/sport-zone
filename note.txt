@@ -1,0 +1,27 @@
+Tôi sẽ tìm hiểu API nào được sử dụng để get thông tin availability cho FE khi người dùng muốn đặt sân và cần kiểm tra schedule đã có người khác đặt.
+Dựa trên phân tích code, tôi có thể trả lời câu hỏi của bạn về API để get thông tin availability cho FE:
+🎯 API chính để FE get thông tin availability:
+GET /fields/:fieldId/availability
+Endpoint: GET /fields/:fieldId/availability
+Query Parameters:
+startDate: "YYYY-MM-DD" (required)
+endDate: "YYYY-MM-DD" (required)
+Example:
+📋 Response Format:
+🔍 Cách hoạt động:
+Pure Lazy Creation: API tạo virtual slots từ Field config
+Check Schedule: Kiểm tra Schedule đã tồn tại cho ngày đó
+Apply Constraints: Áp dụng bookedSlots từ Schedule để đánh dấu available: false
+Return Result: Trả về danh sách slots với trạng thái available/unavailable
+💡 Logic trong BookingsService:
+🎯 Khi nào FE gọi API này:
+User chọn sân → FE gọi API để get availability
+User chọn ngày → FE gọi API với date range
+Real-time update → FE có thể gọi lại khi có thay đổi
+Check before booking → FE hiển thị slots available/unavailable
+⚡ Tính năng đặc biệt:
+Public API: Không cần authentication
+Max 30 days: Giới hạn date range để tránh overload
+Real-time data: Luôn reflect trạng thái booking mới nhất
+Price calculation: Bao gồm cả pricing info cho mỗi slot
+Kết luận: API GET /fields/:fieldId/availability là endpoint chính mà FE sử dụng để kiểm tra slots đã có người đặt hay chưa, với field available: false cho các slots đã bị book.

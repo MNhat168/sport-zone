@@ -1,4 +1,5 @@
 import { Global, Module } from '@nestjs/common';
+import { RolesGuard } from './guards/roles.guard';
 import { TimezoneService } from './services/timezone.service';
 import { GlobalTimezoneInterceptor } from './interceptors/global-timezone.interceptor';
 
@@ -11,10 +12,12 @@ import { GlobalTimezoneInterceptor } from './interceptors/global-timezone.interc
   providers: [
     TimezoneService,
     GlobalTimezoneInterceptor,
+    RolesGuard,
   ],
   exports: [
     TimezoneService,
     GlobalTimezoneInterceptor,
+    RolesGuard,
   ],
 })
 export class CommonModule {}
