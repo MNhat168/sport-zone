@@ -2,9 +2,17 @@ import {
   Controller,
   Get,
   Param,
-  Body, Put, UseInterceptors, UploadedFiles, Inject, NotFoundException, BadRequestException, UseGuards, Req,
+  Body,
+  Put,
+  UseInterceptors,
+  UploadedFiles,
+  Inject,
+  NotFoundException,
+  BadRequestException,
+  UseGuards,
+  Req,
   Post,
-  Request
+  Request,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { ApiTags, ApiConsumes, ApiBearerAuth } from '@nestjs/swagger';
@@ -13,7 +21,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { UserRepository } from '@modules/users/repositories/user.repository';
 // DTO
 import { ForgotPasswordDto } from './dto/forgot-password.dto.ts';
-import { ResetPasswordDto } from './dto/reset-password.dto'; 
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 import { EmailService } from '../email/email.service';
 import { v4 as uuidv4 } from 'uuid';
@@ -25,23 +33,23 @@ import { USER_REPOSITORY } from './interface/users.interface';
 import { Multer } from 'multer';
 import { AuthGuard } from '@nestjs/passport';
 import { UserRole } from './entities/user.entity';
-import { SetFavouriteFieldsDto } from './dto/set-favourite-fields';
+import { SetFavouriteFieldsDto } from './dto/set-favourite-fields.dto';
 @ApiTags('Users')
 @Controller('users')
 @ApiBearerAuth('token')
 export class UsersController {
-    constructor(
-        private readonly usersService: UsersService,
-        @Inject(USER_REPOSITORY)
-        private readonly userRepository: UserRepository,
-        private readonly emailService: EmailService,
-    ) { }
-    @UseGuards(JwtAccessTokenGuard)
-    @Get('get-profile')
-    async getProfile(@Req() req: any): Promise<User> {
-        //console.log('req.user',req.user);
-        return this.usersService.findById(req.user.userId);
-    }
+  constructor(
+    private readonly usersService: UsersService,
+    @Inject(USER_REPOSITORY)
+    private readonly userRepository: UserRepository,
+    private readonly emailService: EmailService,
+  ) {}
+  @UseGuards(JwtAccessTokenGuard)
+  @Get('get-profile')
+  async getProfile(@Req() req: any): Promise<User> {
+    //console.log('req.user',req.user);
+    return this.usersService.findById(req.user.userId);
+  }
 
   // @Get(':id/profile')
   // async getProfile(@Param('id') id: string): Promise<UserProfileDto> {
@@ -56,56 +64,63 @@ export class UsersController {
   //     return this.usersService.updateProfile(id, dto);
   // }
 
-    @Post('forgot-password')
-    async forgotPassword(@Body() body: ForgotPasswordDto) {
-        const { email } = body;
-        const user = await this.userRepository.findOne({ email });
+  @Post('forgot-password')
+  async forgotPassword(@Body() body: ForgotPasswordDto) {
+    const { email } = body;
+    const user = await this.userRepository.findOne({ email });
 
-        if (!user) throw new NotFoundException('Email không tồn tại');
+    if (!user) throw new NotFoundException('Email không tồn tại');
 
-        const token = uuidv4();
-        console.log('token', token);
-        user.resetPasswordToken = token;
-        user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 giờ
+    const token = uuidv4();
+    console.log('token', token);
+    user.resetPasswordToken = token;
+    user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 giờ
 
-        await this.userRepository.update(user.id, user);
-        await this.emailService.sendResetPassword(user.email, token);
+    await this.userRepository.update(user.id, user);
+    await this.emailService.sendResetPassword(user.email, token);
 
-        return { message: 'Đã gửi mail đặt lại mật khẩu' };
+    return { message: 'Đã gửi mail đặt lại mật khẩu' };
+  }
+
+  @Post('reset-password')
+  async resetPassword(@Body() body: ResetPasswordDto) {
+    const { token, newPassword } = body;
+    console.log('body', body);
+    const user = await this.userRepository.findOne({
+      resetPasswordToken: token,
+    });
+    if (
+      !user ||
+      !user.resetPasswordExpires ||
+      new Date() > user.resetPasswordExpires
+    ) {
+      throw new BadRequestException('Token hết hạn hoặc không hợp lệ');
     }
+    user.password = await bcrypt.hash(newPassword, 10);
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    await this.userRepository.update(user.id, user);
+    return { message: 'Đặt lại mật khẩu thành công' };
+  }
 
-    @Post('reset-password')
-    async resetPassword(@Body() body: ResetPasswordDto) {
-        const { token, newPassword } = body;
-        console.log('body', body);
-        const user = await this.userRepository.findOne({
-            resetPasswordToken: token,
-        });
-        if (!user || !user.resetPasswordExpires || new Date() > user.resetPasswordExpires) {
-            throw new BadRequestException('Token hết hạn hoặc không hợp lệ');
-        }
-        user.password = await bcrypt.hash(newPassword, 10);
-        user.resetPasswordToken = undefined;
-        user.resetPasswordExpires = undefined;
-        await this.userRepository.update(user.id, user);
-        return { message: 'Đặt lại mật khẩu thành công' };
-    }
-
-    @Put(':id')
-    @UseInterceptors(FileFieldsInterceptor([{ name: 'avatar', maxCount: 1 }]))
-    @ApiConsumes('multipart/form-data')
-    async update(
-        @Param('id') id: string,
-        @Body() user: UpdateUserDto,
-        @UploadedFiles() files: { avatar?: Express.Multer.File[] },
-    ): Promise<User> {
-        const avatarFile = files?.avatar?.[0];  // ← Đây là nơi avatarFile được tạo
-        return this.usersService.update(id, user, avatarFile);  // ← Được truyền vào service
-    }
+  @Put(':id')
+  @UseInterceptors(FileFieldsInterceptor([{ name: 'avatar', maxCount: 1 }]))
+  @ApiConsumes('multipart/form-data')
+  async update(
+    @Param('id') id: string,
+    @Body() user: UpdateUserDto,
+    @UploadedFiles() files: { avatar?: Express.Multer.File[] },
+  ): Promise<User> {
+    const avatarFile = files?.avatar?.[0]; // ← Đây là nơi avatarFile được tạo
+    return this.usersService.update(id, user, avatarFile); // ← Được truyền vào service
+  }
 
   @UseGuards(AuthGuard('jwt'))
   @Post('favourite-fields')
-  async setFavouriteFields(@Request() req, @Body() body: SetFavouriteFieldsDto) {
+  async setFavouriteFields(
+    @Request() req,
+    @Body() body: SetFavouriteFieldsDto,
+  ) {
     const userEmail = req.user.email;
     const user = await this.usersService.findByEmail(userEmail);
     if (!user) {
@@ -116,7 +131,12 @@ export class UsersController {
         'Only users with role USER can set favourite fields',
       );
     }
+    // Debug: log the received body
+    console.log('[DEBUG] Controller received body:', body);
     // Add multiple favourite fields, block duplicates
-    return this.usersService.setFavouriteFields(userEmail, body.favouriteFields);
+    return this.usersService.setFavouriteFields(
+      userEmail,
+      body.favouriteFields,
+    );
   }
 }
