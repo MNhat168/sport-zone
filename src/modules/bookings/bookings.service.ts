@@ -42,6 +42,8 @@ export interface DailyAvailability {
 export class BookingsService {
   private readonly logger = new Logger(BookingsService.name);
 
+
+
   constructor(
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
     @InjectModel(Schedule.name) private readonly scheduleModel: Model<Schedule>,
@@ -127,7 +129,6 @@ export class BookingsService {
         });
       }
 
-      this.logger.log(`Generated availability for field ${fieldId}, ${result.length} days`);
       return result;
 
     } catch (error) {
@@ -221,7 +222,7 @@ export class BookingsService {
           startTime: bookingData.startTime,
           endTime: bookingData.endTime,
           numSlots,
-          status: BookingStatus.PENDING,
+          status: BookingStatus.CONFIRMED, // Đặt luôn thành CONFIRMED thay vì PENDING
           totalPrice: pricingInfo.totalPrice + amenitiesFee,
           amenitiesFee,
           selectedAmenities: bookingData.selectedAmenities?.map(id => new Types.ObjectId(id)) || [],
@@ -262,7 +263,6 @@ export class BookingsService {
           { session }
         ).exec();
 
-        this.logger.log(`Created booking ${booking._id} for field ${bookingData.fieldId} on ${bookingData.date}`);
 
         // Emit event for notifications
         this.eventEmitter.emit('booking.created', {
@@ -335,12 +335,12 @@ export class BookingsService {
           }
         ).exec();
 
-        // Query affected bookings
+        // Query affected bookings (chỉ cần tìm CONFIRMED vì không còn PENDING)
         const affectedBookings = await this.bookingModel
           .find({
             field: new Types.ObjectId(fieldId),
             date: holidayDate,
-            status: { $in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] }
+            status: BookingStatus.CONFIRMED
           })
           .session(session)
           .exec();
@@ -368,7 +368,6 @@ export class BookingsService {
           await schedule.save({ session });
         }
 
-        this.logger.log(`Marked holiday for field ${fieldId} on ${date}, affected ${affectedBookings.length} bookings`);
 
         return { schedule, affectedBookings };
       });
@@ -480,6 +479,88 @@ export class BookingsService {
     return bookings;
   }
 
+  /**
+   * Lấy danh sách booking của user với pagination và filter
+   * @param userId - ID của user
+   * @param options - Options để filter và paginate
+   * @returns Danh sách booking với pagination info
+   */
+  async getUserBookings(userId: string, options: {
+    status?: string;
+    type?: string;
+    limit: number;
+    page: number;
+  }): Promise<{ bookings: any[]; pagination: any }> {
+    try {
+
+      // Build filter query
+      const filter: any = { user: new Types.ObjectId(userId) };
+      
+      if (options.status) {
+        filter.status = options.status.toLowerCase();
+      }
+      
+      if (options.type) {
+        filter.type = options.type.toLowerCase();
+      }
+
+      // Calculate skip for pagination
+      const skip = (options.page - 1) * options.limit;
+
+      // Get total count for pagination
+      const total = await this.bookingModel.countDocuments(filter);
+
+      // Get bookings with population (không dùng .lean() để tận dụng BaseEntity toJSON transform)
+      const rawBookings = await this.bookingModel
+        .find(filter)
+        .populate({
+          path: 'field',
+          select: 'name location images sportType owner',
+          populate: {
+            path: 'owner',
+            select: 'fullName phoneNumber email'
+          }
+        })
+        .populate({
+          path: 'requestedCoach',
+          select: 'user hourlyRate sports',
+          populate: {
+            path: 'user',
+            select: 'fullName phoneNumber email'
+          }
+        })
+        .populate('selectedAmenities', 'name price')
+        .populate('user', 'fullName email phoneNumber')
+        .populate('payment', 'amount method status paymentNote')
+        .sort({ createdAt: -1 }) // Newest first
+        .skip(skip)
+        .limit(options.limit)
+        .exec();
+
+      // Convert to JSON để trigger BaseEntity toJSON transform
+      const bookings = rawBookings.map(booking => booking.toJSON());
+
+      const totalPages = Math.ceil(total / options.limit);
+
+
+      return {
+        bookings,
+        pagination: {
+          total,
+          page: options.page,
+          limit: options.limit,
+          totalPages,
+          hasNextPage: options.page < totalPages,
+          hasPrevPage: options.page > 1
+        }
+      };
+
+    } catch (error) {
+      this.logger.error(`Error getting user bookings for ${userId}:`, error);
+      throw new InternalServerErrorException('Failed to get user bookings');
+    }
+  }
+
   // ============================================================================
   // LEGACY/BACKWARD COMPATIBILITY METHODS
   // ============================================================================
@@ -496,7 +577,7 @@ export class BookingsService {
       startTime: data.startTime,
       endTime: data.endTime,
       type: BookingType.FIELD,
-      status: BookingStatus.PENDING,
+      status: BookingStatus.CONFIRMED, // Đặt luôn thành CONFIRMED
       totalPrice: data.totalPrice,
     });
     await booking.save();
@@ -527,7 +608,7 @@ export class BookingsService {
       startTime: data.fieldStartTime,
       endTime: data.fieldEndTime,
       type: BookingType.FIELD,
-      status: BookingStatus.PENDING,
+      status: BookingStatus.CONFIRMED, // Đặt luôn thành CONFIRMED
       totalPrice: data.fieldPrice,
     });
     // Create coach booking
@@ -539,7 +620,7 @@ export class BookingsService {
       startTime: data.coachStartTime,
       endTime: data.coachEndTime,
       type: BookingType.COACH,
-      status: BookingStatus.PENDING,
+      status: BookingStatus.CONFIRMED, // Đặt luôn thành CONFIRMED
       totalPrice: data.coachPrice,
     });
     await fieldBooking.save();
@@ -679,8 +760,6 @@ export class BookingsService {
       const endOfDay = new Date(date);
       endOfDay.setUTCHours(16, 59, 59, 999); // End of day in Vietnam = UTC+17-1ms
 
-      this.logger.log(`Searching bookings for field ${fieldId} on ${date.toISOString().split('T')[0]}`);
-
       // Query Booking collection for confirmed and pending bookings
       const bookings = await this.bookingModel.find({
         field: new Types.ObjectId(fieldId),
@@ -690,8 +769,6 @@ export class BookingsService {
         },
         status: { $in: ['confirmed', 'pending'] }
       }).exec();
-
-      this.logger.log(`Found ${bookings.length} bookings for field ${fieldId}`);
       
       return bookings;
     } catch (error) {

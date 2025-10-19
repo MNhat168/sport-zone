@@ -20,6 +20,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
 import { SchedulesModule } from './modules/schedules/schedules.module';
 import { CoachesModule } from './modules/coaches/coaches.module';
+import { AmenitiesModule } from './modules/amenities/amenities.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 @Module({
   imports: [
@@ -28,9 +29,21 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
       isGlobal: true, // ← cho phép dùng ở mọi module
       envFilePath: '.env',
     }),
-    MongooseModule.forRoot(
-      process.env.MONGODB_URI!
-    ),
+    MongooseModule.forRoot(process.env.MONGODB_URI!, {
+      connectionFactory: (connection) => {
+        connection.plugin((schema: any) => {
+          schema.set('toJSON', {
+            virtuals: true,
+            versionKey: false,
+            transform: (_doc: any, ret: any) => {
+              if (ret && ret._id && typeof ret._id !== 'string') ret._id = ret._id.toString();
+              return ret;
+            },
+          });
+        });
+        return connection;
+      },
+    }),
     EventEmitterModule.forRoot(),
     CommonModule,
     AuthModule,
@@ -46,8 +59,8 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     AdminModule,
     SchedulesModule,
     CoachesModule,
+    AmenitiesModule,
     NotificationsModule,
-    MongooseModule.forRoot(process.env.MONGODB_URI!)
   ],
   controllers: [AppController],
   providers: [

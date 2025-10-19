@@ -1,7 +1,18 @@
-import { IsString, IsNumber, IsArray, IsBoolean, IsOptional, IsEnum, ValidateNested, IsPositive, Min, Max } from 'class-validator';
+import { IsString, IsNumber, IsArray, IsBoolean, IsOptional, IsEnum, ValidateNested, IsPositive, Min, Max, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { SportType } from 'src/common/enums/sport-type.enum';
+
+class FieldAmenityDto {
+    @ApiProperty({ example: '507f1f77bcf86cd799439020', description: 'ID của tiện ích' })
+    @IsString()
+    amenityId: string;
+
+    @ApiProperty({ example: 150000, description: 'Giá của tiện ích tại sân này (VND)', minimum: 0 })
+    @IsNumber()
+    @Min(0)
+    price: number;
+}
 
 class DayOperatingHoursDto {
     @ApiProperty({ 
@@ -49,6 +60,29 @@ class DayPriceRangeDto {
     multiplier: number;
 }
 
+class GeoPointDto {
+    @ApiProperty({ enum: ['Point'], example: 'Point', description: 'GeoJSON type' })
+    @IsString()
+    @IsIn(['Point'])
+    type: 'Point';
+
+    @ApiProperty({ example: [106.700981, 10.776889], description: '[longitude, latitude]' })
+    @IsArray()
+    @Type(() => Number)
+    coordinates: [number, number];
+}
+
+export class LocationDto {
+    @ApiProperty({ example: 'District 3, Ho Chi Minh City', description: 'Địa chỉ hiển thị' })
+    @IsString()
+    address: string;
+
+    @ApiProperty({ type: GeoPointDto, description: 'GeoJSON point' })
+    @ValidateNested()
+    @Type(() => GeoPointDto)
+    geo: GeoPointDto;
+}
+
 /**
  * DTO cho response thông tin sân
  */
@@ -59,6 +93,12 @@ export class FieldsDto {
     @ApiProperty({ example: '507f1f77bcf86cd799439012', description: 'ID chủ sân' })
     owner: string;
 
+    @ApiPropertyOptional({ example: 'Nguyễn Văn A', description: 'Tên chủ sân' })
+    ownerName?: string;
+
+    @ApiPropertyOptional({ example: '0901234567', description: 'Số điện thoại chủ sân' })
+    ownerPhone?: string;
+
     @ApiProperty({ example: 'Sân bóng Phú Nhuận', description: 'Tên sân' })
     name: string;
 
@@ -68,8 +108,9 @@ export class FieldsDto {
     @ApiProperty({ example: 'Sân bóng đá 11 người, có đèn chiếu sáng', description: 'Mô tả sân' })
     description: string;
 
-    @ApiProperty({ example: 'District 3, Ho Chi Minh City', description: 'Địa điểm' })
-    location: string;
+    @ApiProperty({ type: LocationDto, description: 'Địa điểm của sân (địa chỉ + toạ độ)' })
+    @Type(() => LocationDto)
+    location: LocationDto;
 
     @ApiProperty({ type: [String], example: ['https://example.com/field1.jpg'], description: 'Danh sách hình ảnh' })
     images: string[];
@@ -130,9 +171,10 @@ export class CreateFieldDto {
     @IsString()
     description: string;
 
-    @ApiProperty({ example: 'District 3, Ho Chi Minh City', description: 'Địa điểm của sân' })
-    @IsString()
-    location: string;
+    @ApiProperty({ type: LocationDto, description: 'Địa điểm của sân (địa chỉ + toạ độ)' })
+    @ValidateNested()
+    @Type(() => LocationDto)
+    location: LocationDto;
 
     @ApiPropertyOptional({ 
         type: [String], 
@@ -183,6 +225,20 @@ export class CreateFieldDto {
     @IsNumber()
     @IsPositive()
     basePrice: number;
+
+    @ApiPropertyOptional({ 
+        type: [FieldAmenityDto], 
+        example: [
+            { amenityId: '507f1f77bcf86cd799439020', price: 150000 },
+            { amenityId: '507f1f77bcf86cd799439021', price: 50000 }
+        ], 
+        description: 'Danh sách tiện ích với giá riêng cho sân này' 
+    })
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => FieldAmenityDto)
+    amenities?: FieldAmenityDto[];
 }
 
 /**
@@ -269,10 +325,25 @@ export class UpdateFieldDto {
     @IsOptional()
     maintenanceUntil?: Date;
 
-    @ApiPropertyOptional({ example: 'Địa điểm mới', description: 'Địa điểm của sân' })
+    @ApiPropertyOptional({ type: LocationDto, description: 'Địa điểm mới của sân' })
     @IsOptional()
-    @IsString()
-    location?: string;
+    @ValidateNested()
+    @Type(() => LocationDto)
+    location?: LocationDto;
+
+    @ApiPropertyOptional({ 
+        type: [FieldAmenityDto], 
+        example: [
+            { amenityId: '507f1f77bcf86cd799439020', price: 150000 },
+            { amenityId: '507f1f77bcf86cd799439021', price: 50000 }
+        ], 
+        description: 'Danh sách tiện ích với giá riêng cho sân này' 
+    })
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => FieldAmenityDto)
+    amenities?: FieldAmenityDto[];
 }
 
 /**
@@ -291,7 +362,10 @@ export class CreateFieldWithFilesDto {
     @IsString()
     description: string;
 
-    @ApiProperty({ example: 'District 3, Ho Chi Minh City', description: 'Địa điểm của sân' })
+    @ApiProperty({ 
+        example: '{"address":"District 3, Ho Chi Minh City","geo":{"type":"Point","coordinates":[106.700981,10.776889]}}', 
+        description: 'Địa điểm của sân (JSON string với address và coordinates)' 
+    })
     @IsString()
     location: string;
 
@@ -325,6 +399,14 @@ export class CreateFieldWithFilesDto {
     @IsString()
     basePrice: string;
 
+    @ApiPropertyOptional({ 
+        example: '[{"amenityId":"507f1f77bcf86cd799439020","price":150000},{"amenityId":"507f1f77bcf86cd799439021","price":50000}]',
+        description: 'Danh sách tiện ích với giá riêng cho sân này (JSON string)' 
+    })
+    @IsOptional()
+    @IsString()
+    amenities?: string;
+
     @ApiProperty({ 
         type: 'array',
         items: { type: 'string', format: 'binary' },
@@ -332,4 +414,38 @@ export class CreateFieldWithFilesDto {
         required: false
     })
     images?: Express.Multer.File[];
+}
+
+/**
+ * DTO cho pagination response
+ */
+export class PaginationDto {
+    @ApiProperty({ example: 25, description: 'Tổng số bản ghi' })
+    total: number;
+
+    @ApiProperty({ example: 1, description: 'Trang hiện tại' })
+    page: number;
+
+    @ApiProperty({ example: 10, description: 'Số bản ghi trên mỗi trang' })
+    limit: number;
+
+    @ApiProperty({ example: 3, description: 'Tổng số trang' })
+    totalPages: number;
+
+    @ApiProperty({ example: true, description: 'Có trang tiếp theo không' })
+    hasNextPage: boolean;
+
+    @ApiProperty({ example: false, description: 'Có trang trước không' })
+    hasPrevPage: boolean;
+}
+
+/**
+ * DTO cho response danh sách field của owner
+ */
+export class OwnerFieldsResponseDto {
+    @ApiProperty({ type: [FieldsDto], description: 'Danh sách sân của owner' })
+    fields: FieldsDto[];
+
+    @ApiProperty({ type: PaginationDto, description: 'Thông tin phân trang' })
+    pagination: PaginationDto;
 }

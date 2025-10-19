@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
-import { BaseEntity } from 'src/common/entities/base.entity';
+import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
 
 export enum PaymentStatus {
   PENDING = 'pending',
@@ -42,3 +42,6 @@ export class Payment extends BaseEntity {
 }
 
 export const PaymentSchema = SchemaFactory.createForClass(Payment);
+
+// Cấu hình timestamps từ BaseEntity
+configureBaseEntitySchema(PaymentSchema);

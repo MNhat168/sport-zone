@@ -1,0 +1,19 @@
+{
+  "enabled": {
+    "amenities": true,
+    "users": false,
+    "fields": false,
+    "bookings": false,
+    "reviews": false
+  },
+  "options": {
+    "clearExisting": false,
+    "skipDuplicates": true,
+    "batchSize": 50
+  },
+  "amenities": {
+    "enabled": true,
+    "clearExisting": false,
+    "skipDuplicates": true
+  }
+}

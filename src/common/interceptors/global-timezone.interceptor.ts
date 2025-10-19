@@ -69,8 +69,12 @@ export class GlobalTimezoneInterceptor implements NestInterceptor {
       // Transform object properties
       const transformed = {};
       for (const [key, value] of Object.entries(plainData)) {
+        // Handle _id serialization
+        if (key === '_id' && value && typeof value === 'object' && value.toString) {
+          transformed[key] = value.toString();
+        }
         // Transform timestamp fields
-        if ((key === 'createdAt' || key === 'updatedAt') && value instanceof Date) {
+        else if ((key === 'createdAt' || key === 'updatedAt') && value instanceof Date) {
           transformed[key] = this.timezoneService.toVietnamTime(value);
         } else if (value && typeof value === 'object') {
           // Recursively transform nested objects

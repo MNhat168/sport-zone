@@ -38,31 +38,18 @@ import { SetFavouriteFieldsDto } from './dto/set-favourite-fields.dto';
 @Controller('users')
 @ApiBearerAuth('token')
 export class UsersController {
-  constructor(
-    private readonly usersService: UsersService,
-    @Inject(USER_REPOSITORY)
-    private readonly userRepository: UserRepository,
-    private readonly emailService: EmailService,
-  ) {}
-  @UseGuards(JwtAccessTokenGuard)
-  @Get('get-profile')
-  async getProfile(@Req() req: any): Promise<User> {
-    //console.log('req.user',req.user);
-    return this.usersService.findById(req.user.userId);
-  }
-
-  // @Get(':id/profile')
-  // async getProfile(@Param('id') id: string): Promise<UserProfileDto> {
-  //     return this.usersService.getProfile(id);
-  // }
-
-  // @Patch(':id/profile')
-  // async updateProfile(
-  //     @Param('id') id: string,
-  //     @Body() dto: Partial<UserProfileDto>,
-  // ): Promise<UserProfileDto> {
-  //     return this.usersService.updateProfile(id, dto);
-  // }
+    constructor(
+        private readonly usersService: UsersService,
+        @Inject(USER_REPOSITORY)
+        private readonly userRepository: UserRepository,
+        private readonly emailService: EmailService,
+    ) { }
+    @UseGuards(JwtAccessTokenGuard)
+    @Get('get-profile')
+    async getProfile(@Req() req: any): Promise<User> {
+        //console.log('req.user',req.user);
+    return await this.usersService.findById(req.user.userId);
+    }
 
   @Post('forgot-password')
   async forgotPassword(@Body() body: ForgotPasswordDto) {
