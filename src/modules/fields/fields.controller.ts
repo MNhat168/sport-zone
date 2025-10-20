@@ -1,9 +1,10 @@
-import { Controller, Get, Query, Param, Post, Body, Delete, Put, UseGuards, Request, UseInterceptors, UploadedFiles, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Query, Param, Post, Body, Delete, Put, UseGuards, Request, UseInterceptors, UploadedFiles, BadRequestException, NotFoundException, Patch } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiConsumes } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { FieldsService } from './fields.service';
-import { FieldsDto, CreateFieldDto, UpdateFieldDto, CreateFieldWithFilesDto, OwnerFieldsResponseDto, FieldOwnerProfileDto, CreateFieldOwnerProfileDto, UpdateFieldOwnerProfileDto } from './dtos/fields.dto';
+import { FieldsDto, CreateFieldDto, UpdateFieldDto, CreateFieldWithFilesDto, OwnerFieldsResponseDto } from './dtos/fields.dto';
+import { FieldOwnerProfileDto, CreateFieldOwnerProfileDto, UpdateFieldOwnerProfileDto } from './dtos/field-owner-profile.dto';
 import type { IFile } from '../../interfaces/file.interface';
 import { FileUploadAuthGuard } from './guards/file-upload-auth.guard';
 
@@ -581,7 +582,7 @@ export class FieldsController {
     /**
      * Cập nhật FieldOwnerProfile
      */
-    @Put('owner-profile')
+    @Patch('owner-profile')
     @UseGuards(AuthGuard('jwt'))
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Cập nhật FieldOwnerProfile (Field Owner only)' })

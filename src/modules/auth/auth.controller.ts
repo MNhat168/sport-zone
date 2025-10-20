@@ -5,14 +5,94 @@ import { SignInTokenDto } from './dto/sign-in-token.dto';
 import { RegisterDto, LoginDto, VerifyAccountDto, ForgotPasswordDto, ResetPasswordDto, LoginWithRememberDto } from './dto/auth.dto';
 import { HttpStatus } from '@nestjs/common';
 import { JwtRefreshTokenGuard } from './guards/jwt-refresh-token.guard';
+import { JwtAccessTokenGuard } from './guards/jwt-access-token.guard';
 import { Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiQuery } from '@nestjs/swagger';
 import { Response } from 'express';
+import { ConfigService } from '@nestjs/config';
 
 @Controller('auth')
 @ApiTags('Auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) { }
+  constructor(
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) { }
+
+  /**
+   * Helper method để set authentication cookies
+   * @param res - Response object
+   * @param accessToken - JWT access token
+   * @param refreshToken - JWT refresh token  
+   * @param rememberMe - Nếu true: persistent cookies (có expiration), nếu false: session cookies
+   */
+  private setAuthCookies(
+    res: Response, 
+    accessToken: string, 
+    refreshToken: string, 
+    rememberMe: boolean
+  ): void {
+    const isProduction = process.env.NODE_ENV === 'production';
+    
+    // Đọc thời gian hết hạn từ ENV (cùng giá trị với JwtService)
+    const accessExpCfg = this.configService.get<string>('JWT_ACCESS_TOKEN_EXPIRATION_TIME') ?? '1d';
+    const refreshExpCfg = this.configService.get<string>('JWT_REFRESH_TOKEN_EXPIRATION_TIME') ?? '7d';
+    const accessMs = this.parseExpirationToMs(accessExpCfg);
+    const refreshMs = this.parseExpirationToMs(refreshExpCfg);
+    
+    // Cấu hình cookie chung
+    const cookieOptions = {
+      httpOnly: true,      // Không thể truy cập từ JavaScript (bảo mật)
+      secure: isProduction, // Chỉ gửi qua HTTPS ở production
+      sameSite: 'strict' as const, // Chống CSRF attack
+      path: '/',
+    };
+
+    // Access token
+    res.cookie('access_token', accessToken, {
+      ...cookieOptions,
+      // Nếu rememberMe = true: cookie tồn tại 15 phút
+      // Nếu rememberMe = false: session cookie (xóa khi đóng browser)
+      expires: rememberMe 
+        ? new Date(Date.now() + accessMs) 
+        : undefined,
+    });
+
+    // Refresh token
+    res.cookie('refresh_token', refreshToken, {
+      ...cookieOptions,
+      // Nếu rememberMe = true: cookie tồn tại 7 ngày
+      // Nếu rememberMe = false: session cookie (xóa khi đóng browser)
+      expires: rememberMe 
+        ? new Date(Date.now() + refreshMs) 
+        : undefined,
+    });
+  }
+
+  /**
+   * Parse giá trị thời gian hết hạn từ ENV sang milliseconds.
+   * Hỗ trợ:
+   * - Số thuần: tính là giây (ví dụ: 86400)
+   * - Chuỗi có hậu tố: s, m, h, d (ví dụ: '15m', '7d')
+   */
+  private parseExpirationToMs(exp: string | number): number {
+    if (typeof exp === 'number') return exp * 1000;
+    const str = String(exp).trim();
+    if (/^\d+$/.test(str)) {
+      return Number(str) * 1000; // số giây
+    }
+    const match = str.match(/^(\d+)\s*([smhd])$/i);
+    if (!match) return 15 * 60 * 1000; // fallback 15 phút
+    const value = Number(match[1]);
+    const unit = match[2].toLowerCase();
+    switch (unit) {
+      case 's': return value * 1000;
+      case 'm': return value * 60 * 1000;
+      case 'h': return value * 60 * 60 * 1000;
+      case 'd': return value * 24 * 60 * 60 * 1000;
+      default: return value * 1000;
+    }
+  }
   
   /**
    * Đăng ký tài khoản mới
@@ -110,22 +190,22 @@ export class AuthController {
   })
   async login(@Body() loginDto: LoginWithRememberDto, @Res() res: Response) {
     console.log('🔐 Login attempt for:', loginDto.email);
-    const result = await this.authService.login({ ...loginDto, rememberMe: !!loginDto.rememberMe });
+    
+    const result = await this.authService.login({ 
+      ...loginDto, 
+      rememberMe: !!loginDto.rememberMe 
+    });
+    
     console.log('✅ Login successful, setting cookies');
-    res.cookie('access_token', result.accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      expires: loginDto.rememberMe ? new Date(Date.now() + 15 * 60 * 1000) : undefined, // 15m or session
-      path: '/',
-    });
-    res.cookie('refresh_token', result.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      expires: loginDto.rememberMe ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : undefined, // 7d or session
-      path: '/',
-    });
+    
+    // Set authentication cookies
+    this.setAuthCookies(
+      res, 
+      result.accessToken, 
+      result.refreshToken, 
+      !!loginDto.rememberMe
+    );
+    
     return res.status(HttpStatus.OK).json({ user: result.user });
   }
 
@@ -167,60 +247,99 @@ export class AuthController {
     return this.authService.resetPassword(resetPasswordDto);
   }
 
-  // Cập nhật authenticateWithGoogle
+  // Đăng nhập bằng Google OAuth
   @Post('google')
-  async authWithGoogle(@Body() sign_in_token: SignInTokenDto & { rememberMe: boolean }, @Res() res: Response) {
+  @ApiOperation({ summary: 'Đăng nhập bằng Google OAuth' })
+  async authWithGoogle(
+    @Body() sign_in_token: SignInTokenDto & { rememberMe: boolean }, 
+    @Res() res: Response
+  ) {
     const result = await this.authService.authenticateWithGoogle(sign_in_token);
-    res.cookie('access_token', result.accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      expires: sign_in_token.rememberMe ? new Date(Date.now() + 15 * 60 * 1000) : undefined,
-      path: '/',
+    
+    // Set authentication cookies
+    this.setAuthCookies(
+      res, 
+      result.accessToken, 
+      result.refreshToken, 
+      !!sign_in_token.rememberMe
+    );
+    
+    return res.status(HttpStatus.OK).json({ 
+      user: result.user, 
+      message: 'Đăng nhập Google thành công' 
     });
-    res.cookie('refresh_token', result.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      expires: sign_in_token.rememberMe ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : undefined,
-      path: '/',
-    });
-    return res.status(HttpStatus.OK).json({ user: result.user, message: 'Đăng nhập Google thành công' });
   }
 
-  // Cập nhật refresh token
+  // Làm mới access token bằng refresh token
   @Post('refresh')
+  @ApiOperation({ summary: 'Làm mới access token' })
   @UseGuards(JwtRefreshTokenGuard)
   async refreshToken(@Req() req: any, @Res() res: Response) {
     const { userId, email, role } = req.user;
+    
+    // Tạo token mới
     const newAccessToken = this.authService.generateAccessToken({ userId, email, role });
     const newRefreshToken = this.authService.generateRefreshToken({ userId, email, role });
 
-    // Giả sử rememberMe=true (hoặc lấy từ user nếu lưu)
-    res.cookie('access_token', newAccessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      expires: new Date(Date.now() + 15 * 60 * 1000), // 15m
-      path: '/',
-    });
-    res.cookie('refresh_token', newRefreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7d
-      path: '/',
-    });
+    // Nếu refresh_token tồn tại, nghĩa là user đã đăng nhập (rememberMe hoặc session)
+    // → Giữ nguyên pattern của cookie (persistent hoặc session)
+    const hasRefreshToken = !!req.cookies['refresh_token'];
+    
+    // Set lại cookies với cùng pattern
+    this.setAuthCookies(res, newAccessToken, newRefreshToken, hasRefreshToken);
 
-    return res.status(HttpStatus.OK).json({ message: 'Token refreshed successfully' });
+    return res.status(HttpStatus.OK).json({ 
+      message: 'Token refreshed successfully' 
+    });
   }
 
-  // Thêm logout endpoint
+  // Kiểm tra session hiện tại có hợp lệ không
+  @Get('validate')
+  @ApiOperation({ summary: 'Kiểm tra session có hợp lệ không' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Session hợp lệ, trả về thông tin user' 
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token không hợp lệ hoặc đã hết hạn' 
+  })
+  @UseGuards(JwtAccessTokenGuard)
+  async validateSession(@Req() req: any) {
+    console.log('🔐 Validating session for user:', req.user?.email);
+    
+    // Nếu đến đây, JWT guard đã verify token thành công
+    // Lấy thông tin user đầy đủ từ database
+    const user = await this.authService.getUserById(req.user.userId);
+    
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+    
+    return {
+      user: {
+        _id: user._id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        avatarUrl: user.avatarUrl,
+        isActive: user.isActive,
+        isVerified: user.isVerified,
+      },
+    };
+  }
+
+  // Đăng xuất - xóa cookies
   @Post('logout')
+  @ApiOperation({ summary: 'Đăng xuất' })
   async logout(@Res() res: Response) {
+    // Xóa cả 2 cookies
     res.clearCookie('access_token', { path: '/' });
     res.clearCookie('refresh_token', { path: '/' });
-    return res.status(HttpStatus.OK).json({ message: 'Logged out' });
+    
+    return res.status(HttpStatus.OK).json({ 
+      message: 'Logged out successfully' 
+    });
   }
 
   // Google OAuth callback handler
