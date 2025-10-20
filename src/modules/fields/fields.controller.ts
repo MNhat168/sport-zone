@@ -1,9 +1,9 @@
-import { Controller, Get, Query, Param, Post, Body, Delete, Put, UseGuards, Request, UseInterceptors, UploadedFiles, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Query, Param, Post, Body, Delete, Put, UseGuards, Request, UseInterceptors, UploadedFiles, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiConsumes } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { FieldsService } from './fields.service';
-import { FieldsDto, CreateFieldDto, UpdateFieldDto, CreateFieldWithFilesDto, OwnerFieldsResponseDto } from './dtos/fields.dto';
+import { FieldsDto, CreateFieldDto, UpdateFieldDto, CreateFieldWithFilesDto, OwnerFieldsResponseDto, FieldOwnerProfileDto, CreateFieldOwnerProfileDto, UpdateFieldOwnerProfileDto } from './dtos/fields.dto';
 import type { IFile } from '../../interfaces/file.interface';
 import { FileUploadAuthGuard } from './guards/file-upload-auth.guard';
 
@@ -527,5 +527,93 @@ export class FieldsController {
     ) {
         const ownerId = req.user._id || req.user.id;
         return this.fieldsService.updateFieldAmenities(fieldId, body.amenities, ownerId);
+    }
+
+    // ============================================================================
+    // FIELD OWNER PROFILE ENDPOINTS
+    // ============================================================================
+
+    /**
+     * Tạo FieldOwnerProfile mới
+     */
+    @Post('owner-profile')
+    @UseGuards(AuthGuard('jwt'))
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Tạo FieldOwnerProfile mới (Field Owner only)' })
+    @ApiResponse({
+        status: 201,
+        description: 'FieldOwnerProfile được tạo thành công',
+        type: FieldOwnerProfileDto
+    })
+    @ApiResponse({ status: 401, description: 'Unauthorized' })
+    @ApiResponse({ status: 400, description: 'Bad Request - User already has profile or validation failed' })
+    async createFieldOwnerProfile(
+        @Request() req: any,
+        @Body() createDto: CreateFieldOwnerProfileDto,
+    ): Promise<FieldOwnerProfileDto> {
+        const userId = req.user._id || req.user.id;
+        return this.fieldsService.createFieldOwnerProfile(userId, createDto);
+    }
+
+    /**
+     * Lấy FieldOwnerProfile của user hiện tại
+     */
+    @Get('owner-profile')
+    @UseGuards(AuthGuard('jwt'))
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Lấy FieldOwnerProfile của user hiện tại' })
+    @ApiResponse({
+        status: 200,
+        description: 'FieldOwnerProfile được lấy thành công',
+        type: FieldOwnerProfileDto
+    })
+    @ApiResponse({ status: 401, description: 'Unauthorized' })
+    @ApiResponse({ status: 404, description: 'FieldOwnerProfile not found' })
+    async getMyFieldOwnerProfile(@Request() req: any): Promise<FieldOwnerProfileDto> {
+        const userId = req.user._id || req.user.id;
+        const profile = await this.fieldsService.getFieldOwnerProfileByUserId(userId);
+        if (!profile) {
+            throw new NotFoundException('Field owner profile not found');
+        }
+        return profile;
+    }
+
+    /**
+     * Cập nhật FieldOwnerProfile
+     */
+    @Put('owner-profile')
+    @UseGuards(AuthGuard('jwt'))
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Cập nhật FieldOwnerProfile (Field Owner only)' })
+    @ApiResponse({
+        status: 200,
+        description: 'FieldOwnerProfile được cập nhật thành công',
+        type: FieldOwnerProfileDto
+    })
+    @ApiResponse({ status: 401, description: 'Unauthorized' })
+    @ApiResponse({ status: 404, description: 'FieldOwnerProfile not found' })
+    @ApiResponse({ status: 400, description: 'Validation failed' })
+    async updateFieldOwnerProfile(
+        @Request() req: any,
+        @Body() updateDto: UpdateFieldOwnerProfileDto,
+    ): Promise<FieldOwnerProfileDto> {
+        const userId = req.user._id || req.user.id;
+        return this.fieldsService.updateFieldOwnerProfile(userId, updateDto);
+    }
+
+    /**
+     * Lấy FieldOwnerProfile theo profile ID (Public endpoint)
+     */
+    @Get('owner-profile/:id')
+    @ApiOperation({ summary: 'Lấy FieldOwnerProfile theo ID (Public)' })
+    @ApiParam({ name: 'id', description: 'FieldOwnerProfile ID' })
+    @ApiResponse({
+        status: 200,
+        description: 'FieldOwnerProfile được lấy thành công',
+        type: FieldOwnerProfileDto
+    })
+    @ApiResponse({ status: 404, description: 'FieldOwnerProfile not found' })
+    async getFieldOwnerProfile(@Param('id') id: string): Promise<FieldOwnerProfileDto> {
+        return this.fieldsService.getFieldOwnerProfile(id);
     }
 }

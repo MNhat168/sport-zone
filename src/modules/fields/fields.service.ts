@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, InternalServerErrorException, Logger, Un
 import { InjectModel } from '@nestjs/mongoose';
 import { Field } from './entities/field.entity';
 import { Model, Types } from 'mongoose';
-import { FieldsDto, CreateFieldDto, UpdateFieldDto, CreateFieldWithFilesDto } from './dtos/fields.dto';
+import { FieldsDto, CreateFieldDto, UpdateFieldDto, CreateFieldWithFilesDto, FieldOwnerProfileDto, CreateFieldOwnerProfileDto, UpdateFieldOwnerProfileDto } from './dtos/fields.dto';
 import { FieldOwnerProfile } from './entities/field-owner-profile.entity';
 import { AwsS3Service } from '../../service/aws-s3.service';
 import type { IFile } from '../../interfaces/file.interface';
@@ -2095,6 +2095,187 @@ export class FieldsService {
                 name: updatedField.name,
                 amenities: updatedField.amenities
             }
+        };
+    }
+
+    // ============================================================================
+    // FIELD OWNER PROFILE OPERATIONS
+    // ============================================================================
+
+    /**
+     * Tạo FieldOwnerProfile mới
+     * @param userId - ID của user
+     * @param createDto - Dữ liệu tạo profile
+     * @returns FieldOwnerProfileDto
+     */
+    async createFieldOwnerProfile(userId: string, createDto: CreateFieldOwnerProfileDto): Promise<FieldOwnerProfileDto> {
+        try {
+            // Kiểm tra xem user đã có profile chưa
+            const existingProfile = await this.fieldOwnerProfileModel.findOne({ user: new Types.ObjectId(userId) }).exec();
+            if (existingProfile) {
+                throw new BadRequestException('User already has a field owner profile');
+            }
+
+            // Tạo profile mới
+            const newProfile = new this.fieldOwnerProfileModel({
+                user: new Types.ObjectId(userId),
+                facilityName: createDto.facilityName,
+                facilityLocation: createDto.facilityLocation,
+                supportedSports: createDto.supportedSports,
+                description: createDto.description,
+                amenities: createDto.amenities || [],
+                verificationDocument: createDto.verificationDocument,
+                businessHours: createDto.businessHours,
+                contactPhone: createDto.contactPhone,
+                website: createDto.website,
+                rating: 0,
+                totalReviews: 0,
+                isVerified: false,
+            });
+
+            const savedProfile = await newProfile.save();
+
+            // Populate user info
+            const populatedProfile = await this.fieldOwnerProfileModel
+                .findById(savedProfile._id)
+                .populate('user', 'fullName phone email')
+                .exec();
+
+            return this.mapToFieldOwnerProfileDto(populatedProfile);
+
+        } catch (error) {
+            if (error instanceof BadRequestException) {
+                throw error;
+            }
+            this.logger.error('Error creating field owner profile', error);
+            throw new InternalServerErrorException('Failed to create field owner profile');
+        }
+    }
+
+    /**
+     * Lấy FieldOwnerProfile theo user ID
+     * @param userId - ID của user
+     * @returns FieldOwnerProfileDto hoặc null
+     */
+    async getFieldOwnerProfileByUserId(userId: string): Promise<FieldOwnerProfileDto | null> {
+        try {
+            const profile = await this.fieldOwnerProfileModel
+                .findOne({ user: new Types.ObjectId(userId) })
+                .populate('user', 'fullName phone email')
+                .exec();
+
+            if (!profile) {
+                return null;
+            }
+
+            return this.mapToFieldOwnerProfileDto(profile);
+
+        } catch (error) {
+            this.logger.error('Error getting field owner profile by user ID', error);
+            throw new InternalServerErrorException('Failed to get field owner profile');
+        }
+    }
+
+    /**
+     * Lấy FieldOwnerProfile theo profile ID
+     * @param profileId - ID của profile
+     * @returns FieldOwnerProfileDto
+     */
+    async getFieldOwnerProfile(profileId: string): Promise<FieldOwnerProfileDto> {
+        try {
+            const profile = await this.fieldOwnerProfileModel
+                .findById(profileId)
+                .populate('user', 'fullName phone email')
+                .exec();
+
+            if (!profile) {
+                throw new NotFoundException('Field owner profile not found');
+            }
+
+            return this.mapToFieldOwnerProfileDto(profile);
+
+        } catch (error) {
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            this.logger.error('Error getting field owner profile', error);
+            throw new InternalServerErrorException('Failed to get field owner profile');
+        }
+    }
+
+    /**
+     * Cập nhật FieldOwnerProfile
+     * @param userId - ID của user (để verify quyền sở hữu)
+     * @param updateDto - Dữ liệu cập nhật
+     * @returns FieldOwnerProfileDto
+     */
+    async updateFieldOwnerProfile(userId: string, updateDto: UpdateFieldOwnerProfileDto): Promise<FieldOwnerProfileDto> {
+        try {
+            // Tìm profile của user
+            const profile = await this.fieldOwnerProfileModel
+                .findOne({ user: new Types.ObjectId(userId) })
+                .exec();
+
+            if (!profile) {
+                throw new NotFoundException('Field owner profile not found');
+            }
+
+            // Cập nhật dữ liệu
+            const updateData: any = {};
+            if (updateDto.facilityName !== undefined) updateData.facilityName = updateDto.facilityName;
+            if (updateDto.facilityLocation !== undefined) updateData.facilityLocation = updateDto.facilityLocation;
+            if (updateDto.supportedSports !== undefined) updateData.supportedSports = updateDto.supportedSports;
+            if (updateDto.description !== undefined) updateData.description = updateDto.description;
+            if (updateDto.amenities !== undefined) updateData.amenities = updateDto.amenities;
+            if (updateDto.verificationDocument !== undefined) updateData.verificationDocument = updateDto.verificationDocument;
+            if (updateDto.businessHours !== undefined) updateData.businessHours = updateDto.businessHours;
+            if (updateDto.contactPhone !== undefined) updateData.contactPhone = updateDto.contactPhone;
+            if (updateDto.website !== undefined) updateData.website = updateDto.website;
+
+            const updatedProfile = await this.fieldOwnerProfileModel
+                .findByIdAndUpdate(profile._id, { $set: updateData }, { new: true })
+                .populate('user', 'fullName phone email')
+                .exec();
+
+            if (!updatedProfile) {
+                throw new NotFoundException('Field owner profile not found');
+            }
+
+            return this.mapToFieldOwnerProfileDto(updatedProfile);
+
+        } catch (error) {
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            this.logger.error('Error updating field owner profile', error);
+            throw new InternalServerErrorException('Failed to update field owner profile');
+        }
+    }
+
+    /**
+     * Helper method để map FieldOwnerProfile entity sang DTO
+     */
+    private mapToFieldOwnerProfileDto(profile: any): FieldOwnerProfileDto {
+        return {
+            id: profile._id.toString(),
+            user: profile.user._id?.toString() || profile.user.toString(),
+            userFullName: profile.user?.fullName,
+            userPhone: profile.user?.phone,
+            userEmail: profile.user?.email,
+            facilityName: profile.facilityName,
+            facilityLocation: profile.facilityLocation,
+            supportedSports: profile.supportedSports,
+            description: profile.description,
+            amenities: profile.amenities,
+            rating: profile.rating,
+            totalReviews: profile.totalReviews,
+            isVerified: profile.isVerified,
+            verificationDocument: profile.verificationDocument,
+            businessHours: profile.businessHours,
+            contactPhone: profile.contactPhone,
+            website: profile.website,
+            createdAt: profile.createdAt,
+            updatedAt: profile.updatedAt,
         };
     }
 }

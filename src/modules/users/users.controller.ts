@@ -3,7 +3,6 @@ import {
   Get,
   Param,
   Body,
-  Put,
   UseInterceptors,
   UploadedFiles,
   Inject,
@@ -13,6 +12,7 @@ import {
   Req,
   Post,
   Request,
+  Patch,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { ApiTags, ApiConsumes, ApiBearerAuth } from '@nestjs/swagger';
@@ -90,16 +90,18 @@ export class UsersController {
     return { message: 'Đặt lại mật khẩu thành công' };
   }
 
-  @Put(':id')
+ 
+  @UseGuards(JwtAccessTokenGuard)
+  @Patch('me')
   @UseInterceptors(FileFieldsInterceptor([{ name: 'avatar', maxCount: 1 }]))
   @ApiConsumes('multipart/form-data')
-  async update(
-    @Param('id') id: string,
+  async updateMe(
+    @Req() req: any,
     @Body() user: UpdateUserDto,
     @UploadedFiles() files: { avatar?: Express.Multer.File[] },
   ): Promise<User> {
-    const avatarFile = files?.avatar?.[0]; // ← Đây là nơi avatarFile được tạo
-    return this.usersService.update(id, user, avatarFile); // ← Được truyền vào service
+    const avatarFile = files?.avatar?.[0];
+    return this.usersService.update(req.user.userId, user, avatarFile);
   }
 
   @UseGuards(AuthGuard('jwt'))

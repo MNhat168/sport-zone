@@ -96,6 +96,19 @@ export class LoginDto {
 }
 
 /**
+ * DTO cho đăng nhập kèm rememberMe
+ */
+export class LoginWithRememberDto extends LoginDto {
+    /**
+     * Ghi nhớ đăng nhập (tùy chọn)
+     * @example true
+     */
+    @ApiPropertyOptional({ description: 'Ghi nhớ đăng nhập', default: false })
+    @IsOptional()
+    rememberMe?: boolean;
+}
+
+/**
  * DTO cho việc xác thực tài khoản
  */
 export class VerifyAccountDto {

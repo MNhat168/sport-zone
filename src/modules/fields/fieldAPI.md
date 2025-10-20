@@ -1441,3 +1441,153 @@ curl -X PUT "http://localhost:3000/fields/507f1f77bcf86cd799439011/amenities" \
   "message": "Access denied. Field owner only."
 }
 ```
+
+## FieldOwnerProfile Management
+
+### Create FieldOwnerProfile
+
+- **Method**: `POST`
+- **Path**: `/fields/owner-profile`
+- **Auth**: Field Owner Only (JWT required)
+- **Description**: Tạo FieldOwnerProfile mới cho user hiện tại
+
+**Request Body**:
+```json
+{
+  "facilityName": "Sân bóng Phú Nhuận",
+  "facilityLocation": "District 3, Ho Chi Minh City",
+  "supportedSports": ["football", "tennis"],
+  "description": "Cơ sở vật chất hiện đại với sân bóng đá và tennis",
+  "amenities": ["wifi", "parking", "changing_room"],
+  "verificationDocument": "https://example.com/business-license.jpg",
+  "businessHours": "Monday-Sunday: 6:00-22:00",
+  "contactPhone": "0901234567",
+  "website": "https://example.com"
+}
+```
+
+**Success 201**:
+```json
+{
+  "id": "507f1f77bcf86cd799439011",
+  "user": "507f1f77bcf86cd799439012",
+  "userFullName": "Nguyễn Văn A",
+  "userPhone": "0901234567",
+  "userEmail": "owner@example.com",
+  "facilityName": "Sân bóng Phú Nhuận",
+  "facilityLocation": "District 3, Ho Chi Minh City",
+  "supportedSports": ["football", "tennis"],
+  "description": "Cơ sở vật chất hiện đại với sân bóng đá và tennis",
+  "amenities": ["wifi", "parking", "changing_room"],
+  "rating": 0,
+  "totalReviews": 0,
+  "isVerified": false,
+  "verificationDocument": "https://example.com/business-license.jpg",
+  "businessHours": "Monday-Sunday: 6:00-22:00",
+  "contactPhone": "0901234567",
+  "website": "https://example.com",
+  "createdAt": "2025-10-20T10:00:00.000Z",
+  "updatedAt": "2025-10-20T10:00:00.000Z"
+}
+```
+
+**Error 400 - User already has profile**:
+```json
+{
+  "statusCode": 400,
+  "message": "User already has a field owner profile"
+}
+```
+
+### Get My FieldOwnerProfile
+
+- **Method**: `GET`
+- **Path**: `/fields/owner-profile`
+- **Auth**: Field Owner Only (JWT required)
+- **Description**: Lấy FieldOwnerProfile của user hiện tại
+
+**Success 200**: (Cùng format với Create response)
+
+**Error 404**:
+```json
+{
+  "statusCode": 404,
+  "message": "Field owner profile not found"
+}
+```
+
+### Update FieldOwnerProfile
+
+- **Method**: `PUT`
+- **Path**: `/fields/owner-profile`
+- **Auth**: Field Owner Only (JWT required)
+- **Description**: Cập nhật FieldOwnerProfile của user hiện tại
+
+**Request Body** (tất cả fields đều OPTIONAL):
+```json
+{
+  "facilityName": "Sân bóng Phú Nhuận - Cập nhật",
+  "description": "Cơ sở vật chất hiện đại với sân bóng đá, tennis và cầu lông",
+  "supportedSports": ["football", "tennis", "badminton"],
+  "amenities": ["wifi", "parking", "changing_room", "shower"],
+  "contactPhone": "0909876543",
+  "website": "https://new-website.com"
+}
+```
+
+**Success 200**: (Cùng format với Create response)
+
+### Get FieldOwnerProfile by ID
+
+- **Method**: `GET`
+- **Path**: `/fields/owner-profile/:id`
+- **Auth**: Public (không cần JWT)
+- **Description**: Lấy FieldOwnerProfile theo ID (cho public viewing)
+
+**Parameters**:
+- `id`: FieldOwnerProfile ID
+
+**Success 200**: (Cùng format với Create response)
+
+## FieldOwnerProfile Data Structure
+
+### FieldOwnerProfile Entity Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `user` | ObjectId (ref: User) | ✅ | Reference đến User entity |
+| `facilityName` | String | ✅ | Tên cơ sở vật chất |
+| `facilityLocation` | String | ✅ | Địa điểm cơ sở vật chất |
+| `supportedSports` | [String] (enum) | ✅ | Các môn thể thao được hỗ trợ |
+| `description` | String | ✅ | Mô tả cơ sở vật chất |
+| `amenities` | [String] | ❌ | Danh sách tiện ích có sẵn |
+| `rating` | Number (0-5) | Auto | Đánh giá trung bình |
+| `totalReviews` | Number | Auto | Tổng số đánh giá |
+| `isVerified` | Boolean | Auto | Trạng thái xác minh |
+| `verificationDocument` | String | ❌ | URL tài liệu xác minh |
+| `businessHours` | String | ❌ | Giờ hoạt động |
+| `contactPhone` | String | ✅ | Số điện thoại liên hệ |
+| `website` | String | ❌ | Website của cơ sở vật chất |
+
+### Supported Sports Enum
+
+- `football` - Bóng đá
+- `tennis` - Tennis
+- `badminton` - Cầu lông
+- `pickleball` - Pickleball
+- `basketball` - Bóng rổ
+- `volleyball` - Bóng chuyền
+- `swimming` - Bơi lội
+- `gym` - Gym
+
+### Common Amenities
+
+- `wifi` - WiFi miễn phí
+- `parking` - Chỗ đậu xe
+- `changing_room` - Phòng thay đồ
+- `shower` - Phòng tắm
+- `drinks` - Đồ uống
+- `equipment_rental` - Thuê dụng cụ
+- `coaching` - Huấn luyện viên
+- `lighting` - Đèn chiếu sáng
+- `rest_area` - Khu vực nghỉ ngơi
