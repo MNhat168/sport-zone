@@ -8,3 +8,10 @@ export enum SportType {
   SWIMMING = 'swimming',
   GYM = 'gym',
 }
+
+export enum AmenityType {
+  COACH = 'coach',
+  DRINK = 'drink',
+  FACILITY = 'facility',
+  OTHER = 'other',
+}

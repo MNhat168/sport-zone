@@ -2,7 +2,7 @@ import { Controller, Post, Body, BadRequestException, UseGuards, Get, Query, Res
 import { AuthService } from './auth.service';
 import { Inject } from '@nestjs/common';
 import { SignInTokenDto } from './dto/sign-in-token.dto';
-import { RegisterDto, LoginDto, VerifyAccountDto, ForgotPasswordDto, ResetPasswordDto } from './dto/auth.dto';
+import { RegisterDto, LoginDto, VerifyAccountDto, ForgotPasswordDto, ResetPasswordDto, LoginWithRememberDto } from './dto/auth.dto';
 import { HttpStatus } from '@nestjs/common';
 import { JwtRefreshTokenGuard } from './guards/jwt-refresh-token.guard';
 import { Req } from '@nestjs/common';
@@ -10,7 +10,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiQuery } from '@nestjs/s
 import { Response } from 'express';
 
 @Controller('auth')
-@ApiTags('Authentication')
+@ApiTags('Auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) { }
   
@@ -108,9 +108,9 @@ export class AuthController {
     status: 400,
     description: 'Email hoặc mật khẩu không đúng',
   })
-  async login(@Body() loginDto: LoginDto & { rememberMe: boolean }, @Res() res: Response) {
+  async login(@Body() loginDto: LoginWithRememberDto, @Res() res: Response) {
     console.log('🔐 Login attempt for:', loginDto.email);
-    const result = await this.authService.login({ ...loginDto, rememberMe: loginDto.rememberMe });
+    const result = await this.authService.login({ ...loginDto, rememberMe: !!loginDto.rememberMe });
     console.log('✅ Login successful, setting cookies');
     res.cookie('access_token', result.accessToken, {
       httpOnly: true,

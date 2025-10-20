@@ -1,0 +1,180 @@
+[
+  {
+    "name": "Bãi giữ xe",
+    "description": "Bãi giữ xe rộng rãi, an toàn có mái che.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/parking/400/300",
+    "type": "facility"
+  },
+  {
+    "name": "Phòng thay đồ",
+    "description": "Phòng thay đồ sạch sẽ, có tủ khóa cá nhân.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/lockerroom/400/300",
+    "type": "facility"
+  },
+  {
+    "name": "Phòng tắm & Vệ sinh",
+    "description": "Khu vực vệ sinh và phòng tắm riêng tư, sạch sẽ.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/shower/400/300",
+    "type": "facility"
+  },
+  {
+    "name": "Tủ sơ cứu y tế",
+    "description": "Trang bị đầy đủ các vật dụng y tế cơ bản.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/firstaid/400/300",
+    "type": "facility"
+  },
+  {
+    "name": "Nước lọc & Nước suối",
+    "description": "Cung cấp nước suối đóng chai và bình nước lọc miễn phí.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/drinkingwater/400/300",
+    "type": "drink"
+  },
+  {
+    "name": "Nước tăng lực & Điện giải",
+    "description": "Bán các loại nước tăng lực và điện giải phổ biến.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/energydrink/400/300",
+    "type": "drink"
+  },
+  {
+    "name": "Cho thuê vợt tennis",
+    "description": "Vợt trợ lực và vợt chuyên nghiệp có sẵn.",
+    "sportType": "tennis",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/tennisracket/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Máy bắn bóng tennis",
+    "description": "Dịch vụ cho thuê máy bắn bóng tự động theo giờ.",
+    "sportType": "tennis",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/tennisballmachine/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Dịch vụ căng vợt tennis",
+    "description": "Nhận căng lại cước vợt, lấy ngay sau 30 phút.",
+    "sportType": "tennis",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/stringing/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Huấn luyện viên Tennis",
+    "description": "HLV có chứng chỉ, kinh nghiệm > 5 năm.",
+    "sportType": "tennis",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/tenniscoach/400/300",
+    "type": "coach"
+  },
+  {
+    "name": "Cho thuê vợt cầu lông",
+    "description": "Vợt dành cho người mới chơi và chuyên nghiệp.",
+    "sportType": "badminton",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/badmintonracket/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Bán ống cầu lông",
+    "description": "Cung cấp các loại cầu lông tiêu chuẩn thi đấu (Thành Công, Victor).",
+    "sportType": "badminton",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/shuttlecock/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Huấn luyện viên cầu lông",
+    "description": "Dạy kèm kỹ thuật cơ bản và nâng cao cho mọi lứa tuổi.",
+    "sportType": "badminton",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/badmintoncoach/400/300",
+    "type": "coach"
+  },
+  {
+    "name": "Cho thuê bóng đá",
+    "description": "Bóng size 5, chất lượng tốt, đã được bơm căng.",
+    "sportType": "football",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/footballball/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Cho thuê áo bib (áo pitch)",
+    "description": "Áo bib nhiều màu để phân biệt đội, miễn phí khi đặt sân.",
+    "sportType": "football",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/trainingbib/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Cho thuê bóng rổ",
+    "description": "Bóng size 7, da xịn, độ nảy tốt.",
+    "sportType": "basketball",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/basketballball/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Huấn luyện viên bóng rổ",
+    "description": "HLV hướng dẫn kỹ thuật ném, dẫn bóng và chiến thuật.",
+    "sportType": "basketball",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/basketballcoach/400/300",
+    "type": "coach"
+  },
+  {
+    "name": "Cho thuê phao bơi và ván tập",
+    "description": "Dụng cụ hỗ trợ cho trẻ em và người mới tập bơi.",
+    "sportType": "swimming",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/swimfloat/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Huấn luyện viên Bơi lội",
+    "description": "HLV dạy kèm cho trẻ em và người lớn, đảm bảo an toàn.",
+    "sportType": "swimming",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/swimmingcoach/400/300",
+    "type": "coach"
+  },
+  {
+    "name": "Huấn luyện viên Gym (PT)",
+    "description": "PT xây dựng lộ trình tập luyện và dinh dưỡng cá nhân hóa.",
+    "sportType": "gym",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/gympt/400/300",
+    "type": "coach"
+  },
+  {
+    "name": "Dịch vụ đo chỉ số InBody",
+    "description": "Phân tích các chỉ số cơ, mỡ, nước trong cơ thể.",
+    "sportType": "gym",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/inbody/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Cho thuê bóng chuyền",
+    "description": "Bóng chuyền da tiêu chuẩn thi đấu, đã được bơm căng.",
+    "sportType": "volleyball",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/volleyballball/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Cho thuê vợt Pickleball",
+    "description": "Bộ 2 vợt và bóng Pickleball tiêu chuẩn.",
+    "sportType": "pickleball",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/pickleballracket/400/300",
+    "type": "other"
+  }
+]

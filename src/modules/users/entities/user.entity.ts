@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
-import { BaseEntity } from 'src/common/entities/base.entity';
+import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
 
 export type UserDocument = HydratedDocument<User>;
 
@@ -57,4 +57,8 @@ export class User extends BaseEntity {
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
+
+// Cấu hình timestamps từ BaseEntity
+configureBaseEntitySchema(UserSchema);
+
 UserSchema.index({ role: 1 });

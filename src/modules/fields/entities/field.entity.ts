@@ -1,8 +1,8 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { SportType } from 'src/common/enums/sport-type.enum';
-import { BaseEntity } from 'src/common/entities/base.entity';
-import { FieldSchedulePricing, FieldSchedulePricingSchema } from '../schema/field-schedule-pricing.schema';
+import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
+import { FieldSchedulePricingSchema } from '../schema/field-schedule-pricing.schema';
 
 @Schema()
 export class Field extends BaseEntity {
@@ -54,8 +54,31 @@ export class Field extends BaseEntity {
   @Prop({ type: Number, default: 0 })
   totalReviews: number;
 
-  @Prop({ required: true })
-  location: string;
+  @Prop({
+    _id: false,
+    type: {
+      address: { type: String, required: true },
+      geo: {
+        type: {
+          type: String,
+          enum: ['Point'],
+          required: true,
+        },
+        coordinates: {
+          type: [Number],
+          required: true,
+        },
+      },
+    },
+    required: true,
+  })
+  location: {
+    address: string;
+    geo: {
+      type: 'Point';
+      coordinates: [number, number];
+    };
+  };
 
   @Prop(FieldSchedulePricingSchema.pendingPriceUpdates)
   pendingPriceUpdates: Array<{
@@ -66,7 +89,24 @@ export class Field extends BaseEntity {
     applied: boolean;
     createdBy: Types.ObjectId;
   }>;
+
+  @Prop({ 
+    type: [{ 
+      amenity: { type: Types.ObjectId, ref: 'Amenity' },
+      price: { type: Number, required: true, min: 0 }
+    }], 
+    default: [] 
+  })
+  amenities: Array<{
+    amenity: Types.ObjectId;
+    price: number;
+  }>;
 }
 
 export const FieldSchema = SchemaFactory.createForClass(Field);
+
+// Cấu hình timestamps từ BaseEntity
+configureBaseEntitySchema(FieldSchema);
+
+FieldSchema.index({ 'location.geo': '2dsphere' });
 

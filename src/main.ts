@@ -6,6 +6,7 @@ import { json, urlencoded } from 'express';
 import * as cookieParser from 'cookie-parser';
 import { ResponseInterceptor } from './interceptors/response.interceptor';
 import { ConfigService } from '@nestjs/config';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
   const logger = new Logger(bootstrap.name);
@@ -55,9 +56,49 @@ async function bootstrap() {
   app.use(urlencoded({ extended: true, limit: '10mb' }));
   // 4. Parse cookies for reading refresh_token in guards
   app.use(cookieParser());
-  await app.listen(port, () =>
-    logger.log(` Server running on: http://localhost:${port}`),
-  );
+
+  // 5. Setup Swagger Documentation
+  const config = new DocumentBuilder()
+    .setTitle('SportZone API')
+    .setDescription('API documentation for SportZone - Sports Field Booking Platform')
+    .setVersion('1.0')
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        name: 'JWT',
+        description: 'Enter JWT token',
+        in: 'header',
+      },
+      'JWT-auth', // This name here is important for matching up with @ApiBearerAuth() in your controller!
+    )
+    .addTag('Auth', 'Authentication endpoints')
+    .addTag('Users', 'User management endpoints')
+    .addTag('Fields', 'Field management endpoints')
+    .addTag('Bookings', 'Booking management endpoints')
+    .addTag('Payments', 'Payment processing endpoints')
+    .addTag('Reviews', 'Review management endpoints')
+    .addTag('Tournaments', 'Tournament management endpoints')
+    .addTag('Amenities', 'Amenity management endpoints')
+    .addTag('Coaches', 'Coach management endpoints')
+    .addTag('Notifications', 'Notification management endpoints')
+    .addTag('Admin', 'Admin management endpoints')
+    .addTag('AI', 'AI-powered features')
+    .addTag('Lesson Types', 'Lesson type management endpoints')
+    .build();
+
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api/docs', app, document, {
+    swaggerOptions: {
+      persistAuthorization: true, // Keep JWT token after page refresh
+    },
+  });
+
+  await app.listen(port, () => {
+    logger.log(`🚀 Server running on: http://localhost:${port}`);
+    logger.log(`📚 Swagger docs available at: http://localhost:${port}/api/docs`);
+  });
 }
 
 bootstrap();

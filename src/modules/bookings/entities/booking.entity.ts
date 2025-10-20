@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { SportType } from 'src/common/enums/sport-type.enum';
-import { BaseEntity } from 'src/common/entities/base.entity';
+import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
 
 export enum BookingType {
   FIELD = 'field',
@@ -100,6 +100,10 @@ export class Booking extends BaseEntity {
 }
 
 export const BookingSchema = SchemaFactory.createForClass(Booking);
+
+// Cấu hình timestamps từ BaseEntity
+configureBaseEntitySchema(BookingSchema);
+
 // Add compound index for efficient field + date queries
 BookingSchema.index({ field: 1, date: 1 });
 BookingSchema.index({ user: 1, status: 1 });

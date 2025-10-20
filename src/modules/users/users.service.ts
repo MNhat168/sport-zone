@@ -36,21 +36,21 @@ export class UsersService {
     return result;
   }
 
-  async findById(id: string): Promise<User> {
-    const user = await this.userRepository.findById(id);
-    if (!user) throw new NotFoundException('User not found');
-    return user;
-  }
-
-  async update(
-    id: string,
-    data: UpdateUserDto,
-    avatarFile?: any, // Avatar file từ multer
-  ): Promise<User> {
-    const user = await this.userRepository.findById(id);
-    if (!user) {
-      throw new NotFoundException('User not found');
+    async findById(id: string): Promise<User> {
+      const user = await this.userRepository.findById(id);
+        if (!user) throw new NotFoundException('User not found');
+        return user;
     }
+    
+    async update(
+        id: string,
+        data: UpdateUserDto,
+        avatarFile?: any, // Avatar file từ multer
+    ): Promise<User> {
+        const user = await this.userRepository.findById(id);
+        if (!user) {
+            throw new NotFoundException('User not found');
+        }
 
     let updateData = { ...data };
 

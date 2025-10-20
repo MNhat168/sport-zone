@@ -1,9 +1,8 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
-import { BaseEntity } from 'src/common/entities/base.entity';
+import { Types, Document } from 'mongoose';
 
-@Schema()
-export class LessonType extends BaseEntity {
+@Schema({ timestamps: true })
+export class LessonType extends Document {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   user: Types.ObjectId;
   

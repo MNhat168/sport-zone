@@ -3,7 +3,6 @@ import {
   Get,
   Param,
   Body,
-  Put,
   UseInterceptors,
   UploadedFiles,
   Inject,
@@ -13,6 +12,7 @@ import {
   Req,
   Post,
   Request,
+  Patch,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { ApiTags, ApiConsumes, ApiBearerAuth } from '@nestjs/swagger';
@@ -38,31 +38,18 @@ import { SetFavouriteFieldsDto } from './dto/set-favourite-fields.dto';
 @Controller('users')
 @ApiBearerAuth('token')
 export class UsersController {
-  constructor(
-    private readonly usersService: UsersService,
-    @Inject(USER_REPOSITORY)
-    private readonly userRepository: UserRepository,
-    private readonly emailService: EmailService,
-  ) {}
-  @UseGuards(JwtAccessTokenGuard)
-  @Get('get-profile')
-  async getProfile(@Req() req: any): Promise<User> {
-    //console.log('req.user',req.user);
-    return this.usersService.findById(req.user.userId);
-  }
-
-  // @Get(':id/profile')
-  // async getProfile(@Param('id') id: string): Promise<UserProfileDto> {
-  //     return this.usersService.getProfile(id);
-  // }
-
-  // @Patch(':id/profile')
-  // async updateProfile(
-  //     @Param('id') id: string,
-  //     @Body() dto: Partial<UserProfileDto>,
-  // ): Promise<UserProfileDto> {
-  //     return this.usersService.updateProfile(id, dto);
-  // }
+    constructor(
+        private readonly usersService: UsersService,
+        @Inject(USER_REPOSITORY)
+        private readonly userRepository: UserRepository,
+        private readonly emailService: EmailService,
+    ) { }
+    @UseGuards(JwtAccessTokenGuard)
+    @Get('get-profile')
+    async getProfile(@Req() req: any): Promise<User> {
+        //console.log('req.user',req.user);
+    return await this.usersService.findById(req.user.userId);
+    }
 
   @Post('forgot-password')
   async forgotPassword(@Body() body: ForgotPasswordDto) {
@@ -103,16 +90,18 @@ export class UsersController {
     return { message: 'Đặt lại mật khẩu thành công' };
   }
 
-  @Put(':id')
+ 
+  @UseGuards(JwtAccessTokenGuard)
+  @Patch('me')
   @UseInterceptors(FileFieldsInterceptor([{ name: 'avatar', maxCount: 1 }]))
   @ApiConsumes('multipart/form-data')
-  async update(
-    @Param('id') id: string,
+  async updateMe(
+    @Req() req: any,
     @Body() user: UpdateUserDto,
     @UploadedFiles() files: { avatar?: Express.Multer.File[] },
   ): Promise<User> {
-    const avatarFile = files?.avatar?.[0]; // ← Đây là nơi avatarFile được tạo
-    return this.usersService.update(id, user, avatarFile); // ← Được truyền vào service
+    const avatarFile = files?.avatar?.[0];
+    return this.usersService.update(req.user.userId, user, avatarFile);
   }
 
   @UseGuards(AuthGuard('jwt'))

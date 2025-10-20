@@ -1,0 +1,1881 @@
+[
+    {
+        "_id": "652a8f3e1c9d440000a1b2c3",
+        "owner": "652a8f3e1c9d440000a0b1a2",
+        "name": "Sân Tennis Tuyên Sơn - Đà Nẵng",
+        "sportType": "tennis",
+        "description": "Cụm 4 sân tennis tiêu chuẩn quốc tế với mặt sân cứng Plexicushion. Có hệ thống đèn chiếu sáng hiện đại, phục vụ đến 10h tối.",
+        "images": [
+            "https://placehold.co/800x600/2a9d8f/ffffff?text=San+Tennis+1",
+            "https://placehold.co/800x600/e9c46a/ffffff?text=San+Tennis+2"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "tuesday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "wednesday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "thursday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "friday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "saturday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "sunday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 60
+            }
+        ],
+        "slotDuration": 60,
+        "minSlots": 1,
+        "maxSlots": 4,
+        "priceRanges": [
+            {
+                "day": "saturday",
+                "start": "06:00",
+                "end": "22:00",
+                "multiplier": 1.2
+            },
+            {
+                "day": "sunday",
+                "start": "06:00",
+                "end": "22:00",
+                "multiplier": 1.2
+            }
+        ],
+        "basePrice": 250000,
+        "isActive": true,
+        "rating": 4.8,
+        "totalReviews": 152,
+        "location": {
+            "address": "Đường 2 Tháng 9, Hòa Cường Bắc, Hải Châu, Đà Nẵng",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.2250,
+                    16.0398
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c2",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c5",
+                "price": 10000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c7",
+                "price": 50000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c8",
+                "price": 150000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c9",
+                "price": 100000
+            }
+        ]
+    },
+    {
+        "_id": "652a8f3e1c9d440000a1b2c4",
+        "owner": "652a8f3e1c9d440000a0b1a3",
+        "name": "Sân bóng đá mini cỏ nhân tạo An Hải",
+        "sportType": "football",
+        "description": "Hệ thống sân 5 và sân 7, mặt cỏ nhân tạo chất lượng cao, êm ái, giảm chấn thương. Có bán nước giải khát và cho thuê áo bib.",
+        "images": [
+            "https://placehold.co/800x600/e76f51/ffffff?text=San+Bong+Da+1"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "tuesday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "wednesday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "thursday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "friday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "saturday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "sunday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 60
+            }
+        ],
+        "slotDuration": 60,
+        "minSlots": 1,
+        "maxSlots": 2,
+        "priceRanges": [
+            {
+                "day": "saturday",
+                "start": "16:00",
+                "end": "22:00",
+                "multiplier": 1.5
+            },
+            {
+                "day": "sunday",
+                "start": "16:00",
+                "end": "22:00",
+                "multiplier": 1.5
+            }
+        ],
+        "basePrice": 300000,
+        "isActive": true,
+        "rating": 4.5,
+        "totalReviews": 210,
+        "location": {
+            "address": "An Hải Bắc, Sơn Trà, Đà Nẵng",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.2390,
+                    16.0745
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c2",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c5",
+                "price": 10000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d4",
+                "price": 20000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d5",
+                "price": 0
+            }
+        ]
+    },
+    {
+        "_id": "652a8f3e1c9d440000a1b2c5",
+        "owner": "652a8f3e1c9d440000a0b1a4",
+        "name": "Nhà thi đấu cầu lông Ngũ Hành Sơn",
+        "sportType": "badminton",
+        "description": "Sân thảm PVC tiêu chuẩn, không gian trong nhà thoáng mát, ánh sáng tốt không gây chói. Sàn có độ bám cao, an toàn khi di chuyển.",
+        "images": [
+            "https://placehold.co/800x600/264653/ffffff?text=San+Cau+Long+1"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "tuesday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "wednesday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "thursday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "friday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "saturday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "sunday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 60
+            }
+        ],
+        "slotDuration": 60,
+        "minSlots": 1,
+        "maxSlots": 3,
+        "priceRanges": [],
+        "basePrice": 80000,
+        "isActive": true,
+        "rating": 4.7,
+        "totalReviews": 98,
+        "location": {
+            "address": "Lê Văn Hiến, Khuê Mỹ, Ngũ Hành Sơn, Đà Nẵng",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.2483,
+                    16.0150
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c5",
+                "price": 10000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d1",
+                "price": 40000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d2",
+                "price": 85000
+            }
+        ]
+    },
+    {
+        "_id": "652a8f3e1c9d440000a1b2c6",
+        "owner": "652a8f3e1c9d440000a0b1a5",
+        "name": "Hồ bơi công cộng Hòa Xuân",
+        "sportType": "swimming",
+        "description": "Hồ bơi ngoài trời 50m, có phân làn bơi chuyên nghiệp và khu vực cho trẻ em. Nước được xử lý bằng công nghệ điện phân muối, an toàn cho da.",
+        "images": [
+            "https://placehold.co/800x600/457b9d/ffffff?text=Ho+Boi"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "05:30",
+                "end": "19:30",
+                "duration": 60
+            },
+            {
+                "day": "tuesday",
+                "start": "05:30",
+                "end": "19:30",
+                "duration": 60
+            },
+            {
+                "day": "wednesday",
+                "start": "05:30",
+                "end": "19:30",
+                "duration": 60
+            },
+            {
+                "day": "thursday",
+                "start": "05:30",
+                "end": "19:30",
+                "duration": 60
+            },
+            {
+                "day": "friday",
+                "start": "05:30",
+                "end": "19:30",
+                "duration": 60
+            },
+            {
+                "day": "saturday",
+                "start": "05:30",
+                "end": "19:30",
+                "duration": 60
+            },
+            {
+                "day": "sunday",
+                "start": "05:30",
+                "end": "19:30",
+                "duration": 60
+            }
+        ],
+        "slotDuration": 60,
+        "minSlots": 1,
+        "maxSlots": 1,
+        "priceRanges": [],
+        "basePrice": 50000,
+        "isActive": true,
+        "rating": 4.6,
+        "totalReviews": 115,
+        "location": {
+            "address": "Đô Đốc Lân, Hoà Xuân, Cẩm Lệ, Đà Nẵng",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.2120,
+                    16.0080
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c2",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c3",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d8",
+                "price": 20000
+            }
+        ]
+    },
+    {
+        "_id": "652a8f3e1c9d440000a1b2c7",
+        "owner": "652a8f3e1c9d440000a0b1a6",
+        "name": "Sân bóng rổ Đại học Đà Nẵng",
+        "sportType": "basketball",
+        "description": "Sân ngoài trời, mặt sân xi măng chuyên dụng, có 2 trụ rổ tiêu chuẩn. Mở cửa cho sinh viên và người ngoài.",
+        "images": [
+            "https://placehold.co/800x600/fb8500/ffffff?text=San+Bong+Ro"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "06:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "tuesday",
+                "start": "06:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "wednesday",
+                "start": "06:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "thursday",
+                "start": "06:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "friday",
+                "start": "06:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "saturday",
+                "start": "06:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "sunday",
+                "start": "06:00",
+                "end": "21:00",
+                "duration": 60
+            }
+        ],
+        "slotDuration": 60,
+        "minSlots": 1,
+        "maxSlots": 1,
+        "priceRanges": [],
+        "basePrice": 100000,
+        "isActive": true,
+        "rating": 4.3,
+        "totalReviews": 88,
+        "location": {
+            "address": "41 Lê Duẩn, Hải Châu 1, Hải Châu, Đà Nẵng",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.2196,
+                    16.0710
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c5",
+                "price": 5000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d6",
+                "price": 20000
+            }
+        ]
+    },
+    {
+        "_id": "652a8f3e1c9d440000a1b2c8",
+        "owner": "652a8f3e1c9d440000a0b1a7",
+        "name": "California Fitness & Yoga Center - Vĩnh Trung Plaza",
+        "sportType": "gym",
+        "description": "Phòng gym cao cấp với trang thiết bị hiện đại từ Technogym. Cung cấp các lớp Yoga, GroupX, và dịch vụ PT chuyên nghiệp.",
+        "images": [
+            "https://placehold.co/800x600/8ecae6/ffffff?text=Phong+Gym+1"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 120
+            },
+            {
+                "day": "tuesday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 120
+            },
+            {
+                "day": "wednesday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 120
+            },
+            {
+                "day": "thursday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 120
+            },
+            {
+                "day": "friday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 120
+            },
+            {
+                "day": "saturday",
+                "start": "07:00",
+                "end": "21:00",
+                "duration": 120
+            },
+            {
+                "day": "sunday",
+                "start": "07:00",
+                "end": "21:00",
+                "duration": 120
+            }
+        ],
+        "slotDuration": 120,
+        "minSlots": 1,
+        "maxSlots": 1,
+        "priceRanges": [],
+        "basePrice": 150000,
+        "isActive": true,
+        "rating": 4.9,
+        "totalReviews": 350,
+        "location": {
+            "address": "255-257 Hùng Vương, Vĩnh Trung, Thanh Khê, Đà Nẵng",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.2144,
+                    16.0645
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c2",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c3",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2da",
+                "price": 500000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2db",
+                "price": 200000
+            }
+        ]
+    },
+    {
+        "_id": "652a8f3e1c9d440000a1b2c9",
+        "owner": "652a8f3e1c9d440000a0b1a8",
+        "name": "Sân bóng đá Chuyên Việt",
+        "sportType": "football",
+        "description": "Sân 7 người, mặt cỏ mới đầu tư, hệ thống thoát nước tốt, đá được ngay sau mưa. Giá cả phải chăng.",
+        "images": [
+            "https://placehold.co/800x600/ffb703/ffffff?text=San+Bong+Da+2"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "07:00",
+                "end": "23:00",
+                "duration": 90
+            },
+            {
+                "day": "tuesday",
+                "start": "07:00",
+                "end": "23:00",
+                "duration": 90
+            },
+            {
+                "day": "wednesday",
+                "start": "07:00",
+                "end": "23:00",
+                "duration": 90
+            },
+            {
+                "day": "thursday",
+                "start": "07:00",
+                "end": "23:00",
+                "duration": 90
+            },
+            {
+                "day": "friday",
+                "start": "07:00",
+                "end": "23:00",
+                "duration": 90
+            },
+            {
+                "day": "saturday",
+                "start": "07:00",
+                "end": "23:00",
+                "duration": 90
+            },
+            {
+                "day": "sunday",
+                "start": "07:00",
+                "end": "23:00",
+                "duration": 90
+            }
+        ],
+        "slotDuration": 90,
+        "minSlots": 1,
+        "maxSlots": 1,
+        "priceRanges": [
+            {
+                "day": "saturday",
+                "start": "17:00",
+                "end": "23:00",
+                "multiplier": 1.4
+            },
+            {
+                "day": "sunday",
+                "start": "17:00",
+                "end": "23:00",
+                "multiplier": 1.4
+            }
+        ],
+        "basePrice": 400000,
+        "isActive": true,
+        "rating": 4.4,
+        "totalReviews": 180,
+        "location": {
+            "address": "Thăng Long, Cẩm Lệ, Đà Nẵng",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.2045,
+                    16.0233
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c5",
+                "price": 10000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d4",
+                "price": 20000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d5",
+                "price": 0
+            }
+        ]
+    },
+    {
+        "_id": "652a8f3e1c9d440000a1b2ca",
+        "owner": "652a8f3e1c9d440000a0b1a9",
+        "name": "Sân cầu lông Thanh Khê",
+        "sportType": "badminton",
+        "description": "4 sân thảm trong nhà, trần cao, không gian rộng. Có dịch vụ bán ống cầu và nước giải khát.",
+        "images": [
+            "https://placehold.co/800x600/219ebc/ffffff?text=San+Cau+Long+2"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "05:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "tuesday",
+                "start": "05:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "wednesday",
+                "start": "05:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "thursday",
+                "start": "05:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "friday",
+                "start": "05:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "saturday",
+                "start": "05:00",
+                "end": "22:00",
+                "duration": 60
+            },
+            {
+                "day": "sunday",
+                "start": "05:00",
+                "end": "22:00",
+                "duration": 60
+            }
+        ],
+        "slotDuration": 60,
+        "minSlots": 1,
+        "maxSlots": 2,
+        "priceRanges": [
+            {
+                "day": "saturday",
+                "start": "17:00",
+                "end": "21:00",
+                "multiplier": 1.25
+            },
+            {
+                "day": "sunday",
+                "start": "17:00",
+                "end": "21:00",
+                "multiplier": 1.25
+            }
+        ],
+        "basePrice": 80000,
+        "isActive": true,
+        "rating": 4.6,
+        "totalReviews": 120,
+        "location": {
+            "address": "Dũng Sĩ Thanh Khê, Thanh Khê Tây, Thanh Khê, Đà Nẵng",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.1818,
+                    16.0740
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c5",
+                "price": 10000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d1",
+                "price": 40000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d2",
+                "price": 85000
+            }
+        ]
+    },
+    {
+        "_id": "652a8f3e1c9d440000a1b2cb",
+        "owner": "652a8f3e1c9d440000a0b1aa",
+        "name": "Sân Tennis Bàu Tràm",
+        "sportType": "tennis",
+        "description": "Khu tổ hợp tennis mới xây dựng, mặt sân đẹp, có HLV dạy kèm cho người mới bắt đầu.",
+        "images": [
+            "https://placehold.co/800x600/023047/ffffff?text=San+Tennis+3"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "05:30",
+                "end": "21:30",
+                "duration": 60
+            },
+            {
+                "day": "tuesday",
+                "start": "05:30",
+                "end": "21:30",
+                "duration": 60
+            },
+            {
+                "day": "wednesday",
+                "start": "05:30",
+                "end": "21:30",
+                "duration": 60
+            },
+            {
+                "day": "thursday",
+                "start": "05:30",
+                "end": "21:30",
+                "duration": 60
+            },
+            {
+                "day": "friday",
+                "start": "05:30",
+                "end": "21:30",
+                "duration": 60
+            },
+            {
+                "day": "saturday",
+                "start": "05:30",
+                "end": "21:30",
+                "duration": 60
+            },
+            {
+                "day": "sunday",
+                "start": "05:30",
+                "end": "21:30",
+                "duration": 60
+            }
+        ],
+        "slotDuration": 60,
+        "minSlots": 1,
+        "maxSlots": 3,
+        "priceRanges": [],
+        "basePrice": 200000,
+        "isActive": true,
+        "rating": 4.5,
+        "totalReviews": 75,
+        "location": {
+            "address": "Khu đô thị Bàu Tràm Lakeside, Hòa Hiệp Nam, Liên Chiểu, Đà Nẵng",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.1560,
+                    16.1050
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c7",
+                "price": 50000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2ca",
+                "price": 300000
+            }
+        ]
+    },
+    {
+        "_id": "652a8f3e1c9d440000a1b2cc",
+        "owner": "652a8f3e1c9d440000a0b1ab",
+        "name": "Sân bóng chuyền bãi biển Mỹ Khê",
+        "sportType": "volleyball",
+        "description": "Sân cát tiêu chuẩn ngay trên bãi biển Mỹ Khê. Cho thuê bóng và lưới, lý tưởng cho các hoạt động team building.",
+        "images": [
+            "https://placehold.co/800x600/ffafcc/000000?text=San+Bong+Chuyen"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "06:00",
+                "end": "18:00",
+                "duration": 60
+            },
+            {
+                "day": "tuesday",
+                "start": "06:00",
+                "end": "18:00",
+                "duration": 60
+            },
+            {
+                "day": "wednesday",
+                "start": "06:00",
+                "end": "18:00",
+                "duration": 60
+            },
+            {
+                "day": "thursday",
+                "start": "06:00",
+                "end": "18:00",
+                "duration": 60
+            },
+            {
+                "day": "friday",
+                "start": "06:00",
+                "end": "18:00",
+                "duration": 60
+            },
+            {
+                "day": "saturday",
+                "start": "06:00",
+                "end": "18:00",
+                "duration": 60
+            },
+            {
+                "day": "sunday",
+                "start": "06:00",
+                "end": "18:00",
+                "duration": 60
+            }
+        ],
+        "slotDuration": 60,
+        "minSlots": 1,
+        "maxSlots": 2,
+        "priceRanges": [],
+        "basePrice": 150000,
+        "isActive": true,
+        "rating": 4.8,
+        "totalReviews": 95,
+        "location": {
+            "address": "Bãi biển Mỹ Khê, Phước Mỹ, Sơn Trà, Đà Nẵng",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.2495,
+                    16.0592
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c3",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c5",
+                "price": 10000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2dc",
+                "price": 30000
+            }
+        ]
+    },
+    {
+        "_id": "652a8f3e1c9d440000a1b2cd",
+        "owner": "652a8f3e1c9d440000a0b1ac",
+        "name": "CLB Pickleball Hoà Xuân",
+        "sportType": "pickleball",
+        "description": "Sân pickleball mới, đạt chuẩn, dành cho cộng đồng yêu thích môn thể thao mới lạ này. Có cho thuê vợt và bóng.",
+        "images": [
+            "https://placehold.co/800x600/a2d2ff/000000?text=San+Pickleball"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "07:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "tuesday",
+                "start": "07:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "wednesday",
+                "start": "07:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "thursday",
+                "start": "07:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "friday",
+                "start": "07:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "saturday",
+                "start": "07:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "sunday",
+                "start": "07:00",
+                "end": "20:00",
+                "duration": 60
+            }
+        ],
+        "slotDuration": 60,
+        "minSlots": 1,
+        "maxSlots": 2,
+        "priceRanges": [],
+        "basePrice": 120000,
+        "isActive": true,
+        "rating": 4.9,
+        "totalReviews": 45,
+        "location": {
+            "address": "Nguyễn Phước Lan, Hoà Xuân, Cẩm Lệ, Đà Nẵng",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.2195,
+                    16.0099
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c5",
+                "price": 10000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2dd",
+                "price": 50000
+            }
+        ]
+    },
+    {
+        "_id": "652a8f3e1c9d440000a1b2ce",
+        "owner": "652a8f3e1c9d440000a0b1a2",
+        "name": "Làng Thể Thao Tuyên Sơn",
+        "sportType": "football",
+        "description": "Tổ hợp đa năng với nhiều sân bóng đá 7 người. Chất lượng mặt cỏ tốt, là địa điểm tổ chức các giải đấu phong trào.",
+        "images": [
+            "https://placehold.co/800x600/fca311/ffffff?text=San+Bong+Da+3"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 90
+            },
+            {
+                "day": "tuesday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 90
+            },
+            {
+                "day": "wednesday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 90
+            },
+            {
+                "day": "thursday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 90
+            },
+            {
+                "day": "friday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 90
+            },
+            {
+                "day": "saturday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 90
+            },
+            {
+                "day": "sunday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 90
+            }
+        ],
+        "slotDuration": 90,
+        "minSlots": 1,
+        "maxSlots": 1,
+        "priceRanges": [
+            {
+                "day": "saturday",
+                "start": "17:30",
+                "end": "22:00",
+                "multiplier": 1.5
+            },
+            {
+                "day": "sunday",
+                "start": "17:30",
+                "end": "22:00",
+                "multiplier": 1.5
+            }
+        ],
+        "basePrice": 500000,
+        "isActive": true,
+        "rating": 4.6,
+        "totalReviews": 312,
+        "location": {
+            "address": "2 Tháng 9, Hoà Cường Bắc, Hải Châu, Đà Nẵng",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.2258,
+                    16.0385
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c2",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c5",
+                "price": 10000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d4",
+                "price": 20000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d5",
+                "price": 0
+            }
+        ]
+    },
+    {
+        "_id": "652a8f3e1c9d440000a1b2cf",
+        "owner": "652a8f3e1c9d440000a0b1a7",
+        "name": "PT Fitness Center",
+        "sportType": "gym",
+        "description": "Phòng gym bình dân, đầy đủ các loại máy tập cơ bản. Giá vé ngày và tháng hợp lý cho sinh viên, người đi làm.",
+        "images": [
+            "https://placehold.co/800x600/e5e5e5/000000?text=Phong+Gym+2"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 120
+            },
+            {
+                "day": "tuesday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 120
+            },
+            {
+                "day": "wednesday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 120
+            },
+            {
+                "day": "thursday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 120
+            },
+            {
+                "day": "friday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 120
+            },
+            {
+                "day": "saturday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 120
+            },
+            {
+                "day": "sunday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 120
+            }
+        ],
+        "slotDuration": 120,
+        "minSlots": 1,
+        "maxSlots": 1,
+        "priceRanges": [],
+        "basePrice": 40000,
+        "isActive": true,
+        "rating": 4.2,
+        "totalReviews": 89,
+        "location": {
+            "address": "Núi Thành, Hoà Thuận Đông, Hải Châu, Đà Nẵng",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.2215,
+                    16.0460
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c5",
+                "price": 10000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2da",
+                "price": 250000
+            }
+        ]
+    },
+    {
+        "_id": "652a8f3e1c9d440000a1b2d0",
+        "owner": "652a8f3e1c9d440000a0b1a5",
+        "name": "Bể bơi khu quân đội K5",
+        "sportType": "swimming",
+        "description": "Hồ bơi trong nhà, nước ấm, phù hợp bơi lội quanh năm. Có HLV dạy bơi chuyên nghiệp.",
+        "images": [
+            "https://placehold.co/800x600/14213d/ffffff?text=Ho+Boi+2"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "tuesday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "wednesday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "thursday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "friday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "saturday",
+                "start": "07:00",
+                "end": "19:00",
+                "duration": 60
+            },
+            {
+                "day": "sunday",
+                "start": "07:00",
+                "end": "19:00",
+                "duration": 60
+            }
+        ],
+        "slotDuration": 60,
+        "minSlots": 1,
+        "maxSlots": 1,
+        "priceRanges": [],
+        "basePrice": 60000,
+        "isActive": true,
+        "rating": 4.5,
+        "totalReviews": 99,
+        "location": {
+            "address": "Tôn Đức Thắng, Hoà Khánh Nam, Liên Chiểu, Đà Nẵng",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.1588,
+                    16.0790
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c2",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c3",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d8",
+                "price": 20000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d9",
+                "price": 300000
+            }
+        ]
+    },
+    {
+        "_id": "652a8f3e1c9d440000a1b2d1",
+        "owner": "652a8f3e1c9d440000a0b1a6",
+        "name": "Sân bóng rổ Hoà Khánh",
+        "sportType": "basketball",
+        "description": "Sân bóng rổ cộng đồng, miễn phí cho tất cả mọi người. Thường đông vào buổi chiều.",
+        "images": [
+            "https://placehold.co/800x600/003049/ffffff?text=San+Bong+Ro+2"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "tuesday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "wednesday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "thursday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "friday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "saturday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "sunday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 60
+            }
+        ],
+        "slotDuration": 60,
+        "minSlots": 1,
+        "maxSlots": 1,
+        "priceRanges": [],
+        "basePrice": 0,
+        "isActive": true,
+        "rating": 4.1,
+        "totalReviews": 55,
+        "location": {
+            "address": "Âu Cơ, Hoà Khánh Bắc, Liên Chiểu, Đà Nẵng",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.1480,
+                    16.0955
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c5",
+                "price": 5000
+            }
+        ]
+    },
+    
+    {
+        "_id": "652baf1a1c9d440000b1c2d2",
+        "owner": "652baf1a1c9d440000b0c1b3",
+        "name": "Sân bóng đá Hoàng Anh Gia Lai",
+        "sportType": "football",
+        "description": "Cụm sân cỏ nhân tạo 7 người thuộc trung tâm đào tạo HAGL. Mặt cỏ chất lượng cao, có căng tin phục vụ.",
+        "images": [
+            "https://placehold.co/800x600/e76f51/ffffff?text=HAGL+Football"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 90
+            },
+            {
+                "day": "tuesday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 90
+            },
+            {
+                "day": "wednesday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 90
+            },
+            {
+                "day": "thursday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 90
+            },
+            {
+                "day": "friday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 90
+            },
+            {
+                "day": "saturday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 90
+            },
+            {
+                "day": "sunday",
+                "start": "06:00",
+                "end": "22:00",
+                "duration": 90
+            }
+        ],
+        "slotDuration": 90,
+        "minSlots": 1,
+        "maxSlots": 1,
+        "priceRanges": [
+            {
+                "day": "saturday",
+                "start": "17:00",
+                "end": "22:00",
+                "multiplier": 1.5
+            },
+            {
+                "day": "sunday",
+                "start": "17:00",
+                "end": "22:00",
+                "multiplier": 1.5
+            }
+        ],
+        "basePrice": 350000,
+        "isActive": true,
+        "rating": 4.7,
+        "totalReviews": 255,
+        "location": {
+            "address": "Đường Wừu, Phường Ia Kring, Pleiku, Gia Lai",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    107.9755,
+                    14.0051
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c2",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c5",
+                "price": 10000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d4",
+                "price": 20000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d5",
+                "price": 0
+            }
+        ]
+    },
+    {
+        "_id": "652baf1a1c9d440000b1c2d3",
+        "owner": "652baf1a1c9d440000b0c1b4",
+        "name": "Nhà thi đấu tỉnh Gia Lai",
+        "sportType": "badminton",
+        "description": "Sân cầu lông thảm trong nhà, trần cao, ánh sáng chuẩn. Là nơi tổ chức các giải đấu chuyên nghiệp của tỉnh.",
+        "images": [
+            "https://placehold.co/800x600/264653/ffffff?text=Nha+Thi+Dau"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "tuesday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "wednesday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "thursday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "friday",
+                "start": "05:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "saturday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 60
+            },
+            {
+                "day": "sunday",
+                "start": "06:00",
+                "end": "20:00",
+                "duration": 60
+            }
+        ],
+        "slotDuration": 60,
+        "minSlots": 1,
+        "maxSlots": 3,
+        "priceRanges": [],
+        "basePrice": 70000,
+        "isActive": true,
+        "rating": 4.6,
+        "totalReviews": 130,
+        "location": {
+            "address": "Đường Anh Hùng Núp, Phường Phù Đổng, Pleiku, Gia Lai",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    107.9920,
+                    13.9785
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c5",
+                "price": 10000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d1",
+                "price": 40000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d2",
+                "price": 85000
+            }
+        ]
+    },
+    {
+        "_id": "652baf1a1c9d440000b1c2d4",
+        "owner": "652baf1a1c9d440000b0c1b5",
+        "name": "CLB Tennis Pleiku Center",
+        "sportType": "tennis",
+        "description": "3 sân tennis ngoài trời mặt sân cứng, có tường tập và HLV hướng dẫn cơ bản.",
+        "images": [
+            "https://placehold.co/800x600/2a9d8f/ffffff?text=Tennis+Pleiku"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "06:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "tuesday",
+                "start": "06:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "wednesday",
+                "start": "06:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "thursday",
+                "start": "06:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "friday",
+                "start": "06:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "saturday",
+                "start": "06:00",
+                "end": "21:00",
+                "duration": 60
+            },
+            {
+                "day": "sunday",
+                "start": "06:00",
+                "end": "21:00",
+                "duration": 60
+            }
+        ],
+        "slotDuration": 60,
+        "minSlots": 1,
+        "maxSlots": 2,
+        "priceRanges": [
+            {
+                "day": "saturday",
+                "start": "06:00",
+                "end": "21:00",
+                "multiplier": 1.2
+            },
+            {
+                "day": "sunday",
+                "start": "06:00",
+                "end": "21:00",
+                "multiplier": 1.2
+            }
+        ],
+        "basePrice": 180000,
+        "isActive": true,
+        "rating": 4.4,
+        "totalReviews": 65,
+        "location": {
+            "address": "Phan Đình Phùng, Phường Tây Sơn, Pleiku, Gia Lai",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.0050,
+                    13.9821
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c7",
+                "price": 50000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2ca",
+                "price": 250000
+            }
+        ]
+    },
+    {
+        "_id": "652baf1a1c9d440000b1c2d5",
+        "owner": "652baf1a1c9d440000b0c1b6",
+        "name": "Phòng Gym Olympia",
+        "sportType": "gym",
+        "description": "Phòng gym đầy đủ trang thiết bị, không gian rộng rãi, có PT hướng dẫn. Giá vé tháng ưu đãi cho học sinh, sinh viên.",
+        "images": [
+            "https://placehold.co/800x600/8ecae6/ffffff?text=Olympia+Gym"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "05:30",
+                "end": "20:30",
+                "duration": 90
+            },
+            {
+                "day": "tuesday",
+                "start": "05:30",
+                "end": "20:30",
+                "duration": 90
+            },
+            {
+                "day": "wednesday",
+                "start": "05:30",
+                "end": "20:30",
+                "duration": 90
+            },
+            {
+                "day": "thursday",
+                "start": "05:30",
+                "end": "20:30",
+                "duration": 90
+            },
+            {
+                "day": "friday",
+                "start": "05:30",
+                "end": "20:30",
+                "duration": 90
+            },
+            {
+                "day": "saturday",
+                "start": "06:00",
+                "end": "19:00",
+                "duration": 90
+            },
+            {
+                "day": "sunday",
+                "start": "06:00",
+                "end": "19:00",
+                "duration": 90
+            }
+        ],
+        "slotDuration": 90,
+        "minSlots": 1,
+        "maxSlots": 1,
+        "priceRanges": [],
+        "basePrice": 35000,
+        "isActive": true,
+        "rating": 4.3,
+        "totalReviews": 92,
+        "location": {
+            "address": "Tôn Thất Tùng, Phường Thống Nhất, Pleiku, Gia Lai",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    107.9895,
+                    13.9688
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c1",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c2",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c5",
+                "price": 10000
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2da",
+                "price": 300000
+            }
+        ]
+    },
+    {
+        "_id": "652baf1a1c9d440000b1c2d6",
+        "owner": "652baf1a1c9d440000b0c1b7",
+        "name": "Hồ bơi Se San Pleiku",
+        "sportType": "swimming",
+        "description": "Hồ bơi ngoài trời, có khu vực riêng cho trẻ em. Nước được lọc liên tục, đảm bảo vệ sinh.",
+        "images": [
+            "https://placehold.co/800x600/457b9d/ffffff?text=Se+San+Pool"
+        ],
+        "operatingHours": [
+            {
+                "day": "monday",
+                "start": "06:00",
+                "end": "19:00",
+                "duration": 60
+            },
+            {
+                "day": "tuesday",
+                "start": "06:00",
+                "end": "19:00",
+                "duration": 60
+            },
+            {
+                "day": "wednesday",
+                "start": "06:00",
+                "end": "19:00",
+                "duration": 60
+            },
+            {
+                "day": "thursday",
+                "start": "06:00",
+                "end": "19:00",
+                "duration": 60
+            },
+            {
+                "day": "friday",
+                "start": "06:00",
+                "end": "19:00",
+                "duration": 60
+            },
+            {
+                "day": "saturday",
+                "start": "06:00",
+                "end": "19:00",
+                "duration": 60
+            },
+            {
+                "day": "sunday",
+                "start": "06:00",
+                "end": "19:00",
+                "duration": 60
+            }
+        ],
+        "slotDuration": 60,
+        "minSlots": 1,
+        "maxSlots": 1,
+        "priceRanges": [],
+        "basePrice": 40000,
+        "isActive": true,
+        "rating": 4.5,
+        "totalReviews": 110,
+        "location": {
+            "address": "Phạm Văn Đồng, Phường Hoa Lư, Pleiku, Gia Lai",
+            "geo": {
+                "type": "Point",
+                "coordinates": [
+                    108.0142,
+                    13.9905
+                ]
+            }
+        },
+        "amenities": [
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c2",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2c3",
+                "price": 0
+            },
+            {
+                "amenity": "652a7b1e1c9d440000a1b2d8",
+                "price": 15000
+            }
+        ]
+    }
+]
+
+   

@@ -18,6 +18,7 @@ import { CreateFieldBookingLazyDto, FieldAvailabilityQueryDto, MarkHolidayDto } 
 import { CancelBookingDto } from './dto/cancel-booking.dto';
 import { CreateSessionBookingLazyDto } from './dto/create-session-booking-lazy.dto';
 import { CancelSessionBookingDto } from './dto/cancel-session-booking.dto';
+import { GetUserBookingsDto, UserBookingsResponseDto } from './dto/get-user-bookings.dto';
 import { Schedule } from '../schedules/entities/schedule.entity';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -220,6 +221,63 @@ export class BookingsController {
   @Get('bookings/coach/:coachId')
   async getBookingsByCoachId(@Param('coachId') coachId: string): Promise<Booking[]> {
     return this.bookingsService.getByRequestedCoachId(coachId);
+  }
+
+  /**
+   * Lấy danh sách booking của user hiện tại
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Get('bookings/my-bookings')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Lấy danh sách booking của user',
+    description: 'Lấy tất cả booking của user đang đăng nhập với thông tin chi tiết'
+  })
+  @ApiQuery({
+    name: 'status',
+    description: 'Filter theo trạng thái booking',
+    required: false,
+    enum: ['pending', 'confirmed', 'cancelled', 'completed'],
+    example: 'confirmed'
+  })
+  @ApiQuery({
+    name: 'type',
+    description: 'Filter theo loại booking',
+    required: false,
+    enum: ['field', 'coach'],
+    example: 'field'
+  })
+  @ApiQuery({
+    name: 'limit',
+    description: 'Số lượng booking trả về',
+    required: false,
+    type: Number,
+    example: 10
+  })
+  @ApiQuery({
+    name: 'page',
+    description: 'Trang hiện tại (bắt đầu từ 1)',
+    required: false,
+    type: Number,
+    example: 1
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách booking của user',
+    type: UserBookingsResponseDto
+  })
+  @ApiResponse({ status: 401, description: 'Chưa xác thực' })
+  async getMyBookings(
+    @Request() req,
+    @Query() query: GetUserBookingsDto,
+  ): Promise<UserBookingsResponseDto> {
+    const userId = this.getUserId(req);
+    return await this.bookingsService.getUserBookings(userId, {
+      status: query.status,
+      type: query.type,
+      limit: query.limit || 10,
+      page: query.page || 1
+    });
   }
 
   // ============================================================================

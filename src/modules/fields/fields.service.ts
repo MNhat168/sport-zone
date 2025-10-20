@@ -2,13 +2,14 @@ import { Injectable, NotFoundException, InternalServerErrorException, Logger, Un
 import { InjectModel } from '@nestjs/mongoose';
 import { Field } from './entities/field.entity';
 import { Model, Types } from 'mongoose';
-import { FieldsDto, CreateFieldDto, UpdateFieldDto, CreateFieldWithFilesDto } from './dtos/fields.dto';
+import { FieldsDto, CreateFieldDto, UpdateFieldDto, CreateFieldWithFilesDto, FieldOwnerProfileDto, CreateFieldOwnerProfileDto, UpdateFieldOwnerProfileDto } from './dtos/fields.dto';
 import { FieldOwnerProfile } from './entities/field-owner-profile.entity';
 import { AwsS3Service } from '../../service/aws-s3.service';
 import type { IFile } from '../../interfaces/file.interface';
 // Import Schedule and Booking models for availability checking
 import { Schedule } from '../schedules/entities/schedule.entity';
 import { Booking } from '../bookings/entities/booking.entity';
+import { User } from '../users/entities/user.entity';
 // Import utility function
 import { timeToMinutes } from '../../utils/utils';
 
@@ -23,8 +24,10 @@ export class FieldsService {
 
     constructor(
         @InjectModel(Field.name) private fieldModel: Model<Field>,
+        @InjectModel(FieldOwnerProfile.name) private fieldOwnerProfileModel: Model<FieldOwnerProfile>,
         @InjectModel(Schedule.name) private scheduleModel: Model<Schedule>,
         @InjectModel(Booking.name) private bookingModel: Model<Booking>,
+        @InjectModel(User.name) private userModel: Model<User>,
         private awsS3Service: AwsS3Service,
     ) {}
 
@@ -34,11 +37,33 @@ export class FieldsService {
     // CRUD OPERATIONS
     // ============================================================================
 
-    async findAll(query?: { name?: string; location?: string; sportType?: string }): Promise<FieldsDto[]> {
+    async findAll(query?: { 
+        name?: string; 
+        location?: string; 
+        sportType?: string;
+        latitude?: number;
+        longitude?: number;
+        radius?: number; // in kilometers
+    }): Promise<FieldsDto[]> {
         // Lọc theo tên và loại thể thao
-        const filter: any = {};
+        const filter: any = { isActive: true };
         if (query?.name) filter.name = { $regex: query.name, $options: 'i' };
         if (query?.sportType) filter.sportType = new RegExp(`^${query.sportType}$`, 'i');
+        if (query?.location) filter['location.address'] = { $regex: query.location, $options: 'i' };
+
+        // Location-based search with radius
+        if (query?.latitude && query?.longitude && query?.radius) {
+            const radiusInMeters = query.radius * 1000; // Convert km to meters
+            filter['location.geo'] = {
+                $near: {
+                    $geometry: {
+                        type: 'Point',
+                        coordinates: [query.longitude, query.latitude]
+                    },
+                    $maxDistance: radiusInMeters
+                }
+            };
+        }
 
         const fields = await this.fieldModel
             .find(filter)
@@ -50,7 +75,7 @@ export class FieldsService {
             name: field.name,
             sportType: field.sportType,
             description: field.description,
-            location: field.location || 'Unknown',
+            location: field.location,
             images: field.images,
             operatingHours: field.operatingHours,
             slotDuration: field.slotDuration,
@@ -68,22 +93,644 @@ export class FieldsService {
         }));
     }
 
+    /**
+     * Lấy danh sách field của field-owner
+     * @param ownerId - ID của field owner
+     * @param query - Optional query filters
+     * @returns Danh sách field của owner
+     */
+    async findByOwner(ownerId: string, query?: {
+        name?: string;
+        sportType?: string;
+        isActive?: boolean;
+        page?: number;
+        limit?: number;
+    }): Promise<{
+        fields: FieldsDto[];
+        pagination: {
+            total: number;
+            page: number;
+            limit: number;
+            totalPages: number;
+            hasNextPage: boolean;
+            hasPrevPage: boolean;
+        };
+    }> {
+        try {
+            // Build filter query
+            const filter: any = { 
+                owner: new Types.ObjectId(ownerId)
+            };
+
+            // Apply optional filters
+            if (query?.name) {
+                filter.name = { $regex: query.name, $options: 'i' };
+            }
+            if (query?.sportType) {
+                filter.sportType = new RegExp(`^${query.sportType}$`, 'i');
+            }
+            if (query?.isActive !== undefined) {
+                filter.isActive = query.isActive;
+            }
+
+            // Check if this ownerId is a User ID, find the corresponding FieldOwnerProfile
+            const user = await this.userModel.findById(ownerId).exec();
+            if (user) {
+                // ownerId is User ID, find the corresponding FieldOwnerProfile
+                const userFieldOwnerProfile = await this.fieldOwnerProfileModel.findOne({ user: new Types.ObjectId(ownerId) }).exec();
+                
+                if (userFieldOwnerProfile) {
+                    filter.owner = userFieldOwnerProfile._id;
+                }
+            }
+            // If ownerId is already FieldOwnerProfile ID, use it directly
+
+            // Pagination setup
+            const page = query?.page || 1;
+            const limit = query?.limit || 10;
+            const skip = (page - 1) * limit;
+
+            // Get total count
+            const total = await this.fieldModel.countDocuments(filter);
+
+            // Get fields with owner population
+            const fields = await this.fieldModel
+                .find(filter)
+                .populate({
+                    path: 'owner',
+                    select: 'user businessName businessRegistration contactInfo'
+                })
+                .sort({ createdAt: -1, _id: -1 }) // Mới nhất trước
+                .skip(skip)
+                .limit(limit)
+                .exec();
+
+            const totalPages = Math.ceil(total / limit);
+
+            // Convert to DTO format
+            const fieldsDto: FieldsDto[] = fields.map(field => ({
+                id: field._id?.toString() || '',
+                owner: (field.owner as any)?._id?.toString() || field.owner?.toString() || '',
+                name: field.name,
+                sportType: field.sportType,
+                description: field.description,
+                location: field.location,
+                images: field.images,
+                amenities: field.amenities,
+                operatingHours: field.operatingHours,
+                slotDuration: field.slotDuration,
+                minSlots: field.minSlots,
+                maxSlots: field.maxSlots,
+                priceRanges: field.priceRanges,
+                basePrice: field.basePrice,
+                isActive: field.isActive,
+                maintenanceNote: field.maintenanceNote,
+                maintenanceUntil: field.maintenanceUntil,
+                rating: field.rating,
+                totalReviews: field.totalReviews,
+                createdAt: field.createdAt,
+                updatedAt: field.updatedAt,
+            }));
+
+            return {
+                fields: fieldsDto,
+                pagination: {
+                    total,
+                    page,
+                    limit,
+                    totalPages,
+                    hasNextPage: page < totalPages,
+                    hasPrevPage: page > 1
+                }
+            };
+
+        } catch (error) {
+            this.logger.error(`Error getting fields for owner ${ownerId}:`, error);
+            throw new InternalServerErrorException('Failed to get owner fields');
+        }
+    }
+
+    /**
+     * Lấy danh sách booking hôm nay của các sân thuộc field-owner
+     * @param userId - ID của user (từ JWT token)
+     * @returns Danh sách booking hôm nay kèm thông tin khách hàng
+     */
+    async getTodayBookingsByOwner(userId: string): Promise<any[]> {
+        try {
+            // Validate userId
+            if (!Types.ObjectId.isValid(userId)) {
+                throw new BadRequestException('Invalid user ID format');
+            }
+
+            // Lấy ngày hôm nay theo timezone Việt Nam (UTC+7)
+            const vietnamTime = new Date();
+            const vietnamDate = new Date(vietnamTime.toLocaleString("en-US", {timeZone: "Asia/Ho_Chi_Minh"}));
+            const todayString = vietnamDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+
+            // Bước 1: Kiểm tra user có tồn tại và có role field_owner không
+            const user = await this.userModel.findById(userId).select('_id role').exec();
+            if (!user) {
+                throw new NotFoundException('User not found');
+            }
+            
+            if (user.role !== 'field_owner') {
+                throw new UnauthorizedException('User is not a field owner');
+            }
+
+            // Bước 2: Tìm FieldOwnerProfile của user này
+            const ownerProfile = await this.fieldOwnerProfileModel
+                .findOne({ user: new Types.ObjectId(userId) })
+                .select('_id facilityName')
+                .exec();
+
+            if (!ownerProfile) {
+                return [];
+            }
+
+            // Bước 3: Tìm tất cả fields của owner profile này
+            const ownerFields = await this.fieldModel
+                .find({ 
+                    owner: ownerProfile._id,
+                    isActive: true 
+                })
+                .select('_id name')
+                .exec();
+
+            if (ownerFields.length === 0) {
+                return [];
+            }
+
+            const fieldIds = ownerFields.map(field => field._id);
+
+            // Bước 4: Tìm tất cả bookings hôm nay cho các sân của owner
+            // Sử dụng date range để handle cả Date object và string
+            const startOfDay = new Date(todayString + 'T00:00:00.000Z');
+            const endOfDay = new Date(todayString + 'T23:59:59.999Z');
+            
+            const bookingQuery = {
+                field: { $in: fieldIds },
+                date: { 
+                    $gte: startOfDay,
+                    $lte: endOfDay
+                },
+                status: { $in: ['pending', 'confirmed', 'completed'] } // Loại bỏ cancelled
+            };
+
+            const todayBookings = await this.bookingModel
+                .find(bookingQuery)
+                .populate({
+                    path: 'field',
+                    select: 'name _id'
+                })
+                .populate({
+                    path: 'user',
+                    select: 'fullName phone email'
+                })
+                .populate({
+                    path: 'selectedAmenities',
+                    select: 'name price'
+                })
+                .sort({ startTime: 1 }) // Sắp xếp theo thời gian bắt đầu
+                .exec();
+
+            // Format dữ liệu trả về
+            const formattedBookings = todayBookings.map(booking => ({
+                bookingId: booking._id?.toString(),
+                fieldId: booking.field?._id?.toString(),
+                fieldName: (booking.field as any)?.name || 'Unknown Field',
+                date: typeof booking.date === 'string' ? booking.date : booking.date.toISOString().split('T')[0],
+                startTime: booking.startTime,
+                endTime: booking.endTime,
+                status: booking.status,
+                totalPrice: booking.totalPrice,
+                customer: {
+                    fullName: (booking.user as any)?.fullName || 'Unknown',
+                    phone: (booking.user as any)?.phone || 'N/A',
+                    email: (booking.user as any)?.email || 'N/A'
+                },
+                selectedAmenities: booking.selectedAmenities?.map((amenity: any) => amenity.name) || [],
+                amenitiesFee: booking.amenitiesFee || 0,
+                createdAt: booking.createdAt
+            }));
+
+            return formattedBookings;
+
+        } catch (error) {
+            this.logger.error(`Error getting today bookings for user ${userId}:`, error);
+            if (error instanceof BadRequestException || error instanceof NotFoundException || error instanceof UnauthorizedException) {
+                throw error;
+            }
+            throw new InternalServerErrorException('Failed to get today bookings');
+        }
+    }
+
+
+    /**
+     * Lấy tất cả booking của các sân thuộc field-owner với filter và pagination
+     * @param userId - ID của user (từ JWT token)
+     * @param filters - Bộ lọc: fieldName, status, startDate, endDate, page, limit
+     * @returns Danh sách booking với pagination
+     */
+    async getAllBookingsByOwner(userId: string, filters: {
+        fieldName?: string;
+        status?: string;
+        startDate?: string;
+        endDate?: string;
+        page?: number;
+        limit?: number;
+    }): Promise<{
+        bookings: any[];
+        pagination: {
+            total: number;
+            page: number;
+            limit: number;
+            totalPages: number;
+            hasNextPage: boolean;
+            hasPrevPage: boolean;
+        };
+    }> {
+        try {
+
+            // Validate userId
+            if (!Types.ObjectId.isValid(userId)) {
+                throw new BadRequestException('Invalid user ID format');
+            }
+
+            // Bước 1: Kiểm tra user có tồn tại và có role field_owner không
+            const user = await this.userModel.findById(userId).select('_id role').exec();
+            if (!user) {
+                throw new NotFoundException('User not found');
+            }
+            
+            if (user.role !== 'field_owner') {
+                throw new UnauthorizedException('User is not a field owner');
+            }
+
+            // Bước 2: Tìm FieldOwnerProfile của user này
+            const ownerProfile = await this.fieldOwnerProfileModel
+                .findOne({ user: new Types.ObjectId(userId) })
+                .select('_id facilityName')
+                .exec();
+
+            if (!ownerProfile) {
+                return {
+                    bookings: [],
+                    pagination: {
+                        total: 0,
+                        page: filters.page || 1,
+                        limit: filters.limit || 10,
+                        totalPages: 0,
+                        hasNextPage: false,
+                        hasPrevPage: false
+                    }
+                };
+            }
+
+            // Bước 3: Tìm tất cả fields của owner profile này
+            const fieldFilter: any = { 
+                owner: ownerProfile._id,
+                isActive: true 
+            };
+
+            // Filter theo tên sân nếu có
+            if (filters.fieldName) {
+                fieldFilter.name = { $regex: filters.fieldName, $options: 'i' };
+            }
+
+            const ownerFields = await this.fieldModel
+                .find(fieldFilter)
+                .select('_id name')
+                .exec();
+
+            if (ownerFields.length === 0) {
+                return {
+                    bookings: [],
+                    pagination: {
+                        total: 0,
+                        page: filters.page || 1,
+                        limit: filters.limit || 10,
+                        totalPages: 0,
+                        hasNextPage: false,
+                        hasPrevPage: false
+                    }
+                };
+            }
+
+            const fieldIds = ownerFields.map(field => field._id);
+
+            // Build booking filter
+            const bookingFilter: any = {
+                field: { $in: fieldIds }
+            };
+
+            // Filter theo status nếu có
+            if (filters.status) {
+                bookingFilter.status = filters.status;
+            }
+
+            // Filter theo date range nếu có - sử dụng date range để handle cả Date object và string
+            if (filters.startDate || filters.endDate) {
+                bookingFilter.date = {};
+                if (filters.startDate) {
+                    // Convert YYYY-MM-DD to start of day
+                    const startDate = new Date(filters.startDate + 'T00:00:00.000Z');
+                    bookingFilter.date.$gte = startDate;
+                }
+                if (filters.endDate) {
+                    // Convert YYYY-MM-DD to end of day
+                    const endDate = new Date(filters.endDate + 'T23:59:59.999Z');
+                    bookingFilter.date.$lte = endDate;
+                }
+            }
+
+            // Pagination setup
+            const page = filters.page || 1;
+            const limit = filters.limit || 10;
+            const skip = (page - 1) * limit;
+
+            // Get total count
+            const total = await this.bookingModel.countDocuments(bookingFilter);
+
+            // Get bookings with population
+            const bookings = await this.bookingModel
+                .find(bookingFilter)
+                .populate({
+                    path: 'field',
+                    select: 'name _id'
+                })
+                .populate({
+                    path: 'user',
+                    select: 'fullName phone email'
+                })
+                .populate({
+                    path: 'selectedAmenities',
+                    select: 'name price'
+                })
+                .sort({ date: -1, startTime: -1 }) // Mới nhất trước, sau đó theo thời gian
+                .skip(skip)
+                .limit(limit)
+                .exec();
+
+            // Format dữ liệu trả về
+            const formattedBookings = bookings.map(booking => ({
+                bookingId: booking._id?.toString(),
+                fieldId: booking.field?._id?.toString(),
+                fieldName: (booking.field as any)?.name || 'Unknown Field',
+                date: typeof booking.date === 'string' ? booking.date : booking.date.toISOString().split('T')[0],
+                startTime: booking.startTime,
+                endTime: booking.endTime,
+                status: booking.status,
+                totalPrice: booking.totalPrice,
+                customer: {
+                    fullName: (booking.user as any)?.fullName || 'Unknown',
+                    phone: (booking.user as any)?.phone || 'N/A',
+                    email: (booking.user as any)?.email || 'N/A'
+                },
+                selectedAmenities: booking.selectedAmenities?.map((amenity: any) => amenity.name) || [],
+                amenitiesFee: booking.amenitiesFee || 0,
+                createdAt: booking.createdAt
+            }));
+
+            const totalPages = Math.ceil(total / limit);
+
+            return {
+                bookings: formattedBookings,
+                pagination: {
+                    total,
+                    page,
+                    limit,
+                    totalPages,
+                    hasNextPage: page < totalPages,
+                    hasPrevPage: page > 1
+                }
+            };
+
+        } catch (error) {
+            this.logger.error(`Error getting all bookings for user ${userId}:`, error);
+            if (error instanceof BadRequestException || error instanceof NotFoundException || error instanceof UnauthorizedException) {
+                throw error;
+            }
+            throw new InternalServerErrorException('Failed to get all bookings');
+        }
+    }
+
+    /**
+     * Find nearby fields within a specified radius (public endpoint)
+     * @param latitude User's latitude
+     * @param longitude User's longitude
+     * @param radius Search radius in kilometers
+     * @param limit Maximum number of results
+     * @param sportType Optional sport type filter
+     * @returns Array of nearby fields with distance information
+     */
+    async findNearbyFieldsPublic(
+        latitude: number, 
+        longitude: number, 
+        radius: number = 10, // Default 10km radius
+        limit: number = 20, // Default 20 results
+        sportType?: string
+    ): Promise<Array<{
+        id: string;
+        name: string;
+        location: string;
+        latitude: number;
+        longitude: number;
+        distance: number;
+        rating: number;
+        price: string;
+        sportType: string;
+        images: string[];
+        isActive: boolean;
+    }>> {
+        try {
+            const radiusInMeters = radius * 1000; // Convert km to meters
+            
+            const filter: any = {
+                'location.geo': {
+                    $near: {
+                        $geometry: {
+                            type: 'Point',
+                            coordinates: [longitude, latitude]
+                        },
+                        $maxDistance: radiusInMeters
+                    }
+                },
+                isActive: true
+            };
+
+            if (sportType) {
+                filter.sportType = new RegExp(`^${sportType}$`, 'i');
+            }
+
+            const fields = await this.fieldModel
+                .find(filter)
+                .limit(limit)
+                .lean();
+
+            // Calculate distance and format response for each field
+            const fieldsWithDistance = fields.map(field => {
+                const distance = this.calculateDistance(
+                    latitude,
+                    longitude,
+                    field.location.geo.coordinates[1], // latitude
+                    field.location.geo.coordinates[0]  // longitude
+                );
+
+                // Format price as "100k/h" style
+                const price = this.formatPrice(field.basePrice);
+
+                return {
+                    id: field._id.toString(),
+                    name: field.name,
+                    location: field.location.address,
+                    latitude: field.location.geo.coordinates[1],
+                    longitude: field.location.geo.coordinates[0],
+                    distance: Math.round(distance * 100) / 100, // Round to 2 decimal places
+                    rating: field.rating,
+                    price: price,
+                    sportType: field.sportType,
+                    images: field.images,
+                    isActive: field.isActive
+                };
+            });
+
+            // Sort by distance (closest first)
+            return fieldsWithDistance.sort((a, b) => a.distance - b.distance);
+
+        } catch (error) {
+            this.logger.error('Error finding nearby fields', error);
+            throw new InternalServerErrorException('Failed to find nearby fields');
+        }
+    }
+
+    /**
+     * Find nearby fields within a specified radius
+     * @param latitude User's latitude
+     * @param longitude User's longitude
+     * @param radius Search radius in kilometers
+     * @param sportType Optional sport type filter
+     * @returns Array of nearby fields with distance information
+     */
+    async findNearbyFields(
+        latitude: number, 
+        longitude: number, 
+        radius: number = 10, // Default 10km radius
+        sportType?: string
+    ): Promise<Array<FieldsDto & { distance: number }>> {
+        try {
+            const radiusInMeters = radius * 1000; // Convert km to meters
+            
+            const filter: any = {
+                'location.geo': {
+                    $near: {
+                        $geometry: {
+                            type: 'Point',
+                            coordinates: [longitude, latitude]
+                        },
+                        $maxDistance: radiusInMeters
+                    }
+                },
+                isActive: true
+            };
+
+            if (sportType) {
+                filter.sportType = new RegExp(`^${sportType}$`, 'i');
+            }
+
+            const fields = await this.fieldModel
+                .find(filter)
+                .lean();
+
+            // Calculate distance for each field
+            const fieldsWithDistance = fields.map(field => {
+                const distance = this.calculateDistance(
+                    latitude,
+                    longitude,
+                    field.location.geo.coordinates[1], // latitude
+                    field.location.geo.coordinates[0]  // longitude
+                );
+
+                return {
+                    id: field._id.toString(),
+                    owner: field.owner?.toString() || '',
+                    name: field.name,
+                    sportType: field.sportType,
+                    description: field.description,
+                    location: field.location,
+                    images: field.images,
+                    operatingHours: field.operatingHours,
+                    slotDuration: field.slotDuration,
+                    minSlots: field.minSlots,
+                    maxSlots: field.maxSlots,
+                    priceRanges: field.priceRanges,
+                    basePrice: field.basePrice,
+                    isActive: field.isActive,
+                    maintenanceNote: field.maintenanceNote,
+                    maintenanceUntil: field.maintenanceUntil,
+                    rating: field.rating,
+                    totalReviews: field.totalReviews,
+                    createdAt: field.createdAt,
+                    updatedAt: field.updatedAt,
+                    distance: Math.round(distance * 100) / 100 // Round to 2 decimal places
+                };
+            });
+
+            // Sort by distance (closest first)
+            return fieldsWithDistance.sort((a, b) => a.distance - b.distance);
+
+        } catch (error) {
+            this.logger.error('Error finding nearby fields', error);
+            throw new InternalServerErrorException('Failed to find nearby fields');
+        }
+    }
+
     async findOne(id: string): Promise<FieldsDto> {
         const field = await this.fieldModel
             .findById(id)
-            .lean();
+            .exec();
 
         if (!field) {
             throw new NotFoundException(`Field with ID ${id} not found`);
         }
 
+        // Resolve owner info explicitly (robust against non-populated refs)
+        let ownerId = '';
+        let ownerName: string | undefined = undefined;
+        let ownerPhone: string | undefined = undefined;
+
+        const ownerRef: any = (field as any).owner;
+        if (ownerRef) {
+            if (ownerRef instanceof Types.ObjectId || typeof ownerRef === 'string') {
+                ownerId = ownerRef.toString();
+            } else if (ownerRef._id) {
+                ownerId = ownerRef._id.toString();
+            }
+        }
+
+        if (ownerId && Types.ObjectId.isValid(ownerId)) {
+            try {
+                const profile = await this.fieldOwnerProfileModel
+                    .findById(ownerId)
+                    .populate({ path: 'user', select: 'fullName phone' })
+                    .exec();
+                if (profile) {
+                    ownerName = profile.facilityName;
+                    ownerPhone = profile.contactPhone || (profile as any).user?.phone;
+                }
+            } catch {}
+        }
+
+        // Performance: do not query by user; owner must be FieldOwnerProfile ObjectId
+
         return {
-            id: field._id.toString(),
-            owner: field.owner?.toString() || '',
+            id: (field._id as Types.ObjectId).toString(),
+            owner: ownerId,
+            ownerName,
+            ownerPhone,
             name: field.name,
             sportType: field.sportType,
             description: field.description,
-            location: field.location || 'Unknown',
+            location: field.location,
             images: field.images,
             operatingHours: field.operatingHours,
             slotDuration: field.slotDuration,
@@ -106,12 +753,33 @@ export class FieldsService {
             // Validate owner exists
             // TODO: Add owner validation if needed
             
+            // Validate and normalize location
+            const validatedLocation = this.validateAndNormalizeLocation(createFieldDto.location);
+            
+            // Process amenities if provided
+            let amenities: Array<{ amenity: Types.ObjectId; price: number }> = [];
+            if (createFieldDto.amenities && createFieldDto.amenities.length > 0) {
+                // Validate amenity IDs and prices
+                amenities = createFieldDto.amenities.map(amenityDto => {
+                    if (!Types.ObjectId.isValid(amenityDto.amenityId)) {
+                        throw new BadRequestException(`Invalid amenity ID format: ${amenityDto.amenityId}`);
+                    }
+                    if (amenityDto.price < 0) {
+                        throw new BadRequestException(`Price must be non-negative: ${amenityDto.price}`);
+                    }
+                    return {
+                        amenity: new Types.ObjectId(amenityDto.amenityId),
+                        price: amenityDto.price
+                    };
+                });
+            }
+
             const newField = new this.fieldModel({
                 owner: new Types.ObjectId(ownerId),
                 name: createFieldDto.name,
                 sportType: createFieldDto.sportType,
                 description: createFieldDto.description,
-                location: createFieldDto.location,
+                location: validatedLocation,
                 images: createFieldDto.images || [],
                 operatingHours: createFieldDto.operatingHours,
                 slotDuration: createFieldDto.slotDuration,
@@ -119,6 +787,7 @@ export class FieldsService {
                 maxSlots: createFieldDto.maxSlots,
                 priceRanges: createFieldDto.priceRanges,
                 basePrice: createFieldDto.basePrice,
+                amenities: amenities,
                 isActive: true,
                 rating: 0,
                 totalReviews: 0,
@@ -126,8 +795,6 @@ export class FieldsService {
 
             const savedField = await newField.save();
             
-            this.logger.log(`Created new field: ${savedField.name} (ID: ${savedField._id})`);
-
             return {
                 id: (savedField._id as Types.ObjectId).toString(),
                 owner: savedField.owner.toString(),
@@ -166,17 +833,11 @@ export class FieldsService {
      */
     async createWithFiles(createFieldDto: CreateFieldWithFilesDto, files: IFile[], ownerId: string): Promise<FieldsDto> {
         try {
-            this.logger.log(`Creating field with ${files?.length || 0} images for owner: ${ownerId}`);
-
             // Upload images to S3 if files are provided
             let imageUrls: string[] = [];
             if (files && files.length > 0) {
-                this.logger.log(`Uploading ${files.length} images to S3...`);
-                
                 const uploadPromises = files.map(file => this.awsS3Service.uploadImage(file));
                 imageUrls = await Promise.all(uploadPromises);
-                
-                this.logger.log(`Successfully uploaded ${imageUrls.length} images to S3`);
             }
 
             // Parse JSON strings from form data
@@ -186,6 +847,48 @@ export class FieldsService {
             const minSlots = parseInt(createFieldDto.minSlots);
             const maxSlots = parseInt(createFieldDto.maxSlots);
             const basePrice = parseInt(createFieldDto.basePrice);
+            
+            // Parse and validate location from form data
+            let location;
+            try {
+                location = JSON.parse(createFieldDto.location);
+            } catch (error) {
+                // If location is not JSON, treat it as address string only
+                // This is a fallback for backward compatibility
+                location = {
+                    address: createFieldDto.location,
+                    geo: {
+                        type: 'Point',
+                        coordinates: [0, 0] // Default coordinates - should be updated by user
+                    }
+                };
+            }
+            
+            const validatedLocation = this.validateAndNormalizeLocation(location);
+            
+            // Parse amenities if provided
+            let amenities: Array<{ amenity: Types.ObjectId; price: number }> = [];
+            if (createFieldDto.amenities) {
+                try {
+                    const amenitiesArray = JSON.parse(createFieldDto.amenities);
+                    if (Array.isArray(amenitiesArray) && amenitiesArray.length > 0) {
+                        amenities = amenitiesArray.map(amenityDto => {
+                            if (!Types.ObjectId.isValid(amenityDto.amenityId)) {
+                                throw new BadRequestException(`Invalid amenity ID format: ${amenityDto.amenityId}`);
+                            }
+                            if (amenityDto.price < 0) {
+                                throw new BadRequestException(`Price must be non-negative: ${amenityDto.price}`);
+                            }
+                            return {
+                                amenity: new Types.ObjectId(amenityDto.amenityId),
+                                price: amenityDto.price
+                            };
+                        });
+                    }
+                } catch (error) {
+                    throw new BadRequestException('Invalid amenities JSON format');
+                }
+            }
 
             // Validate parsed data for day-based structure
             if (!Array.isArray(operatingHours) || operatingHours.length === 0) {
@@ -248,7 +951,7 @@ export class FieldsService {
                 name: createFieldDto.name,
                 sportType: createFieldDto.sportType,
                 description: createFieldDto.description,
-                location: createFieldDto.location,
+                location: validatedLocation,
                 images: imageUrls,
                 operatingHours,
                 slotDuration,
@@ -256,6 +959,7 @@ export class FieldsService {
                 maxSlots,
                 priceRanges,
                 basePrice,
+                amenities: amenities,
                 isActive: true,
                 rating: 0,
                 totalReviews: 0,
@@ -263,8 +967,6 @@ export class FieldsService {
 
             const savedField = await newField.save();
             
-            this.logger.log(`Created new field with images: ${savedField.name} (ID: ${savedField._id})`);
-
             return {
                 id: (savedField._id as Types.ObjectId).toString(),
                 owner: savedField.owner.toString(),
@@ -310,9 +1012,37 @@ export class FieldsService {
                 throw new UnauthorizedException('Only field owner can update field information');
             }
 
+            // Process amenities if provided
+            let updateData: any = { ...updateFieldDto };
+            if (updateFieldDto.amenities !== undefined) {
+                if (updateFieldDto.amenities.length > 0) {
+                    // Validate amenity IDs and prices
+                    const validAmenities = updateFieldDto.amenities.map(amenityDto => {
+                        if (!Types.ObjectId.isValid(amenityDto.amenityId)) {
+                            throw new BadRequestException(`Invalid amenity ID format: ${amenityDto.amenityId}`);
+                        }
+                        if (amenityDto.price < 0) {
+                            throw new BadRequestException(`Price must be non-negative: ${amenityDto.price}`);
+                        }
+                        return {
+                            amenity: new Types.ObjectId(amenityDto.amenityId),
+                            price: amenityDto.price
+                        };
+                    });
+                    updateData.amenities = validAmenities;
+                } else {
+                    updateData.amenities = [];
+                }
+            }
+
+            // Validate and normalize location if provided
+            if (updateFieldDto.location) {
+                updateData.location = this.validateAndNormalizeLocation(updateFieldDto.location);
+            }
+
             const updatedField = await this.fieldModel.findByIdAndUpdate(
                 fieldId,
-                { $set: updateFieldDto },
+                { $set: updateData },
                 { new: true }
             );
 
@@ -320,15 +1050,13 @@ export class FieldsService {
                 throw new NotFoundException('Field not found');
             }
 
-            this.logger.log(`Updated field: ${updatedField.name} (ID: ${updatedField._id})`);
-
             return {
                 id: (updatedField._id as Types.ObjectId).toString(),
                 owner: updatedField.owner.toString(),
                 name: updatedField.name,
                 sportType: updatedField.sportType,
                 description: updatedField.description,
-                location: updatedField.location || 'Unknown',
+                location: updatedField.location,
                 images: updatedField.images,
                 operatingHours: updatedField.operatingHours,
                 slotDuration: updatedField.slotDuration,
@@ -371,8 +1099,6 @@ export class FieldsService {
             
             await this.fieldModel.findByIdAndDelete(fieldId);
             
-            this.logger.log(`Deleted field: ${field.name} (ID: ${fieldId})`);
-
             return {
                 success: true,
                 message: 'Field deleted successfully'
@@ -489,7 +1215,6 @@ export class FieldsService {
             const endOfDay = new Date(date);
             endOfDay.setUTCHours(16, 59, 59, 999); // End of day in Vietnam = UTC+17-1ms
 
-            this.logger.log(`Searching bookings for field ${fieldId} on ${date.toISOString().split('T')[0]}`);
 
             // Get bookings from Booking collection (Pure Lazy Creation pattern)
             const bookings = await this.bookingModel.find({
@@ -501,8 +1226,6 @@ export class FieldsService {
                 status: { $in: ['confirmed', 'pending'] } // Include both confirmed and pending bookings
             }).exec();
 
-            this.logger.log(`Found ${bookings.length} bookings in Booking collection`);
-
             // Also check Schedule collection for legacy booked slots
             const schedule = await this.scheduleModel.findOne({
                 field: new Types.ObjectId(fieldId),
@@ -513,7 +1236,6 @@ export class FieldsService {
             }).exec();
 
             const scheduleSlots = schedule?.bookedSlots || [];
-            this.logger.log(`Found ${scheduleSlots.length} booked slots in Schedule collection`);
 
             // Combine both sources
             const allBookedSlots = [
@@ -535,7 +1257,6 @@ export class FieldsService {
                 }))
             ];
 
-            this.logger.log(`Total booked slots found: ${allBookedSlots.length}`);
             return allBookedSlots;
 
         } catch (error) {
@@ -634,7 +1355,6 @@ export class FieldsService {
             // Clean up old cache entries periodically
             this.cleanupCache();
 
-            this.logger.log(`Retrieved field config for ${fieldId}`);
             return field;
 
         } catch (error) {
@@ -690,7 +1410,6 @@ export class FieldsService {
                 }
             }
 
-            this.logger.log(`Retrieved ${result.size} field configurations`);
             return result;
 
         } catch (error) {
@@ -1076,6 +1795,114 @@ export class FieldsService {
     }
 
     // ============================================================================
+    // LOCATION HELPER METHODS
+    // ============================================================================
+
+    /**
+     * Calculate distance between two coordinates using Haversine formula
+     * @param lat1 First point latitude
+     * @param lon1 First point longitude
+     * @param lat2 Second point latitude
+     * @param lon2 Second point longitude
+     * @returns Distance in kilometers
+     */
+    private calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+        const R = 6371; // Earth's radius in kilometers
+        const dLat = this.deg2rad(lat2 - lat1);
+        const dLon = this.deg2rad(lon2 - lon1);
+        const a = 
+            Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(this.deg2rad(lat1)) * Math.cos(this.deg2rad(lat2)) * 
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        const distance = R * c; // Distance in kilometers
+        return distance;
+    }
+
+    /**
+     * Convert degrees to radians
+     */
+    private deg2rad(deg: number): number {
+        return deg * (Math.PI/180);
+    }
+
+    /**
+     * Format price in Vietnamese style (e.g., "100k/h", "1.5tr/h")
+     * @param price Price in VND
+     * @returns Formatted price string
+     */
+    private formatPrice(price: number): string {
+        if (price >= 1000000) {
+            const millions = price / 1000000;
+            return `${millions.toFixed(1)}tr/h`;
+        } else if (price >= 1000) {
+            const thousands = price / 1000;
+            return `${thousands}k/h`;
+        } else {
+            return `${price}/h`;
+        }
+    }
+
+    /**
+     * Validate location coordinates
+     * @param latitude Latitude value
+     * @param longitude Longitude value
+     * @returns Validation result
+     */
+    private validateCoordinates(latitude: number, longitude: number): { isValid: boolean; error?: string } {
+        if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+            return { isValid: false, error: 'Latitude and longitude must be numbers' };
+        }
+
+        if (latitude < -90 || latitude > 90) {
+            return { isValid: false, error: 'Latitude must be between -90 and 90 degrees' };
+        }
+
+        if (longitude < -180 || longitude > 180) {
+            return { isValid: false, error: 'Longitude must be between -180 and 180 degrees' };
+        }
+
+        return { isValid: true };
+    }
+
+    /**
+     * Validate and normalize location data
+     * @param location Location object
+     * @returns Normalized location object
+     */
+    private validateAndNormalizeLocation(location: any): { 
+        address: string; 
+        geo: { type: 'Point'; coordinates: [number, number] } 
+    } {
+        if (!location) {
+            throw new BadRequestException('Location is required');
+        }
+
+        if (!location.address || typeof location.address !== 'string') {
+            throw new BadRequestException('Location address is required and must be a string');
+        }
+
+        if (!location.geo || !location.geo.coordinates) {
+            throw new BadRequestException('Location coordinates are required');
+        }
+
+        const [longitude, latitude] = location.geo.coordinates;
+        const validation = this.validateCoordinates(latitude, longitude);
+        
+        if (!validation.isValid) {
+            throw new BadRequestException(validation.error);
+        }
+
+        return {
+            address: location.address.trim(),
+            geo: {
+                type: 'Point',
+                coordinates: [longitude, latitude]
+            }
+        };
+    }
+
+    // ============================================================================
     // HELPER METHODS
     // ============================================================================
 
@@ -1162,10 +1989,8 @@ export class FieldsService {
     clearCache(fieldId?: string): void {
         if (fieldId) {
             this.fieldConfigCache.delete(fieldId);
-            this.logger.log(`Cleared cache for field ${fieldId}`);
         } else {
             this.fieldConfigCache.clear();
-            this.logger.log('Cleared all field config cache');
         }
     }
 
@@ -1186,6 +2011,271 @@ export class FieldsService {
         return {
             size: this.fieldConfigCache.size,
             entries
+        };
+    }
+
+    // ============================================================================
+    // AMENITIES OPERATIONS
+    // ============================================================================
+
+    /**
+     * Get field amenities with populated data
+     */
+    async getFieldAmenities(fieldId: string) {
+        const field = await this.fieldModel
+            .findById(fieldId)
+            .populate('amenities.amenity', 'name description sportType isActive imageUrl type')
+            .lean();
+
+        if (!field) {
+            throw new NotFoundException(`Field with ID ${fieldId} not found`);
+        }
+
+        return {
+            fieldId: field._id.toString(),
+            fieldName: field.name,
+            amenities: field.amenities || []
+        };
+    }
+
+
+
+    /**
+     * Update field amenities (replace all)
+     */
+    async updateFieldAmenities(fieldId: string, amenitiesData: Array<{ amenityId: string; price: number }>, ownerId: string) {
+        // Verify field exists and user is owner
+        const field = await this.fieldModel.findById(fieldId);
+        if (!field) {
+            throw new NotFoundException(`Field with ID ${fieldId} not found`);
+        }
+
+        if (field.owner.toString() !== ownerId) {
+            throw new UnauthorizedException('Access denied. Field owner only.');
+        }
+
+        // Validate amenities data
+        if (!Array.isArray(amenitiesData)) {
+            throw new BadRequestException('Amenities data must be an array');
+        }
+
+        // Convert to ObjectIds and validate format
+        const validAmenities = amenitiesData.map(amenityData => {
+            if (!Types.ObjectId.isValid(amenityData.amenityId)) {
+                throw new BadRequestException(`Invalid amenity ID format: ${amenityData.amenityId}`);
+            }
+            if (amenityData.price < 0) {
+                throw new BadRequestException(`Price must be non-negative: ${amenityData.price}`);
+            }
+            return {
+                amenity: new Types.ObjectId(amenityData.amenityId),
+                price: amenityData.price
+            };
+        });
+
+        // Update field amenities
+        const updatedField = await this.fieldModel.findByIdAndUpdate(
+            fieldId,
+            { amenities: validAmenities },
+            { new: true }
+        ).populate('amenities.amenity', 'name description sportType isActive imageUrl type');
+
+        if (!updatedField) {
+            throw new NotFoundException(`Field with ID ${fieldId} not found`);
+        }
+
+        // Clear cache for this field
+        this.clearCache(fieldId);
+
+        return {
+            success: true,
+            message: `Updated field amenities`,
+            field: {
+                id: (updatedField._id as Types.ObjectId).toString(),
+                name: updatedField.name,
+                amenities: updatedField.amenities
+            }
+        };
+    }
+
+    // ============================================================================
+    // FIELD OWNER PROFILE OPERATIONS
+    // ============================================================================
+
+    /**
+     * Tạo FieldOwnerProfile mới
+     * @param userId - ID của user
+     * @param createDto - Dữ liệu tạo profile
+     * @returns FieldOwnerProfileDto
+     */
+    async createFieldOwnerProfile(userId: string, createDto: CreateFieldOwnerProfileDto): Promise<FieldOwnerProfileDto> {
+        try {
+            // Kiểm tra xem user đã có profile chưa
+            const existingProfile = await this.fieldOwnerProfileModel.findOne({ user: new Types.ObjectId(userId) }).exec();
+            if (existingProfile) {
+                throw new BadRequestException('User already has a field owner profile');
+            }
+
+            // Tạo profile mới
+            const newProfile = new this.fieldOwnerProfileModel({
+                user: new Types.ObjectId(userId),
+                facilityName: createDto.facilityName,
+                facilityLocation: createDto.facilityLocation,
+                supportedSports: createDto.supportedSports,
+                description: createDto.description,
+                amenities: createDto.amenities || [],
+                verificationDocument: createDto.verificationDocument,
+                businessHours: createDto.businessHours,
+                contactPhone: createDto.contactPhone,
+                website: createDto.website,
+                rating: 0,
+                totalReviews: 0,
+                isVerified: false,
+            });
+
+            const savedProfile = await newProfile.save();
+
+            // Populate user info
+            const populatedProfile = await this.fieldOwnerProfileModel
+                .findById(savedProfile._id)
+                .populate('user', 'fullName phone email')
+                .exec();
+
+            return this.mapToFieldOwnerProfileDto(populatedProfile);
+
+        } catch (error) {
+            if (error instanceof BadRequestException) {
+                throw error;
+            }
+            this.logger.error('Error creating field owner profile', error);
+            throw new InternalServerErrorException('Failed to create field owner profile');
+        }
+    }
+
+    /**
+     * Lấy FieldOwnerProfile theo user ID
+     * @param userId - ID của user
+     * @returns FieldOwnerProfileDto hoặc null
+     */
+    async getFieldOwnerProfileByUserId(userId: string): Promise<FieldOwnerProfileDto | null> {
+        try {
+            const profile = await this.fieldOwnerProfileModel
+                .findOne({ user: new Types.ObjectId(userId) })
+                .populate('user', 'fullName phone email')
+                .exec();
+
+            if (!profile) {
+                return null;
+            }
+
+            return this.mapToFieldOwnerProfileDto(profile);
+
+        } catch (error) {
+            this.logger.error('Error getting field owner profile by user ID', error);
+            throw new InternalServerErrorException('Failed to get field owner profile');
+        }
+    }
+
+    /**
+     * Lấy FieldOwnerProfile theo profile ID
+     * @param profileId - ID của profile
+     * @returns FieldOwnerProfileDto
+     */
+    async getFieldOwnerProfile(profileId: string): Promise<FieldOwnerProfileDto> {
+        try {
+            const profile = await this.fieldOwnerProfileModel
+                .findById(profileId)
+                .populate('user', 'fullName phone email')
+                .exec();
+
+            if (!profile) {
+                throw new NotFoundException('Field owner profile not found');
+            }
+
+            return this.mapToFieldOwnerProfileDto(profile);
+
+        } catch (error) {
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            this.logger.error('Error getting field owner profile', error);
+            throw new InternalServerErrorException('Failed to get field owner profile');
+        }
+    }
+
+    /**
+     * Cập nhật FieldOwnerProfile
+     * @param userId - ID của user (để verify quyền sở hữu)
+     * @param updateDto - Dữ liệu cập nhật
+     * @returns FieldOwnerProfileDto
+     */
+    async updateFieldOwnerProfile(userId: string, updateDto: UpdateFieldOwnerProfileDto): Promise<FieldOwnerProfileDto> {
+        try {
+            // Tìm profile của user
+            const profile = await this.fieldOwnerProfileModel
+                .findOne({ user: new Types.ObjectId(userId) })
+                .exec();
+
+            if (!profile) {
+                throw new NotFoundException('Field owner profile not found');
+            }
+
+            // Cập nhật dữ liệu
+            const updateData: any = {};
+            if (updateDto.facilityName !== undefined) updateData.facilityName = updateDto.facilityName;
+            if (updateDto.facilityLocation !== undefined) updateData.facilityLocation = updateDto.facilityLocation;
+            if (updateDto.supportedSports !== undefined) updateData.supportedSports = updateDto.supportedSports;
+            if (updateDto.description !== undefined) updateData.description = updateDto.description;
+            if (updateDto.amenities !== undefined) updateData.amenities = updateDto.amenities;
+            if (updateDto.verificationDocument !== undefined) updateData.verificationDocument = updateDto.verificationDocument;
+            if (updateDto.businessHours !== undefined) updateData.businessHours = updateDto.businessHours;
+            if (updateDto.contactPhone !== undefined) updateData.contactPhone = updateDto.contactPhone;
+            if (updateDto.website !== undefined) updateData.website = updateDto.website;
+
+            const updatedProfile = await this.fieldOwnerProfileModel
+                .findByIdAndUpdate(profile._id, { $set: updateData }, { new: true })
+                .populate('user', 'fullName phone email')
+                .exec();
+
+            if (!updatedProfile) {
+                throw new NotFoundException('Field owner profile not found');
+            }
+
+            return this.mapToFieldOwnerProfileDto(updatedProfile);
+
+        } catch (error) {
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            this.logger.error('Error updating field owner profile', error);
+            throw new InternalServerErrorException('Failed to update field owner profile');
+        }
+    }
+
+    /**
+     * Helper method để map FieldOwnerProfile entity sang DTO
+     */
+    private mapToFieldOwnerProfileDto(profile: any): FieldOwnerProfileDto {
+        return {
+            id: profile._id.toString(),
+            user: profile.user._id?.toString() || profile.user.toString(),
+            userFullName: profile.user?.fullName,
+            userPhone: profile.user?.phone,
+            userEmail: profile.user?.email,
+            facilityName: profile.facilityName,
+            facilityLocation: profile.facilityLocation,
+            supportedSports: profile.supportedSports,
+            description: profile.description,
+            amenities: profile.amenities,
+            rating: profile.rating,
+            totalReviews: profile.totalReviews,
+            isVerified: profile.isVerified,
+            verificationDocument: profile.verificationDocument,
+            businessHours: profile.businessHours,
+            contactPhone: profile.contactPhone,
+            website: profile.website,
+            createdAt: profile.createdAt,
+            updatedAt: profile.updatedAt,
         };
     }
 }
