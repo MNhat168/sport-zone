@@ -292,4 +292,14 @@ export class AuthService {
   async logout() {
     return { message: 'Logged out' };
   }
+
+  // Get user by ID for session validation
+  async getUserById(userId: string) {
+    try {
+      const user = await this.userModel.findById(userId);
+      return user;
+    } catch (error) {
+      return null;
+    }
+  }
 }

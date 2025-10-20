@@ -2,7 +2,8 @@ import { Injectable, NotFoundException, InternalServerErrorException, Logger, Un
 import { InjectModel } from '@nestjs/mongoose';
 import { Field } from './entities/field.entity';
 import { Model, Types } from 'mongoose';
-import { FieldsDto, CreateFieldDto, UpdateFieldDto, CreateFieldWithFilesDto, FieldOwnerProfileDto, CreateFieldOwnerProfileDto, UpdateFieldOwnerProfileDto } from './dtos/fields.dto';
+import { FieldsDto, CreateFieldDto, UpdateFieldDto, CreateFieldWithFilesDto } from './dtos/fields.dto';
+import { FieldOwnerProfileDto, CreateFieldOwnerProfileDto, UpdateFieldOwnerProfileDto } from './dtos/field-owner-profile.dto';
 import { FieldOwnerProfile } from './entities/field-owner-profile.entity';
 import { AwsS3Service } from '../../service/aws-s3.service';
 import type { IFile } from '../../interfaces/file.interface';
@@ -2259,9 +2260,6 @@ export class FieldsService {
         return {
             id: profile._id.toString(),
             user: profile.user._id?.toString() || profile.user.toString(),
-            userFullName: profile.user?.fullName,
-            userPhone: profile.user?.phone,
-            userEmail: profile.user?.email,
             facilityName: profile.facilityName,
             facilityLocation: profile.facilityLocation,
             supportedSports: profile.supportedSports,
