@@ -3,6 +3,7 @@ import { ProfilesService } from './profiles.service';
 import { Types } from 'mongoose';
 import { BadRequestException } from '@nestjs/common';
 import { SportType } from 'src/common/enums/sport-type.enum';
+import { CoachProfile } from 'src/modules/coaches/entities/coach-profile.entity';
 
 @Controller('profiles')
 export class ProfilesController {
@@ -11,6 +12,35 @@ export class ProfilesController {
     @Get('user/:userId')
     async getByUserId(@Param('userId') userId: string) {
         return this.profileService.findByUserId(userId);
+    }
+
+    @Patch('coach/update/:userId')
+    async updateCoachProfile(
+        @Param('userId') userId: string,
+        @Body()
+        body: {
+            certification?: string;
+            bio?: string;
+            sports?: SportType[];
+            location?: string;
+            experience?: string;
+        },
+    ): Promise<CoachProfile> {
+        const { certification, bio, sports, location, experience } = body;
+
+        if (!certification && !bio && !sports && !location && !experience) {
+            throw new BadRequestException(
+                'At least one field must be provided to update',
+            );
+        }
+
+        return this.profileService.updateCoachProfile(userId, {
+            certification,
+            bio,
+            sports,
+            location,
+            experience,
+        });
     }
 
     @Patch(':userId/hourly-rate')

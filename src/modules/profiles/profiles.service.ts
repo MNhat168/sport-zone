@@ -28,6 +28,46 @@ export class ProfilesService {
         return coachProfile;
     }
 
+    async updateCoachProfile(
+        userId: string,
+        updates: {
+            certification?: string;
+            bio?: string;
+            sports?: SportType[];
+            location?: string;
+            experience?: string;
+        },
+    ): Promise<CoachProfile> {
+        if (!Types.ObjectId.isValid(userId)) {
+            throw new BadRequestException('Invalid user ID format');
+        }
+
+        const allowedFields = ['certification', 'bio', 'sports', 'location', 'experience'];
+        const updateData: Record<string, any> = {};
+
+        for (const field of allowedFields) {
+            if (updates[field] !== undefined) {
+                updateData[field] = updates[field];
+            }
+        }
+
+        if (Object.keys(updateData).length === 0) {
+            throw new BadRequestException('No valid fields provided for update');
+        }
+
+        const profile = await this.coachProfileModel.findOneAndUpdate(
+            { user: new Types.ObjectId(userId) },
+            { $set: updateData },
+            { new: true },
+        );
+
+        if (!profile) {
+            throw new NotFoundException('Coach profile not found');
+        }
+
+        return profile;
+    }
+
     async setHourlyRate(coachId: string, newRate: number): Promise<CoachProfile> {
         if (!Types.ObjectId.isValid(coachId)) {
             throw new BadRequestException('Invalid coach ID format');
