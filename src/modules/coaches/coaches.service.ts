@@ -121,18 +121,18 @@ export class CoachesService {
     return {
       id: user._id.toString(),
       name: user.fullName,
-      profileImage: user.avatarUrl ?? '',
+      avatar: user.avatarUrl ?? '',
       description: profile?.bio ?? '',
       rating: profile?.rating ?? 0,
-      reviewCount: profile?.totalReviews ?? 0,
+      numberOfReviews: profile?.totalReviews ?? 0,
       location: profile?.location ?? '',
       level: profile?.certification ?? '',
       completedSessions: profile?.completedSessions ?? 0,
-      createdAt: (profile as any)?.createdAt ?? '',
+      memberSince: (profile as any)?.createdAt ?? '',
       availableSlots,
       lessonTypes,
       price: profile?.hourlyRate ?? 0,
-
+      rank: profile?.rank ?? 'novice',
       coachingDetails: {
         experience: profile?.experience ?? '',
         certification: profile?.certification ?? '',
