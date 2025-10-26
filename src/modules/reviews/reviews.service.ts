@@ -2,11 +2,13 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Review, ReviewType } from './entities/review.entity';
+import { Booking, BookingType } from '../bookings/entities/booking.entity';
 
 @Injectable()
 export class ReviewsService {
   constructor(
     @InjectModel(Review.name) private readonly reviewModel: Model<Review>,
+    @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
   ) {}
 
   // Create coach review service *
@@ -25,6 +27,26 @@ export class ReviewsService {
     if (!data.comment || data.comment.length < 10) {
       throw new BadRequestException('Comment must be at least 10 characters');
     }
+    // If bookingId provided, validate booking exists and belongs to the user
+    if (data.booking) {
+      const booking = await this.bookingModel.findById(data.booking).exec();
+      if (!booking) {
+        throw new BadRequestException('Booking not found');
+      }
+      if (String(booking.user) !== String(data.user)) {
+        throw new BadRequestException('Booking does not belong to the current user');
+      }
+      // If booking has a requested coach, ensure it matches the provided coach
+      if (booking.requestedCoach && String(booking.requestedCoach) !== String(data.coach)) {
+        throw new BadRequestException('Provided coach does not match the coach on the booking');
+      }
+      // Optional: ensure booking type is coach
+      if (booking.type && booking.type !== BookingType.COACH) {
+        // not strictly required, but warn/abort if booking wasn't a coach booking
+        throw new BadRequestException('Booking is not a coach booking');
+      }
+    }
+
     const review = new this.reviewModel({
       user: data.user,
       coach: data.coach,
@@ -52,6 +74,25 @@ export class ReviewsService {
     if (!data.comment || data.comment.length < 10) {
       throw new BadRequestException('Comment must be at least 10 characters');
     }
+    // If bookingId provided, validate booking exists and belongs to the user
+    if (data.booking) {
+      const booking = await this.bookingModel.findById(data.booking).exec();
+      if (!booking) {
+        throw new BadRequestException('Booking not found');
+      }
+      if (String(booking.user) !== String(data.user)) {
+        throw new BadRequestException('Booking does not belong to the current user');
+      }
+      // Ensure booking.field matches provided field
+      if (booking.field && String(booking.field) !== String(data.field)) {
+        throw new BadRequestException('Provided field does not match the field on the booking');
+      }
+      // Optional: ensure booking type is field
+      if (booking.type && booking.type !== BookingType.FIELD) {
+        throw new BadRequestException('Booking is not a field booking');
+      }
+    }
+
     const review = new this.reviewModel({
       user: data.user,
       field: data.field,

@@ -33,6 +33,9 @@ export class CoachProfile extends BaseEntity {
   @Prop({ type: Number, default: 0 })
   totalReviews: number;
 
+  @Prop({ type: String, default: 'novice' })
+  rank?: string;
+
   @Prop({ type: String, default: '', required: false })
   location?: string;
 }

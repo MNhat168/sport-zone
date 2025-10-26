@@ -3,10 +3,14 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ReviewsController } from './reviews.controller';
 import { ReviewsService } from './reviews.service';
 import { Review, ReviewSchema } from './entities/review.entity';
+import { Booking, BookingSchema } from '../bookings/entities/booking.entity';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: Review.name, schema: ReviewSchema }]),
+    MongooseModule.forFeature([
+      { name: Review.name, schema: ReviewSchema },
+      { name: Booking.name, schema: BookingSchema },
+    ]),
   ],
   controllers: [ReviewsController],
   providers: [ReviewsService],
