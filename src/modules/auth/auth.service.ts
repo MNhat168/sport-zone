@@ -24,13 +24,13 @@ export class AuthService {
 
   generateAccessToken(payload: TokenPayload) {
     return this.jwt_service.sign(payload, {
-      expiresIn: this.config_service.get<string>('JWT_ACCESS_TOKEN_EXPIRATION_TIME') || '15m',
+      expiresIn: Number(this.config_service.get('JWT_ACCESS_TOKEN_EXPIRATION_TIME')) || 3600,
     });
   }
 
   generateRefreshToken(payload: TokenPayload) {
     return this.jwt_service.sign(payload, {
-      expiresIn: this.config_service.get<string>('JWT_REFRESH_TOKEN_EXPIRATION_TIME') || '7d',
+      expiresIn: Number(this.config_service.get('JWT_REFRESH_TOKEN_EXPIRATION_TIME')) || 25200,
     });
   }
   // Register a new user
@@ -42,7 +42,7 @@ export class AuthService {
     password: string;
   }) {
     const { fullName, email, phone, date_of_birth, password } = body;
-    
+
     // Validate phone number format (Vietnamese phone number)
     const phoneRegex = /^[0-9]{10}$/;
     if (!phoneRegex.test(phone)) {
@@ -57,7 +57,7 @@ export class AuthService {
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       // Chưa đến sinh nhật trong năm này
     }
-    
+
     if (age < 12) {
       throw new BadRequestException('Tuổi phải lớn hơn hoặc bằng 12.');
     }
@@ -219,19 +219,19 @@ export class AuthService {
       });
       await user.save();
     }
-    const accessToken = this.generateAccessToken({ 
-      userId: (user._id as any).toString(), 
-      email: user.email, 
-      role: user.role 
+    const accessToken = this.generateAccessToken({
+      userId: (user._id as any).toString(),
+      email: user.email,
+      role: user.role
     });
-    const refreshToken = this.generateRefreshToken({ 
-      userId: (user._id as any).toString(), 
-      email: user.email, 
-      role: user.role 
+    const refreshToken = this.generateRefreshToken({
+      userId: (user._id as any).toString(),
+      email: user.email,
+      role: user.role
     });
-    return { 
+    return {
       access_token: accessToken,
-      refresh_token: refreshToken 
+      refresh_token: refreshToken
     };
   }
   async authenticateWithGoogle(sign_in_token: SignInTokenDto & { rememberMe: boolean }) {
@@ -264,15 +264,15 @@ export class AuthService {
     if (!user.isActive) throw new HttpException({ message: 'Tài khoản đã bị khóa' }, HttpStatus.UNAUTHORIZED);
     if (avatar && user.avatarUrl !== avatar) await this.user_repository.update(user.id, { avatarUrl: avatar });
 
-    const accessToken = this.generateAccessToken({ 
-      userId: (user._id as any).toString(), 
-      email: user.email, 
-      role: user.role 
+    const accessToken = this.generateAccessToken({
+      userId: (user._id as any).toString(),
+      email: user.email,
+      role: user.role
     });
-    const refreshToken = this.generateRefreshToken({ 
-      userId: (user._id as any).toString(), 
-      email: user.email, 
-      role: user.role 
+    const refreshToken = this.generateRefreshToken({
+      userId: (user._id as any).toString(),
+      email: user.email,
+      role: user.role
     });
 
     return {
