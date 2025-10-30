@@ -3,7 +3,7 @@ import { Types } from 'mongoose';
 import { NotificationType } from 'src/common/enums/notification-type.enum';
 import { BaseEntity } from 'src/common/entities/base.entity';
 
-@Schema()
+@Schema({ timestamps: true })
 export class Notification extends BaseEntity {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   recipient: Types.ObjectId;

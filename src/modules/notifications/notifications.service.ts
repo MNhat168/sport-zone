@@ -10,7 +10,7 @@ export class NotificationsService {
     constructor(
         @Inject(NOTIFICATION_REPOSITORY)
         private readonly notificationRepository: NotificationRepositoryInterface,
-    ) {}
+    ) { }
 
     async create(dto: CreateNotificationDto): Promise<Notification> {
         return this.notificationRepository.create(dto);
@@ -33,11 +33,11 @@ export class NotificationsService {
             notificationId,
             { isRead: true }
         );
-        
+
         if (!notification) {
             throw new NotFoundException('Notification not found');
         }
-        
+
         return notification;
     }
 
