@@ -27,22 +27,36 @@ export class ReviewsService {
     if (!data.comment || data.comment.length < 10) {
       throw new BadRequestException('Comment must be at least 10 characters');
     }
-    // If bookingId provided, validate booking exists and belongs to the user
-    if (data.booking) {
-      const booking = await this.bookingModel.findById(data.booking).exec();
+
+    let bookingId = data.booking;
+
+    // If bookingId is not provided, try to auto-attach the latest booking for this user and coach
+    if (!bookingId) {
+      const latestBooking = await this.bookingModel.findOne({
+        user: data.user,
+        requestedCoach: data.coach,
+        type: BookingType.COACH,
+      })
+        .sort({ createdAt: -1 })
+        .exec();
+      if (latestBooking) {
+        bookingId = String(latestBooking._id);
+      }
+    }
+
+    // If bookingId is now present, validate it
+    if (bookingId) {
+      const booking = await this.bookingModel.findById(bookingId).exec();
       if (!booking) {
         throw new BadRequestException('Booking not found');
       }
       if (String(booking.user) !== String(data.user)) {
         throw new BadRequestException('Booking does not belong to the current user');
       }
-      // If booking has a requested coach, ensure it matches the provided coach
       if (booking.requestedCoach && String(booking.requestedCoach) !== String(data.coach)) {
         throw new BadRequestException('Provided coach does not match the coach on the booking');
       }
-      // Optional: ensure booking type is coach
       if (booking.type && booking.type !== BookingType.COACH) {
-        // not strictly required, but warn/abort if booking wasn't a coach booking
         throw new BadRequestException('Booking is not a coach booking');
       }
     }
@@ -50,7 +64,7 @@ export class ReviewsService {
     const review = new this.reviewModel({
       user: data.user,
       coach: data.coach,
-      booking: data.booking,
+      booking: bookingId,
       type: ReviewType.COACH,
       rating: data.rating,
       comment: data.comment,
@@ -166,8 +180,31 @@ export class ReviewsService {
     return this.reviewModel.find({ field: fieldId, type: ReviewType.FIELD });
   }
 
-  // Get all reviews for a specific coach *
-  async getAllReviewsForCoach(coachId: string) {
-    return this.reviewModel.find({ coach: coachId, type: ReviewType.COACH });
+  // Get all reviews for a specific coach with pagination
+  async getAllReviewsForCoach(coachId: string, page = 1, limit = 10) {
+    const filter = { coach: coachId, type: ReviewType.COACH } as any;
+    const skip = Math.max(0, (page - 1) * limit);
+
+    const [items, total] = await Promise.all([
+      this.reviewModel
+        .find(filter)
+        .populate('user', 'fullName')
+        .populate('booking', 'createdAt startTime')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.reviewModel.countDocuments(filter).exec(),
+    ]);
+
+    return {
+      data: items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
+    };
   }
 }

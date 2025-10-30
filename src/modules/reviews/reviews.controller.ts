@@ -7,6 +7,8 @@ import {
   Patch,
   Param,
   ForbiddenException,
+  Get,
+  Query,
 } from '@nestjs/common';
 import { ReviewsService } from './reviews.service';
 import { AuthGuard } from '@nestjs/passport';
@@ -114,15 +116,29 @@ export class ReviewsController {
 
   // Get all reviews for a specific field
   @UseGuards(AuthGuard('jwt'))
-  @Post('field/:fieldId/all')
+  @Get('field/:fieldId/all')
   async getAllReviewsForField(@Param('fieldId') fieldId: string) {
     return this.reviewsService.getAllReviewsForField(fieldId);
   }
 
-  //Get all reviews for a specific coach
-  @UseGuards(AuthGuard('jwt'))
-  @Post('coach/:coachId/all')
-  async getAllReviewsForCoach(@Param('coachId') coachId: string) {
-    return this.reviewsService.getAllReviewsForCoach(coachId);
+  // //Get all reviews for a specific coach
+  // // Get all reviews for a specific coach (admin/authenticated route)
+  // @UseGuards(AuthGuard('jwt'))
+  // @Get('coach/:coachId/all')
+  // async getAllReviewsForCoach(@Param('coachId') coachId: string) {
+  //   return this.reviewsService.getAllReviewsForCoach(coachId);
+  // }
+
+  // Public endpoint for retrieving coach reviews (used by frontend)
+  // This matches the frontend expectation: GET /reviews/coach/:coachId
+  @Get('coach/:coachId')
+  async getPublicReviewsForCoach(
+    @Param('coachId') coachId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const p = Math.max(1, parseInt(page || '1', 10) || 1);
+    const l = Math.max(1, parseInt(limit || '10', 10) || 10);
+    return this.reviewsService.getAllReviewsForCoach(coachId, p, l);
   }
 }
