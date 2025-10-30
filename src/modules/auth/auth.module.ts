@@ -28,7 +28,7 @@ import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
         return {
           secret: configService.get<string>('JWT_SECRET') || 'your-secret-key',
           signOptions: {
-            expiresIn: configService.get<string>('JWT_ACCESS_TOKEN_EXPIRATION_TIME') || '15m',
+            expiresIn: Number(configService.get('JWT_ACCESS_TOKEN_EXPIRATION_TIME')) || 3600,
           },
         };
       },
@@ -38,10 +38,10 @@ import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
   ],
   controllers: [AuthController],
   providers: [
-    AuthService, 
+    AuthService,
     JwtStrategy,
     JwtRefreshStrategy,
-    UserRepository, 
+    UserRepository,
     UsersService,
     {
       provide: USER_REPOSITORY,
@@ -50,4 +50,4 @@ import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
   ],
   exports: [AuthService],
 })
-export class AuthModule {}
+export class AuthModule { }
