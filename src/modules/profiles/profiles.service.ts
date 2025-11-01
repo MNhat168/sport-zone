@@ -144,11 +144,11 @@ export class ProfilesService {
         return profile;
     }
 
-    async getCoachIdByUserId(userId: string): Promise<string> {
-        const coach = await this.coachProfileModel.findOne({ user: new Types.ObjectId(userId) }).exec();
+    async getCoachIdByUserId(userId: string): Promise<any> {
+        const coach = await this.coachProfileModel.findOne({ user: new Types.ObjectId(userId) }).populate('user').exec();
         if (!coach) {
             throw new NotFoundException('Coach profile not found for this user');
         }
-        return coach.id.toString();
+        return coach;
     }
 }

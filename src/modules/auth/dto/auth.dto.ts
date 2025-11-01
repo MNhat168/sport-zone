@@ -189,7 +189,7 @@ export class ResetPasswordDto {
     })
     @IsString()
     @Length(6, 50, { message: 'Mật khẩu phải có độ dài từ 6-50 ký tự' })
-    password: string;
+    newPassword: string;
 
     /**
      * Xác nhận mật khẩu mới

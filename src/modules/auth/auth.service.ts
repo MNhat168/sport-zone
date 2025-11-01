@@ -181,15 +181,15 @@ export class AuthService {
     });
   }
 
-  async resetPassword(body: { email: string; resetPasswordToken: string; password: string; confirmPassword: string }) {
-    const { email, resetPasswordToken, password, confirmPassword } = body;
-    if (password !== confirmPassword) throw new BadRequestException('Mật khẩu xác nhận không khớp');
+  async resetPassword(body: { email: string; resetPasswordToken: string; newPassword: string; confirmPassword: string }) {
+    const { email, resetPasswordToken, newPassword, confirmPassword } = body;
+    if (newPassword !== confirmPassword) throw new BadRequestException('Mật khẩu xác nhận không khớp');
     const user = await this.userModel.findOne({ email });
     if (!user) throw new BadRequestException('User not found');
     if (!user.resetPasswordToken || !user.resetPasswordExpires) throw new BadRequestException('No reset token');
     if (user.resetPasswordToken !== resetPasswordToken) throw new BadRequestException('Invalid code');
     if (user.resetPasswordExpires < new Date()) throw new BadRequestException('Reset token expired');
-    user.password = await bcrypt.hash(password, 10);
+    user.password = await bcrypt.hash(newPassword, 10);
     user.resetPasswordToken = undefined;
     user.resetPasswordExpires = undefined;
     await user.save();

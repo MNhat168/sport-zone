@@ -13,6 +13,7 @@ import { Booking } from '../bookings/entities/booking.entity';
 import { User } from '../users/entities/user.entity';
 // Import utility function
 import { timeToMinutes } from '../../utils/utils';
+import { Amenity } from '../amenities/entities/amenities.entity';
 
 
 @Injectable()
@@ -29,6 +30,7 @@ export class FieldsService {
         @InjectModel(Schedule.name) private scheduleModel: Model<Schedule>,
         @InjectModel(Booking.name) private bookingModel: Model<Booking>,
         @InjectModel(User.name) private userModel: Model<User>,
+        @InjectModel(Amenity.name) private amenityModel: Model<Amenity>,
         private awsS3Service: AwsS3Service,
     ) {}
 
@@ -155,16 +157,25 @@ export class FieldsService {
             const total = await this.fieldModel.countDocuments(filter);
 
             // Get fields with owner population
-            const fields = await this.fieldModel
+        const fields = await this.fieldModel
                 .find(filter)
                 .populate({
                     path: 'owner',
                     select: 'user businessName businessRegistration contactInfo'
                 })
+                .populate('amenities.amenity', 'name')
                 .sort({ createdAt: -1, _id: -1 }) // Mới nhất trước
                 .skip(skip)
                 .limit(limit)
-                .exec();
+            .exec();
+
+        // Debug: inspect raw amenities array for each field
+        try {
+            console.log('[FieldsService.findByOwner] ownerId=', ownerId, 'fieldsCount=', fields.length);
+            fields.forEach((f: any, idx: number) => {
+                console.log(`[FieldsService.findByOwner] [${idx}] fieldId=`, f?._id?.toString?.(), 'amenitiesRaw=', f?.amenities);
+            });
+        } catch {}
 
             const totalPages = Math.ceil(total / limit);
 
@@ -177,7 +188,15 @@ export class FieldsService {
                 description: field.description,
                 location: field.location,
                 images: field.images,
-                amenities: field.amenities,
+                amenities: Array.isArray((field as any).amenities)
+                    ? (field as any).amenities
+                        .filter((a: any) => a && a.amenity)
+                        .map((a: any) => ({
+                            amenityId: (a.amenity._id as Types.ObjectId).toString(),
+                            name: a.amenity.name,
+                            price: a.price ?? 0
+                        }))
+                    : [],
                 operatingHours: field.operatingHours,
                 slotDuration: field.slotDuration,
                 minSlots: field.minSlots,
@@ -688,7 +707,10 @@ export class FieldsService {
     async findOne(id: string): Promise<FieldsDto> {
         const field = await this.fieldModel
             .findById(id)
+            .populate('amenities.amenity', 'name')
             .exec();
+
+        // Debug logging removed after migration
 
         if (!field) {
             throw new NotFoundException(`Field with ID ${id} not found`);
@@ -723,6 +745,19 @@ export class FieldsService {
 
         // Performance: do not query by user; owner must be FieldOwnerProfile ObjectId
 
+        // Build amenities response (post-migration expects `amenity` ref populated)
+        let amenitiesDto: { amenityId: string; name: string; price: number }[] = [];
+        const rawAmenities: any[] = Array.isArray((field as any).amenities) ? (field as any).amenities : [];
+        if (rawAmenities.length > 0) {
+            amenitiesDto = rawAmenities
+                .filter(a => a && a.amenity)
+                .map(a => ({
+                    amenityId: (a.amenity._id || a.amenity).toString(),
+                    name: (a.amenity.name) ?? '',
+                    price: a.price ?? 0
+                }));
+        }
+
         return {
             id: (field._id as Types.ObjectId).toString(),
             owner: ownerId,
@@ -744,6 +779,7 @@ export class FieldsService {
             maintenanceUntil: field.maintenanceUntil,
             rating: field.rating,
             totalReviews: field.totalReviews,
+            amenities: amenitiesDto,
             createdAt: field.createdAt,
             updatedAt: field.updatedAt,
         };
@@ -837,7 +873,7 @@ export class FieldsService {
             // Upload images to S3 if files are provided
             let imageUrls: string[] = [];
             if (files && files.length > 0) {
-                const uploadPromises = files.map(file => this.awsS3Service.uploadImage(file));
+                const uploadPromises = files.map((file) => this.awsS3Service.uploadImageFromBuffer(file.buffer, file.mimetype));
                 imageUrls = await Promise.all(uploadPromises);
             }
 

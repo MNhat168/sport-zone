@@ -14,15 +14,12 @@ export class JwtAccessTokenGuard extends AuthGuard('jwt') {
 		context: ExecutionContext,
 	): boolean | Promise<boolean> | Observable<boolean> {
 		const req = context.switchToHttp().getRequest();
-		console.log('JwtAccessTokenGuard - Request URL:', req.url);
-		console.log('JwtAccessTokenGuard - Auth Header:', req.headers.authorization ? 'Present' : 'Missing');
+		// Removed verbose request logging
 
 		const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
 			context.getHandler(),
 			context.getClass(),
 		]);
-		
-		console.log('JwtAccessTokenGuard - Is Public Route:', isPublic);
 		
 		if (isPublic) {
 			return true;
@@ -32,13 +29,9 @@ export class JwtAccessTokenGuard extends AuthGuard('jwt') {
 	}
 
 	handleRequest(err: any, user: any, info: any, context: ExecutionContext) {
-		console.log('JwtAccessTokenGuard handleRequest - Error:', err);
+		// Removed verbose logging; only throw structured errors when needed
 		console.log('JwtAccessTokenGuard handleRequest - User:', user ? { userId: user.userId, role: user.role } : null);
-		console.log('JwtAccessTokenGuard handleRequest - Info:', info);
-		
 		if (err || !user) {
-			console.error('JWT Guard failed:', err || 'No user found');
-			
 			// Check if token is expired
 			if (info && info.name === 'TokenExpiredError') {
 				throw new UnauthorizedException({
