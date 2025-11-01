@@ -84,6 +84,9 @@ export class Booking extends BaseEntity {
   @Prop({ type: Boolean, default: false })
   holidayNotified?: boolean;
 
+  @Prop({ type: String, maxlength: 200 })
+  note?: string;
+
   // Snapshot pricing data from Field at booking time (Pure Lazy Creation principle)
   @Prop({
     type: {

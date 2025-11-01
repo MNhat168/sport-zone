@@ -306,8 +306,6 @@ export class AuthController {
   })
   @UseGuards(JwtAccessTokenGuard)
   async validateSession(@Req() req: any) {
-    console.log('🔐 Validating session for user:', req.user?.email);
-    
     // Nếu đến đây, JWT guard đã verify token thành công
     // Lấy thông tin user đầy đủ từ database
     const user = await this.authService.getUserById(req.user.userId);

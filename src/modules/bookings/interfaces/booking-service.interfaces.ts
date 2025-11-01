@@ -5,6 +5,7 @@ export interface CreateFieldBookingPayload {
   startTime: string;
   endTime: string;
   totalPrice: number;
+  note?: string;
 }
 
 export interface CreateSessionBookingPayload {
