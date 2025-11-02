@@ -12,8 +12,7 @@ import { User, UserSchema } from '../users/entities/user.entity';
 // Services and Controllers
 import { BookingsService } from './bookings.service';
 import { BookingsController } from './bookings.controller';
-import { ReservationsController } from './reservations.controller';
-import { PaymentsModule } from '../payments/payments.module';
+import { TransactionsModule } from '../transactions/transactions.module';
 import { FieldsModule } from '../fields/fields.module';
 import { CoachesModule } from '../coaches/coaches.module';
 import { EmailModule } from '../email/email.module';
@@ -32,12 +31,12 @@ import { EmailModule } from '../email/email.module';
       { name: User.name, schema: UserSchema },
     ]),
     EventEmitterModule,
-    PaymentsModule,
+    TransactionsModule,
     FieldsModule,
     CoachesModule,
     EmailModule,
   ],
-  controllers: [BookingsController, ReservationsController],
+  controllers: [BookingsController],
   providers: [BookingsService],
   exports: [BookingsService],
 })

@@ -69,8 +69,8 @@ export class Booking extends BaseEntity {
   @Prop({ required: true, min: 0 })
   totalPrice: number;
 
-  @Prop({ type: Types.ObjectId, ref: 'Payment' })
-  payment?: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Transaction' })
+  transaction?: Types.ObjectId;
 
   @Prop({ type: String })
   cancellationReason?: string;

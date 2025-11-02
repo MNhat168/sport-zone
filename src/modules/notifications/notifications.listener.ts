@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { NotificationsService } from './notifications.service';
 import { NotificationType } from 'src/common/enums/notification-type.enum';
@@ -13,6 +13,8 @@ import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class NotificationListener {
+  private readonly logger = new Logger(NotificationListener.name);
+
   constructor(
     private readonly notificationsService: NotificationsService,
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
@@ -150,8 +152,18 @@ export class NotificationListener {
     const title = 'Thanh toán thành công';
     const message = `Bạn đã thanh toán thành công ${amountStr} qua ${payload.method.toString().toUpperCase()}${payload.transactionId ? ` (Mã GD: ${payload.transactionId})` : ''}.`;
 
+    // Ensure userId is a valid string before creating ObjectId
+    const userIdStr = typeof payload.userId === 'string' 
+      ? payload.userId 
+      : String(payload.userId);
+    
+    if (!Types.ObjectId.isValid(userIdStr)) {
+      this.logger.error(`[Payment Success] Invalid userId: ${userIdStr}`);
+      return;
+    }
+
     await this.notificationsService.create({
-      recipient: new Types.ObjectId(payload.userId),
+      recipient: new Types.ObjectId(userIdStr),
       type: NotificationType.PAYMENT_SUCCESS,
       title,
       message,
@@ -167,7 +179,17 @@ export class NotificationListener {
     // Send booking email to field owner on non-cash payments once payment succeeds
     try {
       if (payload.bookingId) {
-        const booking = await this.bookingModel.findById(payload.bookingId).lean();
+        // Ensure bookingId is a valid string
+        const bookingIdStr = typeof payload.bookingId === 'string'
+          ? payload.bookingId
+          : String(payload.bookingId);
+        
+        if (!Types.ObjectId.isValid(bookingIdStr)) {
+          this.logger.error(`[Payment Success] Invalid bookingId: ${bookingIdStr}`);
+          return;
+        }
+
+        const booking = await this.bookingModel.findById(bookingIdStr).lean();
         if (booking) {
           const field = await this.fieldModel.findById(booking.field).lean();
           if (field) {
@@ -228,12 +250,21 @@ export class NotificationListener {
     transactionId?: string;
     reason?: string;
   }) {
+    // Ensure userId is a valid string before creating ObjectId
+    const userIdStr = typeof payload.userId === 'string' 
+      ? payload.userId 
+      : String(payload.userId);
+    
+    if (!Types.ObjectId.isValid(userIdStr)) {
+      this.logger.error(`[Payment Failed] Invalid userId: ${userIdStr}`);
+      return;
+    }
     const amountStr = payload.amount?.toLocaleString('vi-VN') + '₫';
     const title = 'Thanh toán thất bại';
     const message = `Thanh toán ${amountStr} qua ${payload.method.toString().toUpperCase()} thất bại${payload.reason ? `: ${payload.reason}` : ''}. Vui lòng thử lại.`;
 
     await this.notificationsService.create({
-      recipient: new Types.ObjectId(payload.userId),
+      recipient: new Types.ObjectId(userIdStr),
       type: NotificationType.PAYMENT_FAILED,
       title,
       message,

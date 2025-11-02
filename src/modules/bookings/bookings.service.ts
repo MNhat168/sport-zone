@@ -7,7 +7,7 @@ import { Field } from '../fields/entities/field.entity';
 import { FieldOwnerProfile } from '../fields/entities/field-owner-profile.entity';
 import { User } from '../users/entities/user.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { PaymentsService } from '../payments/payments.service';
+import { TransactionsService } from '../transactions/transactions.service';
 import { FieldsService } from '../fields/fields.service';
 import { CoachesService } from '../coaches/coaches.service';
 import { EmailService } from '../email/email.service';
@@ -55,7 +55,7 @@ export class BookingsService {
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectConnection() private readonly connection: Connection,
     private eventEmitter: EventEmitter2,
-    private readonly paymentsService: PaymentsService,
+    private readonly transactionsService: TransactionsService,
     private readonly fieldsService: FieldsService,
     private readonly coachesService: CoachesService,
     private readonly emailService: EmailService,
@@ -257,7 +257,7 @@ export class BookingsService {
         await booking.save({ session });
 
         // Create Payment record using PaymentsService
-        const payment = await this.paymentsService.createPayment({
+        const payment = await this.transactionsService.createPayment({
           bookingId: (booking._id as Types.ObjectId).toString(),
           userId: userId,
           amount: booking.totalPrice,
@@ -265,8 +265,8 @@ export class BookingsService {
           paymentNote: bookingData.paymentNote
         });
 
-        // Update booking with payment reference
-        booking.payment = payment._id as Types.ObjectId;
+        // Update booking with transaction reference
+        booking.transaction = payment._id as Types.ObjectId;
         await booking.save({ session });
 
         // Update Schedule with new booked slot and increment version
@@ -644,7 +644,7 @@ export class BookingsService {
         })
         .populate('selectedAmenities', 'name price')
         .populate('user', 'fullName email phoneNumber')
-        .populate('payment', 'amount method status paymentNote')
+        .populate('transaction', 'amount method status notes')
         .sort({ createdAt: -1 }) // Newest first
         .skip(skip)
         .limit(options.limit)
@@ -1133,7 +1133,7 @@ export class BookingsService {
 
       // Update booking status
       booking.status = BookingStatus.CONFIRMED;
-      booking.payment = new Types.ObjectId(event.paymentId);
+      booking.transaction = new Types.ObjectId(event.paymentId);
       await booking.save();
 
       this.logger.log(`[Payment Success] ✅ Booking ${event.bookingId} confirmed successfully`);
@@ -1272,7 +1272,7 @@ export class BookingsService {
       // Update booking status
       booking.status = BookingStatus.CANCELLED;
       booking.cancellationReason = event.reason || 'Payment failed';
-      booking.payment = new Types.ObjectId(event.paymentId);
+      booking.transaction = new Types.ObjectId(event.paymentId);
       await booking.save();
 
       this.logger.log(`[Payment Failed] ⚠️ Booking ${event.bookingId} cancelled due to payment failure`);
