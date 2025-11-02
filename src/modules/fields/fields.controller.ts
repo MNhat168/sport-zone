@@ -18,6 +18,20 @@ export class FieldsController {
     constructor(private readonly fieldsService: FieldsService) { }
 
     /**
+     * Helper method to get FieldOwnerProfile ID from user ID
+     * @param userId - User ID from JWT token
+     * @returns FieldOwnerProfile ID
+     * @throws NotFoundException if user doesn't have FieldOwnerProfile
+     */
+    private async getOwnerProfileId(userId: string): Promise<string> {
+        const profile = await this.fieldsService.getFieldOwnerProfileByUserId(userId);
+        if (!profile) {
+            throw new NotFoundException('Field owner profile not found. Please create a field owner profile first.');
+        }
+        return profile.id;
+    }
+
+    /**
      * Get all fields with filtering
      */
     @Get()
@@ -295,7 +309,8 @@ export class FieldsController {
         @Request() req,
         @Body() createFieldDto: CreateFieldDto,
     ): Promise<FieldsDto> {
-        const ownerId = req.user._id || req.user.id;
+        const userId = req.user._id || req.user.id || req.user.userId;
+        const ownerId = await this.getOwnerProfileId(userId);
         return this.fieldsService.create(createFieldDto, ownerId);
     }
 
@@ -316,7 +331,8 @@ export class FieldsController {
         @Body() createFieldDto: CreateFieldWithFilesDto,
         @UploadedFiles() files: IFile[],
     ): Promise<FieldsDto> {
-        const ownerId = req.user._id || req.user.id;
+        const userId = req.user._id || req.user.id || req.user.userId;
+        const ownerId = await this.getOwnerProfileId(userId);
         return this.fieldsService.createWithFiles(createFieldDto, files, ownerId);
     }
 
@@ -337,7 +353,8 @@ export class FieldsController {
         @Param('id') id: string,
         @Body() updateFieldDto: UpdateFieldDto,
     ): Promise<FieldsDto> {
-        const ownerId = req.user._id || req.user.id;
+        const userId = req.user._id || req.user.id || req.user.userId;
+        const ownerId = await this.getOwnerProfileId(userId);
         return this.fieldsService.update(id, updateFieldDto, ownerId);
     }
 
@@ -357,7 +374,8 @@ export class FieldsController {
         @Request() req,
         @Param('id') id: string,
     ): Promise<{ success: boolean; message: string }> {
-        const ownerId = req.user._id || req.user.id;
+        const userId = req.user._id || req.user.id || req.user.userId;
+        const ownerId = await this.getOwnerProfileId(userId);
         return this.fieldsService.delete(id, ownerId);
     }
 
@@ -383,7 +401,8 @@ export class FieldsController {
             effectiveDate: string; // ISO date string
         },
     ) {
-        const ownerId = req.user._id || req.user.id;
+        const userId = req.user._id || req.user.id || req.user.userId;
+        const ownerId = await this.getOwnerProfileId(userId);
         const effectiveDate = new Date(body.effectiveDate);
         return this.fieldsService.schedulePriceUpdate(
             fieldId,
@@ -623,7 +642,8 @@ export class FieldsController {
         @Param('id') fieldId: string,
         @Body() body: { amenities: Array<{ amenityId: string; price: number }> },
     ) {
-        const ownerId = req.user._id || req.user.id;
+        const userId = req.user._id || req.user.id || req.user.userId;
+        const ownerId = await this.getOwnerProfileId(userId);
         return this.fieldsService.updateFieldAmenities(fieldId, body.amenities, ownerId);
     }
 

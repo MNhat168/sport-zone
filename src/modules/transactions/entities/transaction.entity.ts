@@ -1,0 +1,120 @@
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Types } from 'mongoose';
+import { PaymentMethod } from 'src/common/enums/payment-method.enum';
+import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
+
+/**
+ * Transaction Status
+ */
+export enum TransactionStatus {
+  PENDING = 'pending',
+  PROCESSING = 'processing',
+  SUCCEEDED = 'succeeded',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+  CANCELLED = 'cancelled',
+  REFUNDED = 'refunded',
+}
+
+/**
+ * Transaction Type – FULLY COVER ALL CASES
+ */
+export enum TransactionType {
+  PAYMENT = 'payment',               // Khách → hệ thống
+  REFUND_FULL = 'refund_full',
+  REFUND_PARTIAL = 'refund_partial',
+  REVERSAL = 'reversal',             // Chargeback
+  ADJUSTMENT = 'adjustment',         // Manual ±
+  PAYOUT = 'payout',                 // Hệ thống → coach / field owner
+  FEE = 'fee',                       // Phí hệ thống thu
+}
+
+/**
+ * Transaction Entity (former Payment + Transaction)
+ */
+@Schema({ collection: 'transactions' }) // Đổi collection name
+export class Transaction extends BaseEntity {
+  // Liên kết booking (NULL nếu phí hệ thống)
+  @Prop({ type: Types.ObjectId, ref: 'Booking' })
+  booking?: Types.ObjectId;
+
+  // Số tiền (dương = vào hệ thống, âm = ra hệ thống)
+  @Prop({ required: true })
+  amount: number;
+
+  // Hướng tiền
+  @Prop({ required: true, enum: ['in', 'out'] })
+  direction: 'in' | 'out';
+
+  // Phương thức
+  @Prop({ required: true, enum: PaymentMethod })
+  method: PaymentMethod;
+
+  // Loại giao dịch
+  @Prop({ required: true, enum: TransactionType, default: TransactionType.PAYMENT })
+  type: TransactionType;
+
+  // Trạng thái
+  @Prop({ required: true, enum: TransactionStatus, default: TransactionStatus.PENDING })
+  status: TransactionStatus;
+
+  // Người thực hiện (khách, admin, coach, system)
+  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  user: Types.ObjectId;
+
+  // Liên kết giao dịch gốc (refund → payment, payout → payment)
+  @Prop({ type: Types.ObjectId, ref: 'Transaction' })
+  relatedTransaction?: Types.ObjectId;
+
+  // External ID từ gateway
+  @Prop({ type: String, unique: true, sparse: true })
+  externalTransactionId?: string;
+
+  // VNPay fields
+  @Prop() vnpayTransactionNo?: string;
+  @Prop() vnpayBankTranNo?: string;
+  @Prop() vnpayBankCode?: string;
+  @Prop() vnpayCardType?: string;
+  @Prop() vnpayResponseCode?: string;
+  @Prop() vnpayTransactionStatus?: string;
+
+  // Refund / Adjustment
+  @Prop() refundReason?: string;
+  @Prop({ type: Types.ObjectId, ref: 'User' }) refundedBy?: Types.ObjectId;
+  @Prop() originalAmount?: number;
+
+  // Payout specific
+  @Prop({ type: Types.ObjectId, ref: 'User' }) payoutTo?: Types.ObjectId; // coach / owner
+  @Prop() payoutBankAccount?: string;
+  @Prop() payoutBankName?: string;
+
+  // Fee specific
+  @Prop() feeRate?: number; // % hoặc fixed
+
+  // Common
+  @Prop() receiptUrl?: string;
+  @Prop() notes?: string;
+  @Prop({ type: Object }) metadata?: Record<string, any>;
+
+  // Timestamps
+  @Prop() processedAt?: Date;
+  @Prop() completedAt?: Date;
+  @Prop() failedAt?: Date;
+
+  // Error
+  @Prop() errorCode?: string;
+  @Prop() errorMessage?: string;
+}
+
+export const TransactionSchema = SchemaFactory.createForClass(Transaction);
+configureBaseEntitySchema(TransactionSchema);
+
+// Indexes
+TransactionSchema.index({ booking: 1 });
+TransactionSchema.index({ user: 1 });
+TransactionSchema.index({ type: 1, status: 1 });
+TransactionSchema.index({ direction: 1 });
+TransactionSchema.index({ externalTransactionId: 1 });
+TransactionSchema.index({ vnpayTransactionNo: 1 });
+TransactionSchema.index({ relatedTransaction: 1 });
+TransactionSchema.index({ createdAt: -1 });

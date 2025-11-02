@@ -35,6 +35,6 @@ import { Amenity, AmenitySchema } from '../amenities/entities/amenities.entity';
   ],
   controllers: [FieldsController],
   providers: [FieldsService, PriceSchedulerService],
-  exports: [FieldsService],
+  exports: [FieldsService], // PriceFormatService được export từ ServiceModule
 })
 export class FieldsModule { }

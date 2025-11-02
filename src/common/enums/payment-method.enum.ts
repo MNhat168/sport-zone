@@ -29,6 +29,9 @@ export enum PaymentMethod {
   
   /** QR Code thanh toán */
   QR_CODE = 9,
+
+  /** Giao dịch nội bộ hệ thống (payout, fee) */
+  INTERNAL = 10,
 }
 
 /**
@@ -44,6 +47,7 @@ export const PaymentMethodLabels: Record<PaymentMethod, string> = {
   [PaymentMethod.VNPAY]: 'VNPay',
   [PaymentMethod.BANK_TRANSFER]: 'Chuyển khoản ngân hàng',
   [PaymentMethod.QR_CODE]: 'QR Code',
+  [PaymentMethod.INTERNAL]: 'Giao dịch nội bộ',
 };
 
 /**
@@ -59,6 +63,7 @@ export const PaymentMethodNames: Record<PaymentMethod, string> = {
   [PaymentMethod.VNPAY]: 'vnpay',
   [PaymentMethod.BANK_TRANSFER]: 'bank_transfer',
   [PaymentMethod.QR_CODE]: 'qr_code',
+  [PaymentMethod.INTERNAL]: 'internal',
 };
 
 /**

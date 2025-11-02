@@ -133,6 +133,9 @@ export class FieldsDto {
     @ApiProperty({ example: 150000, description: 'Giá cơ bản (VND)' })
     basePrice: number;
 
+    @ApiPropertyOptional({ example: '200.000đ/giờ', description: 'Giá đã format để hiển thị (200.000đ/giờ, N/A)' })
+    price?: string;
+
     @ApiProperty({ example: true, description: 'Trạng thái hoạt động' })
     isActive: boolean;
 

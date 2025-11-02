@@ -14,6 +14,7 @@ import { User } from '../users/entities/user.entity';
 // Import utility function
 import { timeToMinutes } from '../../utils/utils';
 import { Amenity } from '../amenities/entities/amenities.entity';
+import { PriceFormatService } from '../../service/price-format.service';
 
 
 @Injectable()
@@ -31,6 +32,7 @@ export class FieldsService {
         @InjectModel(Booking.name) private bookingModel: Model<Booking>,
         @InjectModel(User.name) private userModel: Model<User>,
         @InjectModel(Amenity.name) private amenityModel: Model<Amenity>,
+        private priceFormatService: PriceFormatService,
         private awsS3Service: AwsS3Service,
     ) {}
 
@@ -72,28 +74,34 @@ export class FieldsService {
             .find(filter)
             .lean();
 
-        return fields.map(field => ({
-            id: field._id.toString(),
-            owner: field.owner?.toString() || '',
-            name: field.name,
-            sportType: field.sportType,
-            description: field.description,
-            location: field.location,
-            images: field.images,
-            operatingHours: field.operatingHours,
-            slotDuration: field.slotDuration,
-            minSlots: field.minSlots,
-            maxSlots: field.maxSlots,
-            priceRanges: field.priceRanges,
-            basePrice: field.basePrice,
-            isActive: field.isActive,
-            maintenanceNote: field.maintenanceNote,
-            maintenanceUntil: field.maintenanceUntil,
-            rating: field.rating,
-            totalReviews: field.totalReviews,
-            createdAt: field.createdAt,
-            updatedAt: field.updatedAt,
-        }));
+        return fields.map(field => {
+            // Format price for display using PriceFormatService
+            const price = this.priceFormatService.formatPrice(field.basePrice);
+            
+            return {
+                id: field._id.toString(),
+                owner: field.owner?.toString() || '',
+                name: field.name,
+                sportType: field.sportType,
+                description: field.description,
+                location: field.location,
+                images: field.images,
+                operatingHours: field.operatingHours,
+                slotDuration: field.slotDuration,
+                minSlots: field.minSlots,
+                maxSlots: field.maxSlots,
+                priceRanges: field.priceRanges,
+                basePrice: field.basePrice, // Keep raw value for calculations
+                price: price, // Add formatted price for display
+                isActive: field.isActive,
+                maintenanceNote: field.maintenanceNote,
+                maintenanceUntil: field.maintenanceUntil,
+                rating: field.rating,
+                totalReviews: field.totalReviews,
+                createdAt: field.createdAt,
+                updatedAt: field.updatedAt,
+            };
+        });
     }
 
     /**
@@ -180,37 +188,43 @@ export class FieldsService {
             const totalPages = Math.ceil(total / limit);
 
             // Convert to DTO format
-            const fieldsDto: FieldsDto[] = fields.map(field => ({
-                id: field._id?.toString() || '',
-                owner: (field.owner as any)?._id?.toString() || field.owner?.toString() || '',
-                name: field.name,
-                sportType: field.sportType,
-                description: field.description,
-                location: field.location,
-                images: field.images,
-                amenities: Array.isArray((field as any).amenities)
-                    ? (field as any).amenities
-                        .filter((a: any) => a && a.amenity)
-                        .map((a: any) => ({
-                            amenityId: (a.amenity._id as Types.ObjectId).toString(),
-                            name: a.amenity.name,
-                            price: a.price ?? 0
-                        }))
-                    : [],
-                operatingHours: field.operatingHours,
-                slotDuration: field.slotDuration,
-                minSlots: field.minSlots,
-                maxSlots: field.maxSlots,
-                priceRanges: field.priceRanges,
-                basePrice: field.basePrice,
-                isActive: field.isActive,
-                maintenanceNote: field.maintenanceNote,
-                maintenanceUntil: field.maintenanceUntil,
-                rating: field.rating,
-                totalReviews: field.totalReviews,
-                createdAt: field.createdAt,
-                updatedAt: field.updatedAt,
-            }));
+            const fieldsDto: FieldsDto[] = fields.map(field => {
+                // Format price for display using PriceFormatService
+                const price = this.priceFormatService.formatPrice(field.basePrice);
+                
+                return {
+                    id: field._id?.toString() || '',
+                    owner: (field.owner as any)?._id?.toString() || field.owner?.toString() || '',
+                    name: field.name,
+                    sportType: field.sportType,
+                    description: field.description,
+                    location: field.location,
+                    images: field.images,
+                    amenities: Array.isArray((field as any).amenities)
+                        ? (field as any).amenities
+                            .filter((a: any) => a && a.amenity)
+                            .map((a: any) => ({
+                                amenityId: (a.amenity._id as Types.ObjectId).toString(),
+                                name: a.amenity.name,
+                                price: a.price ?? 0
+                            }))
+                        : [],
+                    operatingHours: field.operatingHours,
+                    slotDuration: field.slotDuration,
+                    minSlots: field.minSlots,
+                    maxSlots: field.maxSlots,
+                    priceRanges: field.priceRanges,
+                    basePrice: field.basePrice, // Keep raw value for calculations
+                    price: price, // Add formatted price for display
+                    isActive: field.isActive,
+                    maintenanceNote: field.maintenanceNote,
+                    maintenanceUntil: field.maintenanceUntil,
+                    rating: field.rating,
+                    totalReviews: field.totalReviews,
+                    createdAt: field.createdAt,
+                    updatedAt: field.updatedAt,
+                };
+            });
 
             return {
                 fields: fieldsDto,
@@ -596,8 +610,8 @@ export class FieldsService {
                     field.location.geo.coordinates[0]  // longitude
                 );
 
-                // Format price as "100k/h" style
-                const price = this.formatPrice(field.basePrice);
+                // Format price using PriceFormatService
+                const price = this.priceFormatService.formatPrice(field.basePrice);
 
                 return {
                     id: field._id.toString(),
@@ -758,6 +772,9 @@ export class FieldsService {
                 }));
         }
 
+        // Format price for display using PriceFormatService
+        const price = this.priceFormatService.formatPrice(field.basePrice);
+
         return {
             id: (field._id as Types.ObjectId).toString(),
             owner: ownerId,
@@ -774,6 +791,7 @@ export class FieldsService {
             maxSlots: field.maxSlots,
             priceRanges: field.priceRanges,
             basePrice: field.basePrice,
+            price: price, // Add formatted price for display
             isActive: field.isActive,
             maintenanceNote: field.maintenanceNote,
             maintenanceUntil: field.maintenanceUntil,
@@ -1863,22 +1881,6 @@ export class FieldsService {
         return deg * (Math.PI/180);
     }
 
-    /**
-     * Format price in Vietnamese style (e.g., "100k/h", "1.5tr/h")
-     * @param price Price in VND
-     * @returns Formatted price string
-     */
-    private formatPrice(price: number): string {
-        if (price >= 1000000) {
-            const millions = price / 1000000;
-            return `${millions.toFixed(1)}tr/h`;
-        } else if (price >= 1000) {
-            const thousands = price / 1000;
-            return `${thousands}k/h`;
-        } else {
-            return `${price}/h`;
-        }
-    }
 
     /**
      * Validate location coordinates
