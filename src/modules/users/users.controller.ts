@@ -33,7 +33,7 @@ import { USER_REPOSITORY } from './interface/users.interface';
 import { Multer } from 'multer';
 import { AuthGuard } from '@nestjs/passport';
 import { UserRole } from './entities/user.entity';
-import { SetFavouriteFieldsDto } from './dto/set-favourite-fields.dto';
+import { SetFavouriteSportsDto } from './dto/set-favourite-sports.dto';
 @ApiTags('Users')
 @Controller('users')
 @ApiBearerAuth('token')
@@ -105,10 +105,10 @@ export class UsersController {
   }
 
   @UseGuards(AuthGuard('jwt'))
-  @Post('favourite-fields')
-  async setFavouriteFields(
+  @Post('favourite-sports')
+  async setFavouriteSports(
     @Request() req,
-    @Body() body: SetFavouriteFieldsDto,
+    @Body() body: SetFavouriteSportsDto,
   ) {
     const userEmail = req.user.email;
     const user = await this.usersService.findByEmail(userEmail);
@@ -123,9 +123,9 @@ export class UsersController {
     // Debug: log the received body
     console.log('[DEBUG] Controller received body:', body);
     // Add multiple favourite fields, block duplicates
-    return this.usersService.setFavouriteFields(
+    return this.usersService.setFavouriteSports(
       userEmail,
-      body.favouriteFields,
+      body.favouriteSports,
     );
   }
 }

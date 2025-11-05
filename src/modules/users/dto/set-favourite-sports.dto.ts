@@ -1,7 +1,7 @@
 import { IsArray, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
-export class SetFavouriteFieldsDto {
+export class SetFavouriteSportsDto {
   @ApiProperty({
     type: [String],
     example: ['football', 'badminton'],
@@ -9,5 +9,5 @@ export class SetFavouriteFieldsDto {
   })
   @IsArray()
   @IsString({ each: true })
-  favouriteFields: string[];
+  favouriteSports: string[];
 }
