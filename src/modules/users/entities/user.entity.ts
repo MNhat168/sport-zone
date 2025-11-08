@@ -50,7 +50,7 @@ export class User extends BaseEntity {
   googleId?: string;
 
   @Prop({ type: [String] })
-  favouriteField?: string[];
+  favouriteSports?: string[];
 
   @Prop({ type: Boolean, default: true })
   isActive: boolean;

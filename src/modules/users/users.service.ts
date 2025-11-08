@@ -88,43 +88,44 @@ export class UsersService {
     return this.userModel.findOne({ email });
   }
 
-  /**
-   * Thêm các môn thể thao yêu thích cho người dùng
-   * @param email - Email người dùng
-   * @param favouriteFields - Mảng tên môn thể thao (VD: ['football', 'badminton'])
-   * @returns User đã cập nhật
-   */
-  async setFavouriteFields(email: string, favouriteFields: string[]) {
-    // Debug: log the value and type of favouriteFields
+  async setFavouriteSports(email: string, favouriteSports: string[]) {
+    // Debug: log the value and type
     console.log(
-      '[DEBUG] setFavouriteFields received:',
-      favouriteFields,
+      '[DEBUG] setFavouriteSports received:',
+      favouriteSports,
       'Type:',
-      typeof favouriteFields,
+      typeof favouriteSports,
       'IsArray:',
-      Array.isArray(favouriteFields),
+      Array.isArray(favouriteSports),
     );
+
     const user = await this.userModel.findOne({ email });
     if (!user) {
       throw new BadRequestException('User not found');
     }
-    // Đảm bảo favouriteFields là mảng
-    if (!Array.isArray(favouriteFields)) {
-      throw new BadRequestException('favouriteFields must be an array');
+
+    // Ensure favouriteSports input is an array
+    if (!Array.isArray(favouriteSports)) {
+      throw new BadRequestException('favouriteSports must be an array');
     }
-    // Đảm bảo user.favouriteField là mảng
-    if (!Array.isArray(user.favouriteField)) {
-      user.favouriteField = [];
+
+    // Ensure user's favouriteSports is an array on the document
+    if (!Array.isArray(user.favouriteSports)) {
+      user.favouriteSports = [];
     }
-    const currentFields: string[] = user.favouriteField;
-    // Lọc các môn mới chưa có trong danh sách hiện tại
-    const newFields = favouriteFields.filter(
-      (field) => typeof field === 'string' && !currentFields.includes(field),
+
+    const currentSports: string[] = user.favouriteSports as string[];
+
+    // Filter incoming sports to only include strings not already present
+    const newSports = favouriteSports.filter(
+      (s) => typeof s === 'string' && !currentSports.includes(s),
     );
-    if (newFields.length === 0) {
-      throw new BadRequestException('All favourite fields already set');
+
+    if (newSports.length === 0) {
+      throw new BadRequestException('All favourite sports already set');
     }
-    user.favouriteField.push(...newFields);
+
+    user.favouriteSports.push(...newSports);
     await user.save();
     return user;
   }
