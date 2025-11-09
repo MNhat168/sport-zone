@@ -114,7 +114,6 @@ TransactionSchema.index({ booking: 1 });
 TransactionSchema.index({ user: 1 });
 TransactionSchema.index({ type: 1, status: 1 });
 TransactionSchema.index({ direction: 1 });
-TransactionSchema.index({ externalTransactionId: 1 });
 TransactionSchema.index({ vnpayTransactionNo: 1 });
 TransactionSchema.index({ relatedTransaction: 1 });
 TransactionSchema.index({ createdAt: -1 });

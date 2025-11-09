@@ -16,10 +16,24 @@ import { TransactionsModule } from '../transactions/transactions.module';
 import { FieldsModule } from '../fields/fields.module';
 import { CoachesModule } from '../coaches/coaches.module';
 import { EmailModule } from '../email/email.module';
+import { ServiceModule } from '../../service/service.module';
+
+// Specialized Services
+import { AvailabilityService } from './services/availability.service';
+import { FieldBookingService } from './services/field-booking.service';
+import { SessionBookingService } from './services/session-booking.service';
+import { PaymentHandlerService } from './services/payment-handler.service';
 
 /**
  * Bookings Module with Pure Lazy Creation pattern
  * Implements lazy schedule creation with atomic upserts
+ * 
+ * Modular architecture with separation of concerns:
+ * - AvailabilityService: Slot generation & conflict checking
+ * - FieldBookingService: Field booking creation & management
+ * - SessionBookingService: Coach session booking operations
+ * - PaymentHandlerService: Payment event handling (CRITICAL)
+ * - BookingsService: Main orchestrator
  */
 @Module({
   imports: [
@@ -35,9 +49,19 @@ import { EmailModule } from '../email/email.module';
     FieldsModule,
     CoachesModule,
     EmailModule,
+    ServiceModule, // Import để dùng CleanupService
   ],
   controllers: [BookingsController],
-  providers: [BookingsService],
-  exports: [BookingsService],
+  providers: [
+    BookingsService,
+    AvailabilityService,
+    FieldBookingService,
+    SessionBookingService,
+    PaymentHandlerService,
+  ],
+  exports: [
+    BookingsService,
+    PaymentHandlerService, // Export để các module khác có thể dùng releaseBookingSlots
+  ],
 })
 export class BookingsModule { }

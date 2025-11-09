@@ -22,13 +22,16 @@ import { GetUserBookingsDto, UserBookingsResponseDto } from './dto/get-user-book
 import { Schedule } from '../schedules/entities/schedule.entity';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { RateLimit, RateLimitGuard } from '@common/guards/rate-limit.guard';
 
 /**
  * Bookings Controller with Pure Lazy Creation pattern
  * Includes both new (Pure Lazy) and legacy endpoints for backward compatibility
+ * ✅ SECURITY: Rate limiting applied to prevent abuse
  */
 @ApiTags('Bookings')
 @Controller()
+@UseGuards(RateLimitGuard) // ✅ Apply rate limiting to all routes
 export class BookingsController {
   constructor(
     private readonly bookingsService: BookingsService,
@@ -53,8 +56,10 @@ export class BookingsController {
   /**
    * Lấy lịch khả dụng của sân theo Pure Lazy Creation
    * Tạo virtual slots từ Field config, áp dụng Schedule constraints nếu tồn tại
+   * ✅ SECURITY: Rate limited to prevent availability checking abuse
    */
   @Get('fields/:fieldId/availability')
+  @RateLimit({ ttl: 10, limit: 30 }) // ✅ 30 requests per 10 seconds per user/IP
   @ApiOperation({
     summary: 'Lấy lịch khả dụng của sân (Pure Lazy)',
     description: 'Tạo virtual slots từ Field config, không cần pre-create Schedule'
@@ -80,6 +85,7 @@ export class BookingsController {
   })
   @ApiResponse({ status: 400, description: 'Dữ liệu đầu vào không hợp lệ' })
   @ApiResponse({ status: 404, description: 'Không tìm thấy sân' })
+  @ApiResponse({ status: 429, description: 'Too many requests - Rate limit exceeded' })
   async getFieldAvailability(
     @Param('fieldId') fieldId: string,
     @Query() query: FieldAvailabilityQueryDto,
@@ -90,10 +96,12 @@ export class BookingsController {
   /**
    * Tạo booking sân theo Pure Lazy Creation
    * Không cần scheduleId, tự động upsert Schedule nếu cần
+   * ✅ SECURITY: Rate limited to prevent booking spam
    */
   @Post('bookings')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
+  @RateLimit({ ttl: 60, limit: 5 }) // ✅ 5 bookings per minute per user
   @ApiOperation({
     summary: 'Tạo booking sân (Pure Lazy)',
     description: 'Tự động tạo Schedule nếu chưa tồn tại, sử dụng fieldId + date'
@@ -106,6 +114,7 @@ export class BookingsController {
   @ApiResponse({ status: 400, description: 'Dữ liệu booking không hợp lệ hoặc slot không khả dụng' })
   @ApiResponse({ status: 404, description: 'Không tìm thấy sân' })
   @ApiResponse({ status: 401, description: 'Chưa xác thực' })
+  @ApiResponse({ status: 429, description: 'Too many requests - Rate limit exceeded' })
   async createFieldBookingLazy(
     @Request() req: any,
     @Body() bookingData: CreateFieldBookingLazyDto,

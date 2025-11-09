@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, Param, Req, BadRequestException, NotFoundException, Delete, Patch } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Param, Req, BadRequestException, NotFoundException, Delete, Patch, HttpCode } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBody } from '@nestjs/swagger';
 import { TransactionsService } from './transactions.service';
 import { PaymentCleanupService } from './payment-cleanup.service';
@@ -17,6 +17,15 @@ import {
     VNPayIPNResponseDto,
     VNPayVerificationResultDto
 } from './dto/vnpay.dto';
+import { PayOSService } from './payos.service';
+import {
+    CreatePayOSUrlDto,
+    PayOSCallbackDto,
+    PayOSPaymentLinkResponseDto,
+    PayOSTransactionQueryResponseDto,
+    PayOSCancelResponseDto,
+    CancelPayOSTransactionDto,
+} from './dto/payos.dto';
 
 @ApiTags('Transactions')
 @Controller('transactions')
@@ -26,6 +35,7 @@ export class TransactionsController {
         private readonly transactionsService: TransactionsService,
         private readonly paymentCleanupService: PaymentCleanupService,
         private readonly vnpayService: VNPayService,
+        private readonly payosService: PayOSService,
         private readonly configService: ConfigService,
         private readonly eventEmitter: EventEmitter2,
     ) { }
@@ -1324,6 +1334,369 @@ export class TransactionsController {
         );
 
         return result;
+    }
+
+    // ============================================
+    // PAYOS ENDPOINTS
+    // ============================================
+
+    /**
+     * Create PayOS payment URL
+     */
+    @Post('payos/create-payment')
+    @ApiOperation({
+        summary: 'Tạo URL thanh toán PayOS',
+        description: 'Create PayOS payment link for booking'
+    })
+    @ApiBody({ type: CreatePayOSUrlDto })
+    @ApiResponse({ status: 201, description: 'Payment link created successfully', type: PayOSPaymentLinkResponseDto })
+    @ApiResponse({ status: 400, description: 'Invalid request data' })
+    async createPayOSPayment(@Body() dto: CreatePayOSUrlDto): Promise<PayOSPaymentLinkResponseDto> {
+        return await this.payosService.createPaymentUrl(dto);
+    }
+
+    /**
+     * PayOS Webhook Handler
+     * Server-to-server callback from PayOS
+     */
+    @Post('payos/webhook')
+    @HttpCode(200)
+    @ApiOperation({
+        summary: 'PayOS Webhook (Internal)',
+        description: 'Server-to-server webhook from PayOS. Must be configured in PayOS portal.'
+    })
+    @ApiResponse({ status: 200, description: 'Webhook processed' })
+    async handlePayOSWebhook(@Body() body: any) {
+        try {
+            console.log('[PayOS Webhook] Received webhook');
+            console.log('[PayOS Webhook] Raw body:', JSON.stringify(body, null, 2));
+
+            // PayOS sends: { "data": {...}, "signature": "..." }
+            const receivedSignature = body.signature;
+            const webhookData = body.data;
+
+            if (!receivedSignature) {
+                console.warn('[PayOS Webhook] ❌ Missing signature');
+                return {
+                    code: '97',
+                    desc: 'Missing signature',
+                };
+            }
+
+            if (!webhookData) {
+                console.warn('[PayOS Webhook] ❌ Missing data');
+                return {
+                    code: '99',
+                    desc: 'Invalid webhook data',
+                };
+            }
+
+            console.log('[PayOS Webhook] Data:', JSON.stringify(webhookData, null, 2));
+            console.log('[PayOS Webhook] Signature (first 8):', receivedSignature.substring(0, 8) + '...');
+
+            // Prepare payload WITHOUT signature
+            const payload = {
+                orderCode: webhookData.orderCode,
+                amount: webhookData.amount,
+                description: webhookData.description,
+                accountNumber: webhookData.accountNumber,
+                reference: webhookData.reference,
+                transactionDateTime: webhookData.transactionDateTime,
+            };
+
+            // Verify signature
+            const verificationResult = this.payosService.verifyCallback(payload, receivedSignature);
+
+            if (!verificationResult.isValid) {
+                console.warn(`[PayOS Webhook] ❌ Invalid signature for order ${webhookData.orderCode}`);
+                return {
+                    code: '97',
+                    desc: 'Invalid signature',
+                };
+            }
+
+            console.log(`[PayOS Webhook] ✅ Signature verified for order ${webhookData.orderCode}`);
+
+            // Find transaction by externalTransactionId (PayOS order code)
+            const transaction = await this.transactionsService.getPaymentByExternalId(
+                String(webhookData.orderCode)
+            );
+
+            if (!transaction) {
+                console.warn(`[PayOS Webhook] Transaction not found for orderCode: ${webhookData.orderCode}`);
+                return {
+                    code: '01',
+                    desc: 'Transaction not found',
+                };
+            }
+
+            // Check if already processed
+            if (transaction.status === TransactionStatus.SUCCEEDED || transaction.status === TransactionStatus.FAILED) {
+                console.log(`[PayOS Webhook] ℹ️ Transaction already processed: ${transaction.status}`);
+                return {
+                    code: '02',
+                    desc: 'Transaction already processed',
+                };
+            }
+
+            // Determine status from PayOS
+            const payosStatus = webhookData.status || 'PAID';
+            let newStatus: TransactionStatus;
+            
+            if (payosStatus === 'PAID') {
+                newStatus = TransactionStatus.SUCCEEDED;
+            } else if (payosStatus === 'CANCELLED' || payosStatus === 'EXPIRED') {
+                newStatus = TransactionStatus.FAILED;
+            } else {
+                newStatus = TransactionStatus.PROCESSING;
+            }
+
+            // Update transaction
+            const updated = await this.transactionsService.updatePaymentStatus(
+                (transaction._id as any).toString(),
+                newStatus,
+                undefined,
+                {
+                    payosOrderCode: webhookData.orderCode,
+                    payosReference: webhookData.reference,
+                    payosAccountNumber: webhookData.accountNumber,
+                    payosTransactionDateTime: webhookData.transactionDateTime,
+                }
+            );
+
+            // Emit payment.failed event if transaction was cancelled or expired
+            // This triggers cleanup (cancel booking and release slots) via CleanupService
+            if (newStatus === TransactionStatus.FAILED) {
+                const bookingIdStr = updated.booking 
+                    ? (typeof updated.booking === 'string' 
+                        ? updated.booking 
+                        : (updated.booking as any)?._id 
+                            ? String((updated.booking as any)._id)
+                            : String(updated.booking))
+                    : undefined;
+                
+                const userIdStr = updated.user
+                    ? (typeof updated.user === 'string'
+                        ? updated.user
+                        : (updated.user as any)?._id
+                            ? String((updated.user as any)._id)
+                            : String(updated.user))
+                    : undefined;
+
+                const reason = payosStatus === 'CANCELLED' 
+                    ? 'PayOS transaction cancelled' 
+                    : 'PayOS transaction expired';
+
+                this.eventEmitter.emit('payment.failed', {
+                    paymentId: String(updated._id),
+                    bookingId: bookingIdStr,
+                    userId: userIdStr,
+                    amount: updated.amount,
+                    method: updated.method,
+                    transactionId: webhookData.reference || String(webhookData.orderCode),
+                    reason,
+                });
+
+                console.log(`[PayOS Webhook] ❌ Payment failed (${payosStatus}), emitted payment.failed event`);
+            }
+
+            // ✅ CRITICAL: Verify transaction was actually updated to SUCCEEDED before emitting event
+            // This ensures transaction status is committed before booking is updated
+            if (newStatus === TransactionStatus.SUCCEEDED) {
+                // Double-check transaction status to ensure it's actually succeeded
+                const verifiedTransaction = await this.transactionsService.getPaymentById(
+                    (updated._id as any).toString()
+                );
+                
+                if (!verifiedTransaction) {
+                    console.error(`[PayOS Webhook] ❌ Transaction ${updated._id} not found after update`);
+                    return {
+                        code: '99',
+                        desc: 'Transaction verification failed',
+                    };
+                }
+                
+                if (verifiedTransaction.status !== TransactionStatus.SUCCEEDED) {
+                    console.error(
+                        `[PayOS Webhook] ❌ Transaction ${updated._id} status mismatch: ` +
+                        `expected SUCCEEDED, got ${verifiedTransaction.status}`
+                    );
+                    return {
+                        code: '99',
+                        desc: 'Transaction status verification failed',
+                    };
+                }
+                
+                console.log(`[PayOS Webhook] ✅ Transaction ${updated._id} verified as SUCCEEDED, emitting event`);
+                
+                const bookingIdStr = updated.booking
+                    ? (typeof updated.booking === 'string'
+                        ? updated.booking
+                        : (updated.booking as any)?._id
+                            ? String((updated.booking as any)._id)
+                            : String(updated.booking))
+                    : undefined;
+
+                const userIdStr = updated.user
+                    ? (typeof updated.user === 'string'
+                        ? updated.user
+                        : (updated.user as any)?._id
+                            ? String((updated.user as any)._id)
+                            : String(updated.user))
+                    : undefined;
+
+                // Only emit event after transaction is verified as SUCCEEDED
+                this.eventEmitter.emit('payment.success', {
+                    paymentId: String(updated._id),
+                    bookingId: bookingIdStr,
+                    userId: userIdStr,
+                    amount: updated.amount,
+                    method: updated.method,
+                    transactionId: webhookData.reference,
+                });
+            }
+
+            console.log(`[PayOS Webhook] ✅ Transaction updated: ${newStatus}`);
+
+            return {
+                code: '00',
+                desc: 'Success',
+            };
+        } catch (error) {
+            console.error(`[PayOS Webhook] ❌ Error: ${error.message}`);
+            return {
+                code: '99',
+                desc: 'System error',
+            };
+        }
+    }
+
+    /**
+     * PayOS Return URL Handler
+     * Called when user returns from PayOS payment page
+     */
+    @Get('payos/return')
+    @ApiOperation({
+        summary: 'PayOS Return URL',
+        description: 'Handle return from PayOS payment page'
+    })
+    @ApiQuery({ name: 'orderCode', description: 'PayOS order code', required: false })
+    @ApiQuery({ name: 'status', description: 'Payment status', required: false })
+    @ApiResponse({ status: 200, description: 'Payment verification result' })
+    async handlePayOSReturn(@Query() query: any) {
+        try {
+            const orderCode = query.orderCode ? Number(query.orderCode) : null;
+            const status = query.status;
+
+            if (!orderCode) {
+                return {
+                    success: false,
+                    paymentStatus: 'failed',
+                    bookingId: '',
+                    message: 'Missing order code',
+                    amount: 0,
+                };
+            }
+
+            // Query transaction from PayOS
+            const payosTransaction = await this.payosService.queryTransaction(orderCode);
+
+            // Find local transaction
+            const transaction = await this.transactionsService.getPaymentByExternalId(String(orderCode));
+
+            if (!transaction) {
+                return {
+                    success: false,
+                    paymentStatus: 'failed',
+                    bookingId: '',
+                    message: 'Transaction not found',
+                    reason: 'Transaction not found in system',
+                    amount: payosTransaction.amount,
+                };
+            }
+
+            // Map PayOS status to our status
+            let paymentStatus: 'succeeded' | 'failed' | 'pending' | 'cancelled';
+            if (payosTransaction.status === 'PAID') {
+                paymentStatus = 'succeeded';
+            } else if (payosTransaction.status === 'CANCELLED' || payosTransaction.status === 'EXPIRED') {
+                paymentStatus = 'failed';
+            } else if (payosTransaction.status === 'PENDING' || payosTransaction.status === 'PROCESSING') {
+                paymentStatus = 'pending';
+            } else {
+                paymentStatus = 'cancelled';
+            }
+
+            const bookingId = transaction.booking
+                ? (typeof transaction.booking === 'string'
+                    ? transaction.booking
+                    : (transaction.booking as any)?._id
+                        ? String((transaction.booking as any)._id)
+                        : String(transaction.booking))
+                : '';
+
+            return {
+                success: paymentStatus === 'succeeded',
+                paymentStatus,
+                bookingId,
+                message: paymentStatus === 'succeeded' ? 'Payment successful' : 'Payment failed',
+                orderCode: payosTransaction.orderCode,
+                reference: payosTransaction.reference,
+                amount: payosTransaction.amount,
+            };
+        } catch (error) {
+            console.error('[PayOS Return] Error:', error);
+            return {
+                success: false,
+                paymentStatus: 'failed',
+                bookingId: '',
+                message: 'Error verifying payment',
+                reason: error.message,
+                amount: 0,
+            };
+        }
+    }
+
+    /**
+     * Query PayOS Transaction Status
+     */
+    @Get('payos/query/:orderCode')
+    @ApiOperation({
+        summary: 'Query PayOS transaction status',
+        description: 'Query transaction status directly from PayOS API'
+    })
+    @ApiParam({ name: 'orderCode', description: 'PayOS order code', example: '123456789' })
+    @ApiResponse({ status: 200, description: 'Transaction query result', type: PayOSTransactionQueryResponseDto })
+    @ApiResponse({ status: 400, description: 'Invalid order code or transaction not found' })
+    async queryPayOSTransaction(@Param('orderCode') orderCode: string): Promise<PayOSTransactionQueryResponseDto> {
+        const orderCodeNum = Number(orderCode);
+        if (isNaN(orderCodeNum)) {
+            throw new BadRequestException('Invalid order code format');
+        }
+        return await this.payosService.queryTransaction(orderCodeNum);
+    }
+
+    /**
+     * Cancel PayOS Transaction
+     */
+    @Post('payos/cancel/:orderCode')
+    @ApiOperation({
+        summary: 'Cancel PayOS transaction',
+        description: 'Cancel a PayOS payment transaction'
+    })
+    @ApiParam({ name: 'orderCode', description: 'PayOS order code', example: '123456789' })
+    @ApiBody({ type: CancelPayOSTransactionDto, required: false })
+    @ApiResponse({ status: 200, description: 'Transaction cancelled successfully', type: PayOSCancelResponseDto })
+    @ApiResponse({ status: 400, description: 'Cannot cancel transaction' })
+    async cancelPayOSTransaction(
+        @Param('orderCode') orderCode: string,
+        @Body() dto?: CancelPayOSTransactionDto
+    ): Promise<PayOSCancelResponseDto> {
+        const orderCodeNum = Number(orderCode);
+        if (isNaN(orderCodeNum)) {
+            throw new BadRequestException('Invalid order code format');
+        }
+        return await this.payosService.cancelTransaction(orderCodeNum, dto?.cancellationReason);
     }
 }
 

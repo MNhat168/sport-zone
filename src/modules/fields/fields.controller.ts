@@ -120,6 +120,7 @@ export class FieldsController {
         }
 
         const data = await this.fieldsService.findNearbyFieldsPublic(lat, lng, searchRadius, resultLimit, sportType);
+        // ResponseInterceptor sẽ tự động wrap thành { success: true, data: [...] }
         return data;
     }
 
