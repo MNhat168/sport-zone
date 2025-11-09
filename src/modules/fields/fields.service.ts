@@ -13,6 +13,8 @@ import { Booking } from '../bookings/entities/booking.entity';
 import { User } from '../users/entities/user.entity';
 // Import utility function
 import { timeToMinutes } from '../../utils/utils';
+import { Amenity } from '../amenities/entities/amenities.entity';
+import { PriceFormatService } from '../../service/price-format.service';
 
 
 @Injectable()
@@ -29,6 +31,8 @@ export class FieldsService {
         @InjectModel(Schedule.name) private scheduleModel: Model<Schedule>,
         @InjectModel(Booking.name) private bookingModel: Model<Booking>,
         @InjectModel(User.name) private userModel: Model<User>,
+        @InjectModel(Amenity.name) private amenityModel: Model<Amenity>,
+        private priceFormatService: PriceFormatService,
         private awsS3Service: AwsS3Service,
     ) {}
 
@@ -70,28 +74,34 @@ export class FieldsService {
             .find(filter)
             .lean();
 
-        return fields.map(field => ({
-            id: field._id.toString(),
-            owner: field.owner?.toString() || '',
-            name: field.name,
-            sportType: field.sportType,
-            description: field.description,
-            location: field.location,
-            images: field.images,
-            operatingHours: field.operatingHours,
-            slotDuration: field.slotDuration,
-            minSlots: field.minSlots,
-            maxSlots: field.maxSlots,
-            priceRanges: field.priceRanges,
-            basePrice: field.basePrice,
-            isActive: field.isActive,
-            maintenanceNote: field.maintenanceNote,
-            maintenanceUntil: field.maintenanceUntil,
-            rating: field.rating,
-            totalReviews: field.totalReviews,
-            createdAt: field.createdAt,
-            updatedAt: field.updatedAt,
-        }));
+        return fields.map(field => {
+            // Format price for display using PriceFormatService
+            const price = this.priceFormatService.formatPrice(field.basePrice);
+            
+            return {
+                id: field._id.toString(),
+                owner: field.owner?.toString() || '',
+                name: field.name,
+                sportType: field.sportType,
+                description: field.description,
+                location: field.location,
+                images: field.images,
+                operatingHours: field.operatingHours,
+                slotDuration: field.slotDuration,
+                minSlots: field.minSlots,
+                maxSlots: field.maxSlots,
+                priceRanges: field.priceRanges,
+                basePrice: field.basePrice, // Keep raw value for calculations
+                price: price, // Add formatted price for display
+                isActive: field.isActive,
+                maintenanceNote: field.maintenanceNote,
+                maintenanceUntil: field.maintenanceUntil,
+                rating: field.rating,
+                totalReviews: field.totalReviews,
+                createdAt: field.createdAt,
+                updatedAt: field.updatedAt,
+            };
+        });
     }
 
     /**
@@ -155,43 +165,66 @@ export class FieldsService {
             const total = await this.fieldModel.countDocuments(filter);
 
             // Get fields with owner population
-            const fields = await this.fieldModel
+        const fields = await this.fieldModel
                 .find(filter)
                 .populate({
                     path: 'owner',
                     select: 'user businessName businessRegistration contactInfo'
                 })
+                .populate('amenities.amenity', 'name')
                 .sort({ createdAt: -1, _id: -1 }) // Mới nhất trước
                 .skip(skip)
                 .limit(limit)
-                .exec();
+            .exec();
+
+        // Debug: inspect raw amenities array for each field
+        try {
+            console.log('[FieldsService.findByOwner] ownerId=', ownerId, 'fieldsCount=', fields.length);
+            fields.forEach((f: any, idx: number) => {
+                console.log(`[FieldsService.findByOwner] [${idx}] fieldId=`, f?._id?.toString?.(), 'amenitiesRaw=', f?.amenities);
+            });
+        } catch {}
 
             const totalPages = Math.ceil(total / limit);
 
             // Convert to DTO format
-            const fieldsDto: FieldsDto[] = fields.map(field => ({
-                id: field._id?.toString() || '',
-                owner: (field.owner as any)?._id?.toString() || field.owner?.toString() || '',
-                name: field.name,
-                sportType: field.sportType,
-                description: field.description,
-                location: field.location,
-                images: field.images,
-                amenities: field.amenities,
-                operatingHours: field.operatingHours,
-                slotDuration: field.slotDuration,
-                minSlots: field.minSlots,
-                maxSlots: field.maxSlots,
-                priceRanges: field.priceRanges,
-                basePrice: field.basePrice,
-                isActive: field.isActive,
-                maintenanceNote: field.maintenanceNote,
-                maintenanceUntil: field.maintenanceUntil,
-                rating: field.rating,
-                totalReviews: field.totalReviews,
-                createdAt: field.createdAt,
-                updatedAt: field.updatedAt,
-            }));
+            const fieldsDto: FieldsDto[] = fields.map(field => {
+                // Format price for display using PriceFormatService
+                const price = this.priceFormatService.formatPrice(field.basePrice);
+                
+                return {
+                    id: field._id?.toString() || '',
+                    owner: (field.owner as any)?._id?.toString() || field.owner?.toString() || '',
+                    name: field.name,
+                    sportType: field.sportType,
+                    description: field.description,
+                    location: field.location,
+                    images: field.images,
+                    amenities: Array.isArray((field as any).amenities)
+                        ? (field as any).amenities
+                            .filter((a: any) => a && a.amenity)
+                            .map((a: any) => ({
+                                amenityId: (a.amenity._id as Types.ObjectId).toString(),
+                                name: a.amenity.name,
+                                price: a.price ?? 0
+                            }))
+                        : [],
+                    operatingHours: field.operatingHours,
+                    slotDuration: field.slotDuration,
+                    minSlots: field.minSlots,
+                    maxSlots: field.maxSlots,
+                    priceRanges: field.priceRanges,
+                    basePrice: field.basePrice, // Keep raw value for calculations
+                    price: price, // Add formatted price for display
+                    isActive: field.isActive,
+                    maintenanceNote: field.maintenanceNote,
+                    maintenanceUntil: field.maintenanceUntil,
+                    rating: field.rating,
+                    totalReviews: field.totalReviews,
+                    createdAt: field.createdAt,
+                    updatedAt: field.updatedAt,
+                };
+            });
 
             return {
                 fields: fieldsDto,
@@ -577,8 +610,8 @@ export class FieldsService {
                     field.location.geo.coordinates[0]  // longitude
                 );
 
-                // Format price as "100k/h" style
-                const price = this.formatPrice(field.basePrice);
+                // Format price using PriceFormatService
+                const price = this.priceFormatService.formatPrice(field.basePrice);
 
                 return {
                     id: field._id.toString(),
@@ -688,7 +721,10 @@ export class FieldsService {
     async findOne(id: string): Promise<FieldsDto> {
         const field = await this.fieldModel
             .findById(id)
+            .populate('amenities.amenity', 'name')
             .exec();
+
+        // Debug logging removed after migration
 
         if (!field) {
             throw new NotFoundException(`Field with ID ${id} not found`);
@@ -723,6 +759,22 @@ export class FieldsService {
 
         // Performance: do not query by user; owner must be FieldOwnerProfile ObjectId
 
+        // Build amenities response (post-migration expects `amenity` ref populated)
+        let amenitiesDto: { amenityId: string; name: string; price: number }[] = [];
+        const rawAmenities: any[] = Array.isArray((field as any).amenities) ? (field as any).amenities : [];
+        if (rawAmenities.length > 0) {
+            amenitiesDto = rawAmenities
+                .filter(a => a && a.amenity)
+                .map(a => ({
+                    amenityId: (a.amenity._id || a.amenity).toString(),
+                    name: (a.amenity.name) ?? '',
+                    price: a.price ?? 0
+                }));
+        }
+
+        // Format price for display using PriceFormatService
+        const price = this.priceFormatService.formatPrice(field.basePrice);
+
         return {
             id: (field._id as Types.ObjectId).toString(),
             owner: ownerId,
@@ -739,11 +791,13 @@ export class FieldsService {
             maxSlots: field.maxSlots,
             priceRanges: field.priceRanges,
             basePrice: field.basePrice,
+            price: price, // Add formatted price for display
             isActive: field.isActive,
             maintenanceNote: field.maintenanceNote,
             maintenanceUntil: field.maintenanceUntil,
             rating: field.rating,
             totalReviews: field.totalReviews,
+            amenities: amenitiesDto,
             createdAt: field.createdAt,
             updatedAt: field.updatedAt,
         };
@@ -837,7 +891,7 @@ export class FieldsService {
             // Upload images to S3 if files are provided
             let imageUrls: string[] = [];
             if (files && files.length > 0) {
-                const uploadPromises = files.map(file => this.awsS3Service.uploadImage(file));
+                const uploadPromises = files.map((file) => this.awsS3Service.uploadImageFromBuffer(file.buffer, file.mimetype));
                 imageUrls = await Promise.all(uploadPromises);
             }
 
@@ -1827,22 +1881,6 @@ export class FieldsService {
         return deg * (Math.PI/180);
     }
 
-    /**
-     * Format price in Vietnamese style (e.g., "100k/h", "1.5tr/h")
-     * @param price Price in VND
-     * @returns Formatted price string
-     */
-    private formatPrice(price: number): string {
-        if (price >= 1000000) {
-            const millions = price / 1000000;
-            return `${millions.toFixed(1)}tr/h`;
-        } else if (price >= 1000) {
-            const thousands = price / 1000;
-            return `${thousands}k/h`;
-        } else {
-            return `${price}/h`;
-        }
-    }
 
     /**
      * Validate location coordinates

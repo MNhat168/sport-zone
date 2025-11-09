@@ -1,4 +1,4 @@
-import { IsString, IsDateString, IsNumber, IsOptional, IsArray, IsUUID, Min, IsEnum, IsInt } from 'class-validator';
+import { IsString, IsDateString, IsNumber, IsOptional, IsArray, IsUUID, Min, IsEnum, IsInt, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
@@ -88,6 +88,16 @@ export class CreateFieldBookingLazyDto {
   @IsOptional()
   @IsString()
   paymentNote?: string;
+
+  /**
+   * Ghi chú của người dùng khi đặt sân (tối đa 200 ký tự)
+   * @example "Gần lưới, chuẩn bị 2 bóng"
+   */
+  @ApiPropertyOptional({ description: 'Ghi chú khi đặt sân (tối đa 200 ký tự)', maxLength: 200 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  note?: string;
 }
 
 /**

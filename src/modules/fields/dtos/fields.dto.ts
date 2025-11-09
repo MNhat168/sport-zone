@@ -133,6 +133,9 @@ export class FieldsDto {
     @ApiProperty({ example: 150000, description: 'Giá cơ bản (VND)' })
     basePrice: number;
 
+    @ApiPropertyOptional({ example: '200.000đ/giờ', description: 'Giá đã format để hiển thị (200.000đ/giờ, N/A)' })
+    price?: string;
+
     @ApiProperty({ example: true, description: 'Trạng thái hoạt động' })
     isActive: boolean;
 
@@ -153,6 +156,16 @@ export class FieldsDto {
 
     @ApiPropertyOptional({ example: '2025-10-02T23:32:00.000+07:00', description: 'Thời gian cập nhật (Vietnam time)' })
     updatedAt?: Date;
+
+    @ApiPropertyOptional({
+        description: 'Danh sách tiện ích đã populate (tên + giá)',
+        type: 'array',
+        example: [
+            { amenityId: '652a7b1e1c9d440000a1b2c1', name: 'Bóng', price: 0 },
+            { amenityId: '652a7b1e1c9d440000a1b2c7', name: 'Thuê vợt', price: 50000 }
+        ]
+    })
+    amenities?: { amenityId: string; name: string; price: number }[];
 }
 
 /**

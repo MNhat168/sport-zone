@@ -13,13 +13,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           let token = null;
           if (req && req.cookies) {
             token = req.cookies['access_token'];
-            console.log('JWT Strategy - Cookie token:', token ? 'Found' : 'Not found');
-            console.log('JWT Strategy - Available cookies:', Object.keys(req.cookies || {}));
-            console.log('JWT Strategy - Content-Type:', req.headers['content-type']);
-            
+            // Removed verbose cookie and content-type logging
             // Special handling for multipart requests
             if (req.headers['content-type']?.includes('multipart/form-data') && token) {
-              console.log('JWT Strategy - Multipart request with cookie token detected');
+              // no-op
             }
           }
           return token;

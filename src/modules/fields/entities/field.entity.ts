@@ -92,6 +92,7 @@ export class Field extends BaseEntity {
 
   @Prop({ 
     type: [{ 
+      _id: false,
       amenity: { type: Types.ObjectId, ref: 'Amenity' },
       price: { type: Number, required: true, min: 0 }
     }], 

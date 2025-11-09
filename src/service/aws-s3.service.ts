@@ -58,33 +58,7 @@ export class AwsS3Service implements OnModuleInit {
         return `https://${this.bucketName}.s3.${this.configService.get<string>('AWS_S3_BUCKET_REGION')}.amazonaws.com/${key}?t=${timestamp}`;
     }
 
-    async uploadImage(file: IFile): Promise<string> {
-        const extension = mime.extension(file.mimetype);
-
-        if (!extension) {
-            throw new Error(`Unsupported mimetype: ${file.mimetype}`);
-        }
-
-        const fileName = this.generatorService.fileName(<string>extension);
-        const key = `images/${fileName}`;
-
-        try {
-            await this.s3Client.send(
-                new PutObjectCommand({
-                    Bucket: this.bucketName,
-                    Body: file.buffer,
-                    ContentType: file.mimetype,
-                    Key: key,
-                    ACL: 'public-read',
-                }),
-            );
-        } catch (error) {
-            console.error('Failed to upload image:', error);
-            throw new Error(`Failed to upload image: ${error.message}`);
-        }
-
-        return this.getS3Url(key);
-    }
+    // Removed uploadImage(file: IFile). Use buffer-based methods below instead.
 
 
     async uploadImageFromBuffer(
@@ -110,6 +84,7 @@ export class AwsS3Service implements OnModuleInit {
                     Key: key,
                     Body: buffer,
                     ContentType: mimetype,
+                    ACL: 'public-read',
                 }),
             );
         } catch (error) {
@@ -118,6 +93,41 @@ export class AwsS3Service implements OnModuleInit {
         }
 
         return this.getS3Url(key);
+    }
+
+    async uploadPrivateImageFromBuffer(
+        buffer: Buffer,
+        mimetype: string,
+    ): Promise<string> {
+        if (!buffer || !mimetype) {
+            throw new Error('Buffer and mimetype are required');
+        }
+
+        const extension = mime.extension(mimetype);
+        if (!extension || !['png', 'jpg', 'jpeg', 'webp'].includes(extension)) {
+            throw new Error(`Unsupported image type: ${mimetype}`);
+        }
+
+        const fileName = this.generatorService.fileName(extension);
+        const key = `images/${fileName}`;
+
+        try {
+            await this.s3Client.send(
+                new PutObjectCommand({
+                    Bucket: this.bucketName,
+                    Key: key,
+                    Body: buffer,
+                    ContentType: mimetype,
+                    // No ACL => private object
+                }),
+            );
+        } catch (error) {
+            console.error('Failed to upload private buffer image:', error);
+            throw new Error(`Failed to upload image: ${error.message}`);
+        }
+
+        // Return S3 key for private objects (caller can generate signed URL if needed)
+        return key;
     }
 
     async uploadDocument(file: IFile): Promise<string> {

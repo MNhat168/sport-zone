@@ -69,8 +69,8 @@ export class Booking extends BaseEntity {
   @Prop({ required: true, min: 0 })
   totalPrice: number;
 
-  @Prop({ type: Types.ObjectId, ref: 'Payment' })
-  payment?: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Transaction' })
+  transaction?: Types.ObjectId;
 
   @Prop({ type: String })
   cancellationReason?: string;
@@ -83,6 +83,9 @@ export class Booking extends BaseEntity {
 
   @Prop({ type: Boolean, default: false })
   holidayNotified?: boolean;
+
+  @Prop({ type: String, maxlength: 200 })
+  note?: string;
 
   // Snapshot pricing data from Field at booking time (Pure Lazy Creation principle)
   @Prop({

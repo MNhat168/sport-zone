@@ -5,7 +5,6 @@ import {
   Body,
   UseInterceptors,
   UploadedFiles,
-  Inject,
   NotFoundException,
   BadRequestException,
   UseGuards,
@@ -19,14 +18,8 @@ import { ApiTags, ApiConsumes, ApiBearerAuth } from '@nestjs/swagger';
 import { UpdateUserDto } from './dto/update-user.dto';
 // import { UserProfileDto } from './dtos/user-profile.dto';
 import { UserRepository } from '@modules/users/repositories/user.repository';
-// DTO
-import { ForgotPasswordDto } from './dto/forgot-password.dto.ts';
-import { ResetPasswordDto } from './dto/reset-password.dto';
-
-import { EmailService } from '../email/email.service';
-import { v4 as uuidv4 } from 'uuid';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import * as bcrypt from 'bcrypt';
+ 
 import { User } from './entities/user.entity';
 import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
 import { USER_REPOSITORY } from './interface/users.interface';
@@ -40,9 +33,7 @@ import { SetFavouriteSportsDto } from './dto/set-favourite-sports.dto';
 export class UsersController {
     constructor(
         private readonly usersService: UsersService,
-        @Inject(USER_REPOSITORY)
-        private readonly userRepository: UserRepository,
-        private readonly emailService: EmailService,
+        // userRepository no longer needed here
     ) { }
     @UseGuards(JwtAccessTokenGuard)
     @Get('get-profile')
@@ -51,44 +42,7 @@ export class UsersController {
     return await this.usersService.findById(req.user.userId);
     }
 
-  @Post('forgot-password')
-  async forgotPassword(@Body() body: ForgotPasswordDto) {
-    const { email } = body;
-    const user = await this.userRepository.findOne({ email });
-
-    if (!user) throw new NotFoundException('Email không tồn tại');
-
-    const token = uuidv4();
-    console.log('token', token);
-    user.resetPasswordToken = token;
-    user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 giờ
-
-    await this.userRepository.update(user.id, user);
-    await this.emailService.sendResetPassword(user.email, token);
-
-    return { message: 'Đã gửi mail đặt lại mật khẩu' };
-  }
-
-  @Post('reset-password')
-  async resetPassword(@Body() body: ResetPasswordDto) {
-    const { token, newPassword } = body;
-    console.log('body', body);
-    const user = await this.userRepository.findOne({
-      resetPasswordToken: token,
-    });
-    if (
-      !user ||
-      !user.resetPasswordExpires ||
-      new Date() > user.resetPasswordExpires
-    ) {
-      throw new BadRequestException('Token hết hạn hoặc không hợp lệ');
-    }
-    user.password = await bcrypt.hash(newPassword, 10);
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpires = undefined;
-    await this.userRepository.update(user.id, user);
-    return { message: 'Đặt lại mật khẩu thành công' };
-  }
+  
 
  
   @UseGuards(JwtAccessTokenGuard)
