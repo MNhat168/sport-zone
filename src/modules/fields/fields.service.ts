@@ -78,6 +78,17 @@ export class FieldsService {
             // Format price for display using PriceFormatService
             const price = this.priceFormatService.formatPrice(field.basePrice);
             
+            // Filter out invalid/placeholder images
+            const validImages = (field.images || []).filter((img: string) => {
+                if (!img || typeof img !== 'string') return false;
+                // Filter out placeholder images
+                if (img.includes('placeholder') || img.includes('placehold.co')) {
+                    return false;
+                }
+                // Filter out empty strings
+                return img.trim().length > 0;
+            });
+            
             return {
                 id: field._id.toString(),
                 owner: field.owner?.toString() || '',
@@ -85,7 +96,7 @@ export class FieldsService {
                 sportType: field.sportType,
                 description: field.description,
                 location: field.location,
-                images: field.images,
+                images: validImages,
                 operatingHours: field.operatingHours,
                 slotDuration: field.slotDuration,
                 minSlots: field.minSlots,
@@ -192,6 +203,17 @@ export class FieldsService {
                 // Format price for display using PriceFormatService
                 const price = this.priceFormatService.formatPrice(field.basePrice);
                 
+                // Filter out invalid/placeholder images
+                const validImages = (field.images || []).filter((img: string) => {
+                    if (!img || typeof img !== 'string') return false;
+                    // Filter out placeholder images
+                    if (img.includes('placeholder') || img.includes('placehold.co')) {
+                        return false;
+                    }
+                    // Filter out empty strings
+                    return img.trim().length > 0;
+                });
+                
                 return {
                     id: field._id?.toString() || '',
                     owner: (field.owner as any)?._id?.toString() || field.owner?.toString() || '',
@@ -199,7 +221,7 @@ export class FieldsService {
                     sportType: field.sportType,
                     description: field.description,
                     location: field.location,
-                    images: field.images,
+                    images: validImages,
                     amenities: Array.isArray((field as any).amenities)
                         ? (field as any).amenities
                             .filter((a: any) => a && a.amenity)
@@ -579,6 +601,7 @@ export class FieldsService {
         try {
             const radiusInMeters = radius * 1000; // Convert km to meters
             
+            // Build filter with geospatial query
             const filter: any = {
                 'location.geo': {
                     $near: {
@@ -589,46 +612,78 @@ export class FieldsService {
                         $maxDistance: radiusInMeters
                     }
                 },
-                isActive: true
+                isActive: true,
+                // Pre-filter invalid coordinates at query level
+                'location.geo.coordinates': {
+                    $ne: [0, 0],
+                    $exists: true
+                }
             };
 
             if (sportType) {
                 filter.sportType = new RegExp(`^${sportType}$`, 'i');
             }
 
+            // Use projection to only fetch needed fields for better performance
             const fields = await this.fieldModel
                 .find(filter)
+                .select('_id name location basePrice rating sportType images isActive')
                 .limit(limit)
                 .lean();
 
-            // Calculate distance and format response for each field
-            const fieldsWithDistance = fields.map(field => {
-                const distance = this.calculateDistance(
-                    latitude,
-                    longitude,
-                    field.location.geo.coordinates[1], // latitude
-                    field.location.geo.coordinates[0]  // longitude
-                );
+            // Optimized mapping - reduce redundant operations
+            const fieldsWithDistance = fields
+                .map(field => {
+                    // Quick validation - MongoDB already filtered by distance, but check for data integrity
+                    if (!field.location?.geo?.coordinates) {
+                        return null;
+                    }
 
-                // Format price using PriceFormatService
-                const price = this.priceFormatService.formatPrice(field.basePrice);
+                    const [fieldLongitude, fieldLatitude] = field.location.geo.coordinates;
+                    
+                    // Skip invalid coordinates
+                    if ((fieldLatitude === 0 && fieldLongitude === 0) ||
+                        fieldLatitude < -90 || fieldLatitude > 90 ||
+                        fieldLongitude < -180 || fieldLongitude > 180) {
+                        return null;
+                    }
+                    
+                    // Calculate distance (Haversine formula)
+                    const distance = this.calculateDistance(
+                        latitude,
+                        longitude,
+                        fieldLatitude,
+                        fieldLongitude
+                    );
 
-                return {
-                    id: field._id.toString(),
-                    name: field.name,
-                    location: field.location.address,
-                    latitude: field.location.geo.coordinates[1],
-                    longitude: field.location.geo.coordinates[0],
-                    distance: Math.round(distance * 100) / 100, // Round to 2 decimal places
-                    rating: field.rating,
-                    price: price,
-                    sportType: field.sportType,
-                    images: field.images,
-                    isActive: field.isActive
-                };
-            });
+                    // Format price
+                    const price = this.priceFormatService.formatPrice(field.basePrice || 0);
 
-            // Sort by distance (closest first)
+                    // Filter images efficiently
+                    const validImages = (field.images || []).filter((img: string) => 
+                        img && typeof img === 'string' && 
+                        img.trim().length > 0 &&
+                        !img.includes('placeholder') && 
+                        !img.includes('placehold.co')
+                    );
+
+                    return {
+                        id: field._id.toString(),
+                        name: field.name,
+                        location: field.location.address || '',
+                        latitude: fieldLatitude,
+                        longitude: fieldLongitude,
+                        distance: Math.round(distance * 100) / 100, // Round to 2 decimal places
+                        rating: field.rating || 0,
+                        price: price,
+                        sportType: field.sportType,
+                        images: validImages,
+                        isActive: field.isActive !== false
+                    };
+                })
+                .filter((field): field is NonNullable<typeof field> => field !== null);
+
+            // $near already returns results sorted by distance, but ensure sorting
             return fieldsWithDistance.sort((a, b) => a.distance - b.distance);
 
         } catch (error) {
@@ -676,38 +731,77 @@ export class FieldsService {
                 .lean();
 
             // Calculate distance for each field
-            const fieldsWithDistance = fields.map(field => {
-                const distance = this.calculateDistance(
-                    latitude,
-                    longitude,
-                    field.location.geo.coordinates[1], // latitude
-                    field.location.geo.coordinates[0]  // longitude
-                );
+            // Filter out fields with invalid coordinates
+            const fieldsWithDistance = fields
+                .filter(field => {
+                    // Validate that location and coordinates exist
+                    if (!field.location || !field.location.geo || !field.location.geo.coordinates) {
+                        this.logger.warn(`Field ${field._id} has missing location data`);
+                        return false;
+                    }
 
-                return {
-                    id: field._id.toString(),
-                    owner: field.owner?.toString() || '',
-                    name: field.name,
-                    sportType: field.sportType,
-                    description: field.description,
-                    location: field.location,
-                    images: field.images,
-                    operatingHours: field.operatingHours,
-                    slotDuration: field.slotDuration,
-                    minSlots: field.minSlots,
-                    maxSlots: field.maxSlots,
-                    priceRanges: field.priceRanges,
-                    basePrice: field.basePrice,
-                    isActive: field.isActive,
-                    maintenanceNote: field.maintenanceNote,
-                    maintenanceUntil: field.maintenanceUntil,
-                    rating: field.rating,
-                    totalReviews: field.totalReviews,
-                    createdAt: field.createdAt,
-                    updatedAt: field.updatedAt,
-                    distance: Math.round(distance * 100) / 100 // Round to 2 decimal places
-                };
-            });
+                    const [fieldLongitude, fieldLatitude] = field.location.geo.coordinates;
+                    
+                    // Filter out fields with invalid coordinates (0,0 is default invalid)
+                    if (fieldLatitude === 0 && fieldLongitude === 0) {
+                        this.logger.warn(`Field ${field._id} has invalid coordinates [0, 0]`);
+                        return false;
+                    }
+
+                    // Validate coordinate ranges
+                    if (fieldLatitude < -90 || fieldLatitude > 90 || 
+                        fieldLongitude < -180 || fieldLongitude > 180) {
+                        this.logger.warn(`Field ${field._id} has out-of-range coordinates`);
+                        return false;
+                    }
+
+                    return true;
+                })
+                .map(field => {
+                    const [fieldLongitude, fieldLatitude] = field.location.geo.coordinates;
+                    
+                    const distance = this.calculateDistance(
+                        latitude,
+                        longitude,
+                        fieldLatitude,
+                        fieldLongitude
+                    );
+
+                    // Filter out invalid/placeholder images
+                    const validImages = (field.images || []).filter((img: string) => {
+                        if (!img || typeof img !== 'string') return false;
+                        // Filter out placeholder images
+                        if (img.includes('placeholder') || img.includes('placehold.co')) {
+                            return false;
+                        }
+                        // Filter out empty strings
+                        return img.trim().length > 0;
+                    });
+
+                    return {
+                        id: field._id.toString(),
+                        owner: field.owner?.toString() || '',
+                        name: field.name,
+                        sportType: field.sportType,
+                        description: field.description,
+                        location: field.location,
+                        images: validImages,
+                        operatingHours: field.operatingHours,
+                        slotDuration: field.slotDuration,
+                        minSlots: field.minSlots,
+                        maxSlots: field.maxSlots,
+                        priceRanges: field.priceRanges,
+                        basePrice: field.basePrice,
+                        isActive: field.isActive,
+                        maintenanceNote: field.maintenanceNote,
+                        maintenanceUntil: field.maintenanceUntil,
+                        rating: field.rating,
+                        totalReviews: field.totalReviews,
+                        createdAt: field.createdAt,
+                        updatedAt: field.updatedAt,
+                        distance: Math.round(distance * 100) / 100 // Round to 2 decimal places
+                    };
+                });
 
             // Sort by distance (closest first)
             return fieldsWithDistance.sort((a, b) => a.distance - b.distance);
@@ -775,6 +869,17 @@ export class FieldsService {
         // Format price for display using PriceFormatService
         const price = this.priceFormatService.formatPrice(field.basePrice);
 
+        // Filter out invalid/placeholder images
+        const validImages = (field.images || []).filter((img: string) => {
+            if (!img || typeof img !== 'string') return false;
+            // Filter out placeholder images
+            if (img.includes('placeholder') || img.includes('placehold.co')) {
+                return false;
+            }
+            // Filter out empty strings
+            return img.trim().length > 0;
+        });
+
         return {
             id: (field._id as Types.ObjectId).toString(),
             owner: ownerId,
@@ -784,7 +889,7 @@ export class FieldsService {
             sportType: field.sportType,
             description: field.description,
             location: field.location,
-            images: field.images,
+            images: validImages,
             operatingHours: field.operatingHours,
             slotDuration: field.slotDuration,
             minSlots: field.minSlots,

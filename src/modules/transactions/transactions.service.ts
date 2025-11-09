@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, Types, ClientSession } from 'mongoose';
 import { Transaction, TransactionStatus, TransactionType } from './entities/transaction.entity';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 import * as crypto from 'crypto';
@@ -27,8 +27,10 @@ export class TransactionsService {
 
   /**
    * Tạo transaction record mới
+   * @param data Payment data
+   * @param session Optional MongoDB session for transaction support
    */
-  async createPayment(data: CreatePaymentData): Promise<Transaction> {
+  async createPayment(data: CreatePaymentData, session?: ClientSession): Promise<Transaction> {
     try {
       const transaction = new this.transactionModel({
         booking: new Types.ObjectId(data.bookingId),
@@ -41,7 +43,11 @@ export class TransactionsService {
         notes: data.paymentNote || null,
       });
 
-      const savedTransaction = await transaction.save();
+      // ✅ CRITICAL: Save with session if provided (for transaction atomicity)
+      const savedTransaction = session 
+        ? await transaction.save({ session })
+        : await transaction.save();
+      
       this.logger.log(`Created transaction ${savedTransaction._id} for booking ${data.bookingId}`);
       
       return savedTransaction;
@@ -52,19 +58,25 @@ export class TransactionsService {
   }
 
   /**
-   * Cập nhật trạng thái transaction với VNPay data
+   * Cập nhật trạng thái transaction với VNPay hoặc PayOS data
    */
   async updatePaymentStatus(
     transactionId: string, 
     status: TransactionStatus,
     receiptUrl?: string,
-    vnpayData?: {
+    gatewayData?: {
+      // VNPay fields
       vnp_TransactionNo?: string;
       vnp_BankTranNo?: string;
       vnp_BankCode?: string;
       vnp_CardType?: string;
       vnp_ResponseCode?: string;
       vnp_TransactionStatus?: string;
+      // PayOS fields
+      payosOrderCode?: number;
+      payosReference?: string;
+      payosAccountNumber?: string;
+      payosTransactionDateTime?: string;
     }
   ): Promise<Transaction> {
     const updateData: any = {
@@ -73,21 +85,44 @@ export class TransactionsService {
     };
 
     // Update VNPay fields
-    if (vnpayData) {
-      if (vnpayData.vnp_TransactionNo) {
-        updateData.vnpayTransactionNo = vnpayData.vnp_TransactionNo;
-        updateData.externalTransactionId = vnpayData.vnp_TransactionNo;
+    if (gatewayData) {
+      if (gatewayData.vnp_TransactionNo) {
+        updateData.vnpayTransactionNo = gatewayData.vnp_TransactionNo;
+        updateData.externalTransactionId = gatewayData.vnp_TransactionNo;
       }
-      if (vnpayData.vnp_BankTranNo) {
-        updateData.vnpayBankTranNo = vnpayData.vnp_BankTranNo;
+      if (gatewayData.vnp_BankTranNo) {
+        updateData.vnpayBankTranNo = gatewayData.vnp_BankTranNo;
         if (!updateData.externalTransactionId) {
-          updateData.externalTransactionId = vnpayData.vnp_BankTranNo;
+          updateData.externalTransactionId = gatewayData.vnp_BankTranNo;
         }
       }
-      if (vnpayData.vnp_BankCode) updateData.vnpayBankCode = vnpayData.vnp_BankCode;
-      if (vnpayData.vnp_CardType) updateData.vnpayCardType = vnpayData.vnp_CardType;
-      if (vnpayData.vnp_ResponseCode) updateData.vnpayResponseCode = vnpayData.vnp_ResponseCode;
-      if (vnpayData.vnp_TransactionStatus) updateData.vnpayTransactionStatus = vnpayData.vnp_TransactionStatus;
+      if (gatewayData.vnp_BankCode) updateData.vnpayBankCode = gatewayData.vnp_BankCode;
+      if (gatewayData.vnp_CardType) updateData.vnpayCardType = gatewayData.vnp_CardType;
+      if (gatewayData.vnp_ResponseCode) updateData.vnpayResponseCode = gatewayData.vnp_ResponseCode;
+      if (gatewayData.vnp_TransactionStatus) updateData.vnpayTransactionStatus = gatewayData.vnp_TransactionStatus;
+
+      // Update PayOS fields
+      if (gatewayData.payosOrderCode) {
+        updateData.externalTransactionId = String(gatewayData.payosOrderCode);
+      }
+      if (gatewayData.payosReference) {
+        updateData.metadata = {
+          ...updateData.metadata,
+          payosReference: gatewayData.payosReference,
+        };
+      }
+      if (gatewayData.payosAccountNumber) {
+        updateData.metadata = {
+          ...updateData.metadata,
+          payosAccountNumber: gatewayData.payosAccountNumber,
+        };
+      }
+      if (gatewayData.payosTransactionDateTime) {
+        updateData.metadata = {
+          ...updateData.metadata,
+          payosTransactionDateTime: gatewayData.payosTransactionDateTime,
+        };
+      }
     }
 
     // Update timestamps based on status
@@ -95,9 +130,9 @@ export class TransactionsService {
       updateData.completedAt = new Date();
     } else if (status === TransactionStatus.FAILED) {
       updateData.failedAt = new Date();
-      if (vnpayData?.vnp_ResponseCode) {
-        updateData.errorCode = vnpayData.vnp_ResponseCode;
-        updateData.errorMessage = this.getVNPayErrorDescription(vnpayData.vnp_ResponseCode);
+      if (gatewayData?.vnp_ResponseCode) {
+        updateData.errorCode = gatewayData.vnp_ResponseCode;
+        updateData.errorMessage = this.getVNPayErrorDescription(gatewayData.vnp_ResponseCode);
       }
     } else if (status === TransactionStatus.PROCESSING) {
       updateData.processedAt = new Date();
@@ -107,7 +142,7 @@ export class TransactionsService {
     if (status === TransactionStatus.SUCCEEDED) {
       updateData.notes = 'Transaction completed successfully';
     } else if (status === TransactionStatus.FAILED) {
-      updateData.notes = `Transaction failed with code ${vnpayData?.vnp_ResponseCode || 'unknown'}`;
+      updateData.notes = `Transaction failed with code ${gatewayData?.vnp_ResponseCode || 'unknown'}`;
     }
 
     const transaction = await this.transactionModel.findByIdAndUpdate(
@@ -140,6 +175,17 @@ export class TransactionsService {
   /**
    * Lấy transaction theo ID
    */
+  /**
+   * Get payment by external transaction ID (PayOS order code, VNPay transaction no, etc.)
+   */
+  async getPaymentByExternalId(externalId: string): Promise<Transaction | null> {
+    return await this.transactionModel
+      .findOne({ externalTransactionId: externalId })
+      .populate('booking')
+      .populate('user', 'fullName email')
+      .exec();
+  }
+
   async getPaymentById(transactionId: string): Promise<Transaction | null> {
     return this.transactionModel
       .findById(transactionId)
