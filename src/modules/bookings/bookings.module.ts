@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 
@@ -45,11 +45,11 @@ import { PaymentHandlerService } from './services/payment-handler.service';
       { name: User.name, schema: UserSchema },
     ]),
     EventEmitterModule,
-    TransactionsModule,
+    forwardRef(() => TransactionsModule),
     FieldsModule,
     CoachesModule,
     EmailModule,
-    ServiceModule, // Import để dùng CleanupService
+    forwardRef(() => ServiceModule), // Import để dùng CleanupService
   ],
   controllers: [BookingsController],
   providers: [
@@ -65,3 +65,6 @@ import { PaymentHandlerService } from './services/payment-handler.service';
   ],
 })
 export class BookingsModule { }
+
+
+

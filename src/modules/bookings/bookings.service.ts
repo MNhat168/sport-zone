@@ -12,6 +12,7 @@ import { FieldsService } from '../fields/fields.service';
 import { CoachesService } from '../coaches/coaches.service';
 import { EmailService } from '../email/email.service';
 import { PaymentHandlerService } from './services/payment-handler.service';
+import { CleanupService } from '../../service/cleanup.service';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 import { CreateFieldBookingLazyDto, FieldAvailabilityQueryDto } from './dto/create-field-booking-lazy.dto';
 import {

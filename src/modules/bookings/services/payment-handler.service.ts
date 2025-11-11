@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -29,7 +29,7 @@ export class PaymentHandlerService implements OnModuleInit {
     private readonly eventEmitter: EventEmitter2,
     private readonly emailService: EmailService,
     private readonly transactionsService: TransactionsService,
-    private readonly cleanupService: CleanupService,
+    @Inject(forwardRef(() => CleanupService)) private readonly cleanupService: CleanupService,
   ) {}
 
   /**
@@ -340,3 +340,5 @@ export class PaymentHandlerService implements OnModuleInit {
     }
   }
 }
+
+

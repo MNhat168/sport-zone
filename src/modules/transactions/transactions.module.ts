@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { TransactionsController } from './transactions.controller';
@@ -19,7 +19,7 @@ import { ServiceModule } from '../../service/service.module';
       { name: Booking.name, schema: BookingSchema },
       { name: Schedule.name, schema: ScheduleSchema },
     ]),
-    ServiceModule, // Import để dùng CleanupService
+    forwardRef(() => ServiceModule), // Import để dùng CleanupService
   ],
   controllers: [TransactionsController],
   providers: [
@@ -31,3 +31,5 @@ import { ServiceModule } from '../../service/service.module';
   exports: [TransactionsService, VNPayService, PayOSService], // Export để các module khác sử dụng
 })
 export class TransactionsModule {}
+
+
