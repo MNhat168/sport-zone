@@ -17,6 +17,7 @@ import { FieldsModule } from '../fields/fields.module';
 import { CoachesModule } from '../coaches/coaches.module';
 import { EmailModule } from '../email/email.module';
 import { ServiceModule } from '../../service/service.module';
+import { WalletModule } from '../wallet/wallet.module';
 
 // Specialized Services
 import { AvailabilityService } from './services/availability.service';
@@ -49,6 +50,7 @@ import { PaymentHandlerService } from './services/payment-handler.service';
     FieldsModule,
     CoachesModule,
     EmailModule,
+    WalletModule, // [V2] Import WalletModule for wallet operations
     forwardRef(() => ServiceModule), // Import để dùng CleanupService
   ],
   controllers: [BookingsController],

@@ -7,11 +7,7 @@ import { PaymentHandlerService } from '../modules/bookings/services/payment-hand
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 /**
- * Cleanup Service
- * Centralized service for cleanup operations:
- * - Cancel expired payments and bookings
- * - Release schedule slots
- * - Fix data inconsistencies
+ * Cleanup Service - Cancel expired payments/bookings, release slots, fix data inconsistencies
  */
 @Injectable()
 export class CleanupService {
@@ -25,10 +21,7 @@ export class CleanupService {
     private readonly paymentHandlerService: PaymentHandlerService,
   ) {}
 
-  /**
-   * Cancel expired payment and associated booking
-   * Handles both normal expiration and data inconsistency cases
-   */
+  /** Cancel expired payment and associated booking */
   async cancelExpiredPaymentAndBooking(
     payment: Transaction,
     hasDataInconsistency: boolean = false
@@ -43,7 +36,7 @@ export class CleanupService {
       ? 'Transaction expired - automatically cancelled after 5 minutes. ⚠️ DATA INCONSISTENCY: Booking was CONFIRMED but transaction was still PENDING. This has been corrected by marking both transaction and booking as FAILED/CANCELLED.'
       : 'Transaction expired - automatically cancelled after 5 minutes';
 
-    // Update transaction status to FAILED
+    // Update transaction to FAILED
     await this.transactionModel.findByIdAndUpdate(paymentId, {
       status: TransactionStatus.FAILED,
       notes,
@@ -58,21 +51,18 @@ export class CleanupService {
       },
     });
 
-    // If booking exists and is still pending/confirmed, cancel it and release slots
-    // This handles both normal expiration and data inconsistency cases
+    // Cancel booking and release slots if exists
     if (bookingId) {
       try {
-        // Get booking details first to check status and release slots
         const bookingToCancel = await this.bookingModel.findById(bookingId);
         
         if (bookingToCancel) {
-          // Only cancel if booking is still pending or confirmed (not already cancelled)
+          // Only cancel if pending or confirmed
           if (bookingToCancel.status === BookingStatus.PENDING || bookingToCancel.status === BookingStatus.CONFIRMED) {
             const cancellationReason = hasDataInconsistency
               ? 'Payment expired - Data inconsistency: Booking was CONFIRMED but payment was still PENDING. This has been corrected by cancelling the booking.'
               : 'Payment expired - automatically cancelled after 5 minutes';
             
-            // Cancel the booking and release slots
             await this.cancelBookingAndReleaseSlots(
               bookingId,
               cancellationReason,
@@ -106,8 +96,7 @@ export class CleanupService {
       `⚠️  Cancelled expired payment ${paymentId} (Booking: ${bookingId}, Booking Status: ${bookingStatus}${hasDataInconsistency ? ' → CANCELLED' : ''})`
     );
 
-    // Emit payment.expired event for other services to handle
-    // (e.g., cancel booking, send notification)
+    // Emit payment.expired event
     this.eventEmitter.emit('payment.expired', {
       paymentId,
       bookingId,
@@ -120,48 +109,41 @@ export class CleanupService {
     });
   }
 
-  /**
-   * Cancel booking and release schedule slots
-   * Centralized method for cancelling bookings with slot release
-   */
+  /** Cancel booking and release schedule slots */
   async cancelBookingAndReleaseSlots(
     bookingId: string,
     cancellationReason: string,
     paymentId?: string
   ): Promise<void> {
     try {
-      // Validate bookingId
       if (!Types.ObjectId.isValid(bookingId)) {
         this.logger.error(`[Cancel Booking] Invalid booking ID: ${bookingId}`);
         return;
       }
 
-      // Find booking
       const booking = await this.bookingModel.findById(bookingId);
       if (!booking) {
         this.logger.error(`[Cancel Booking] Booking ${bookingId} not found`);
         return;
       }
 
-      // Check if already cancelled (idempotency)
+      // Skip if already cancelled
       if (booking.status === BookingStatus.CANCELLED) {
         this.logger.warn(`[Cancel Booking] Booking ${bookingId} already cancelled`);
         return;
       }
 
-      // Only cancel if booking is still pending or confirmed
+      // Only cancel if pending or confirmed
       if (booking.status !== BookingStatus.PENDING && booking.status !== BookingStatus.CONFIRMED) {
         this.logger.warn(`[Cancel Booking] Booking ${bookingId} status is ${booking.status}, cannot cancel`);
         return;
       }
 
-      // Update booking status
       const updateData: any = {
         status: BookingStatus.CANCELLED,
         cancellationReason,
       };
 
-      // Update transaction reference if provided
       if (paymentId) {
         updateData.transaction = new Types.ObjectId(paymentId);
       }
@@ -174,10 +156,8 @@ export class CleanupService {
 
       this.logger.log(`[Cancel Booking] ✅ Cancelled booking ${bookingId}: ${cancellationReason}`);
 
-      // Release schedule slots
       await this.paymentHandlerService.releaseBookingSlots(booking);
 
-      // Emit booking cancelled event
       this.eventEmitter.emit('booking.cancelled', {
         bookingId,
         userId: booking.user.toString(),
@@ -191,9 +171,7 @@ export class CleanupService {
     }
   }
 
-  /**
-   * Cancel a payment manually and associated booking if exists
-   */
+  /** Cancel payment manually and associated booking */
   async cancelPaymentManually(
     paymentId: string,
     reason: string = 'User cancelled'
@@ -213,7 +191,6 @@ export class CleanupService {
       );
     }
 
-    // Update transaction status
     await this.transactionModel.findByIdAndUpdate(paymentId, {
       status: TransactionStatus.FAILED,
       notes: `Manually cancelled: ${reason}`,
@@ -228,7 +205,6 @@ export class CleanupService {
 
     this.logger.log(`✅ Manually cancelled payment ${paymentId}: ${reason}`);
 
-    // Cancel associated booking if exists
     const bookingId = (payment.booking as any)?._id?.toString() || payment.booking;
     if (bookingId) {
       try {
@@ -242,7 +218,6 @@ export class CleanupService {
       }
     }
 
-    // Emit payment.cancelled event
     this.eventEmitter.emit('payment.cancelled', {
       paymentId: paymentId,
       bookingId,

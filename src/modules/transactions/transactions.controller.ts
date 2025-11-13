@@ -1574,11 +1574,12 @@ export class TransactionsController {
     /**
      * PayOS Return URL Handler
      * Called when user returns from PayOS payment page
+     * ✅ CRITICAL: Updates transaction status and emits payment events (similar to webhook)
      */
     @Get('payos/return')
     @ApiOperation({
         summary: 'PayOS Return URL',
-        description: 'Handle return from PayOS payment page'
+        description: 'Handle return from PayOS payment page. Updates transaction status and triggers booking confirmation.'
     })
     @ApiQuery({ name: 'orderCode', description: 'PayOS order code', required: false })
     @ApiQuery({ name: 'status', description: 'Payment status', required: false })
@@ -1598,6 +1599,8 @@ export class TransactionsController {
                 };
             }
 
+            console.log(`[PayOS Return] Processing return for orderCode: ${orderCode}`);
+
             // Query transaction from PayOS
             const payosTransaction = await this.payosService.queryTransaction(orderCode);
 
@@ -1605,6 +1608,7 @@ export class TransactionsController {
             const transaction = await this.transactionsService.getPaymentByExternalId(String(orderCode));
 
             if (!transaction) {
+                console.warn(`[PayOS Return] Transaction not found for orderCode: ${orderCode}`);
                 return {
                     success: false,
                     paymentStatus: 'failed',
@@ -1615,16 +1619,124 @@ export class TransactionsController {
                 };
             }
 
-            // Map PayOS status to our status
+            // Map PayOS status to our TransactionStatus enum
+            let newStatus: TransactionStatus;
             let paymentStatus: 'succeeded' | 'failed' | 'pending' | 'cancelled';
+            
             if (payosTransaction.status === 'PAID') {
+                newStatus = TransactionStatus.SUCCEEDED;
                 paymentStatus = 'succeeded';
             } else if (payosTransaction.status === 'CANCELLED' || payosTransaction.status === 'EXPIRED') {
+                newStatus = TransactionStatus.FAILED;
                 paymentStatus = 'failed';
             } else if (payosTransaction.status === 'PENDING' || payosTransaction.status === 'PROCESSING') {
+                newStatus = TransactionStatus.PROCESSING;
                 paymentStatus = 'pending';
             } else {
+                newStatus = TransactionStatus.FAILED;
                 paymentStatus = 'cancelled';
+            }
+
+            // ✅ CRITICAL: Only update if status has changed and transaction is not already finalized
+            if (transaction.status !== TransactionStatus.SUCCEEDED && transaction.status !== TransactionStatus.FAILED) {
+                console.log(`[PayOS Return] Updating transaction ${transaction._id} from ${transaction.status} to ${newStatus}`);
+                
+                // Update transaction status (similar to webhook)
+                const updated = await this.transactionsService.updatePaymentStatus(
+                    (transaction._id as any).toString(),
+                    newStatus,
+                    undefined,
+                    {
+                        payosOrderCode: payosTransaction.orderCode,
+                        payosReference: payosTransaction.reference,
+                        payosAccountNumber: payosTransaction.accountNumber,
+                        payosTransactionDateTime: payosTransaction.transactionDateTime,
+                    }
+                );
+
+                // Emit payment.failed event if transaction was cancelled or expired
+                if (newStatus === TransactionStatus.FAILED) {
+                    const bookingIdStr = updated.booking 
+                        ? (typeof updated.booking === 'string' 
+                            ? updated.booking 
+                            : (updated.booking as any)?._id 
+                                ? String((updated.booking as any)._id)
+                                : String(updated.booking))
+                        : undefined;
+                    
+                    const userIdStr = updated.user
+                        ? (typeof updated.user === 'string'
+                            ? updated.user
+                            : (updated.user as any)?._id
+                                ? String((updated.user as any)._id)
+                                : String(updated.user))
+                        : undefined;
+
+                    const reason = payosTransaction.status === 'CANCELLED' 
+                        ? 'PayOS transaction cancelled' 
+                        : 'PayOS transaction expired';
+
+                    this.eventEmitter.emit('payment.failed', {
+                        paymentId: String(updated._id),
+                        bookingId: bookingIdStr,
+                        userId: userIdStr,
+                        amount: updated.amount,
+                        method: updated.method,
+                        transactionId: payosTransaction.reference || String(payosTransaction.orderCode),
+                        reason,
+                    });
+
+                    console.log(`[PayOS Return] ❌ Payment failed (${payosTransaction.status}), emitted payment.failed event`);
+                }
+
+                // ✅ CRITICAL: Emit payment.success event if payment succeeded
+                if (newStatus === TransactionStatus.SUCCEEDED) {
+                    // Double-check transaction status to ensure it's actually succeeded
+                    const verifiedTransaction = await this.transactionsService.getPaymentById(
+                        (updated._id as any).toString()
+                    );
+                    
+                    if (!verifiedTransaction) {
+                        console.error(`[PayOS Return] ❌ Transaction ${updated._id} not found after update`);
+                    } else if (verifiedTransaction.status !== TransactionStatus.SUCCEEDED) {
+                        console.error(
+                            `[PayOS Return] ❌ Transaction ${updated._id} status mismatch: ` +
+                            `expected SUCCEEDED, got ${verifiedTransaction.status}`
+                        );
+                    } else {
+                        console.log(`[PayOS Return] ✅ Transaction ${updated._id} verified as SUCCEEDED, emitting event`);
+                        
+                        const bookingIdStr = updated.booking
+                            ? (typeof updated.booking === 'string'
+                                ? updated.booking
+                                : (updated.booking as any)?._id
+                                    ? String((updated.booking as any)._id)
+                                    : String(updated.booking))
+                            : undefined;
+
+                        const userIdStr = updated.user
+                            ? (typeof updated.user === 'string'
+                                ? updated.user
+                                : (updated.user as any)?._id
+                                    ? String((updated.user as any)._id)
+                                    : String(updated.user))
+                            : undefined;
+
+                        // Emit payment.success event to trigger booking confirmation
+                        this.eventEmitter.emit('payment.success', {
+                            paymentId: String(updated._id),
+                            bookingId: bookingIdStr,
+                            userId: userIdStr,
+                            amount: updated.amount,
+                            method: updated.method,
+                            transactionId: payosTransaction.reference,
+                        });
+
+                        console.log(`[PayOS Return] ✅ Payment success event emitted for booking ${bookingIdStr}`);
+                    }
+                }
+            } else {
+                console.log(`[PayOS Return] ℹ️ Transaction ${transaction._id} already processed: ${transaction.status}`);
             }
 
             const bookingId = transaction.booking
