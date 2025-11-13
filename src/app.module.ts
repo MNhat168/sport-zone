@@ -11,7 +11,7 @@ import { ProfilesModule } from './modules/profiles/profiles.module';
 import { FieldsModule } from './modules/fields/fields.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
-import { TournamentsModule } from './modules/tournaments/tournaments.module';
+import { TournamentModule } from './modules/tournaments/tournaments.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { AiModule } from './modules/ai/ai.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -52,7 +52,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     FieldsModule,
     BookingsModule,
     TransactionsModule,
-    TournamentsModule,
+    TournamentModule,
     ReviewsModule,
     AiModule,
     NotificationsModule,

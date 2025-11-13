@@ -32,6 +32,7 @@ export enum PaymentMethod {
 
   /** Giao dịch nội bộ hệ thống (payout, fee) */
   INTERNAL = 10,
+  WALLET,
 }
 
 /**
@@ -48,6 +49,7 @@ export const PaymentMethodLabels: Record<PaymentMethod, string> = {
   [PaymentMethod.BANK_TRANSFER]: 'Chuyển khoản ngân hàng',
   [PaymentMethod.QR_CODE]: 'QR Code',
   [PaymentMethod.INTERNAL]: 'Giao dịch nội bộ',
+  [PaymentMethod.WALLET]: ""
 };
 
 /**
@@ -55,7 +57,7 @@ export const PaymentMethodLabels: Record<PaymentMethod, string> = {
  */
 export const PaymentMethodNames: Record<PaymentMethod, string> = {
   [PaymentMethod.CASH]: 'cash',
-  [PaymentMethod.EBANKING]: 'ebanking', 
+  [PaymentMethod.EBANKING]: 'ebanking',
   [PaymentMethod.CREDIT_CARD]: 'credit_card',
   [PaymentMethod.DEBIT_CARD]: 'debit_card',
   [PaymentMethod.MOMO]: 'momo',
@@ -64,6 +66,7 @@ export const PaymentMethodNames: Record<PaymentMethod, string> = {
   [PaymentMethod.BANK_TRANSFER]: 'bank_transfer',
   [PaymentMethod.QR_CODE]: 'qr_code',
   [PaymentMethod.INTERNAL]: 'internal',
+  [PaymentMethod.WALLET]: ""
 };
 
 /**

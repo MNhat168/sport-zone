@@ -1,9 +1,26 @@
 import { Module } from '@nestjs/common';
-import { TournamentsController } from './tournaments.controller';
-import { TournamentsService } from './tournaments.service';
+import { MongooseModule } from '@nestjs/mongoose';
+import { TournamentService } from './tournaments.service';
+import { TournamentController } from './tournaments.controller';
+import { Tournament, TournamentSchema } from './entities/tournament.entity';
+import { 
+  TournamentFieldReservation, 
+  TournamentFieldReservationSchema 
+} from './entities/tournament-field-reservation.entity';
+import { Field, FieldSchema } from '../fields/entities/field.entity';
+import { Transaction, TransactionSchema } from '../transactions/entities/transaction.entity';
 
 @Module({
-  controllers: [TournamentsController],
-  providers: [TournamentsService]
+  imports: [
+    MongooseModule.forFeature([
+      { name: Tournament.name, schema: TournamentSchema },
+      { name: TournamentFieldReservation.name, schema: TournamentFieldReservationSchema },
+      { name: Field.name, schema: FieldSchema },
+      { name: Transaction.name, schema: TransactionSchema },
+    ]),
+  ],
+  controllers: [TournamentController],
+  providers: [TournamentService],
+  exports: [TournamentService],
 })
-export class TournamentsModule {}
+export class TournamentModule {}

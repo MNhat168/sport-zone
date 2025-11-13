@@ -1,16 +1,19 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { SportType } from 'src/common/enums/sport-type.enum';
+import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
 
 export enum TournamentStatus {
-  UPCOMING = 'upcoming',
+  DRAFT = 'draft', // Initial creation, fields not reserved
+  PENDING = 'pending', // Fields reserved, waiting for minimum participants
+  CONFIRMED = 'confirmed', // Minimum threshold met, fields booked
   ONGOING = 'ongoing',
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
 }
 
-@Schema({ timestamps: true })
-export class Tournament extends Document {
+@Schema()
+export class Tournament extends BaseEntity {
   @Prop({ required: true })
   name: string;
 
@@ -26,8 +29,17 @@ export class Tournament extends Document {
   @Prop({ required: true, type: Date })
   endDate: Date;
 
-  @Prop({ required: true, min: 2 })
-  maxTeams: number;
+  @Prop({ required: true })
+  startTime: string;
+
+  @Prop({ required: true })
+  endTime: string;
+
+  @Prop({ required: true, min: 1 })
+  maxParticipants: number;
+
+  @Prop({ required: true, min: 1 })
+  minParticipants: number;
 
   @Prop({ required: true, min: 0 })
   registrationFee: number;
@@ -38,14 +50,82 @@ export class Tournament extends Document {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   organizer: Types.ObjectId;
 
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }] })
-  participants: Types.ObjectId[];
+  @Prop({ 
+    type: [{ 
+      user: { type: Types.ObjectId, ref: 'User', required: true },
+      registeredAt: { type: Date, default: Date.now },
+      transaction: { type: Types.ObjectId, ref: 'Transaction' }
+    }],
+    default: []
+  })
+  participants: Array<{
+    user: Types.ObjectId;
+    registeredAt: Date;
+    transaction?: Types.ObjectId;
+  }>;
 
   @Prop({ 
     enum: TournamentStatus, 
-    default: TournamentStatus.UPCOMING 
+    default: TournamentStatus.DRAFT 
   })
   status: TournamentStatus;
+
+  // Field Reservation
+  @Prop({ 
+    type: [{ 
+      field: { type: Types.ObjectId, ref: 'Field', required: true },
+      reservation: { type: Types.ObjectId, ref: 'TournamentFieldReservation' },
+      booking: { type: Types.ObjectId, ref: 'Booking' }
+    }],
+    default: []
+  })
+  fields: Array<{
+    field: Types.ObjectId;
+    reservation?: Types.ObjectId;
+    booking?: Types.ObjectId;
+  }>;
+
+  @Prop({ required: true, min: 1 })
+  fieldsNeeded: number;
+
+  @Prop({ required: true, min: 0 })
+  totalFieldCost: number;
+
+  // Confirmation deadline (e.g., 48 hours before tournament)
+  @Prop({ required: true, type: Date })
+  confirmationDeadline: Date;
+
+  // Escrow tracking
+  @Prop({ type: Number, default: 0 })
+  totalRegistrationFeesCollected: number;
+
+  @Prop({ type: Types.ObjectId, ref: 'Transaction' })
+  organizerPaymentTransaction?: Types.ObjectId;
+
+  // Commission
+  @Prop({ type: Number, default: 0.1 }) // 10% default
+  commissionRate: number;
+
+  @Prop({ type: Number, default: 0 })
+  commissionAmount: number;
+
+  // Prize money or expenses
+  @Prop({ type: Number, default: 0 })
+  prizePool: number;
+
+  @Prop({ type: String })
+  cancellationReason?: string;
+
+  @Prop({ type: String })
+  rules?: string;
+
+  @Prop({ type: [String], default: [] })
+  images: string[];
 }
 
 export const TournamentSchema = SchemaFactory.createForClass(Tournament);
+configureBaseEntitySchema(TournamentSchema);
+
+TournamentSchema.index({ sportType: 1, status: 1 });
+TournamentSchema.index({ startDate: 1 });
+TournamentSchema.index({ organizer: 1 });
