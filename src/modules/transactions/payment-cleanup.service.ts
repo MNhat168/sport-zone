@@ -2,8 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Transaction, TransactionStatus, TransactionType } from './entities/transaction.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Transaction, TransactionStatus, TransactionType } from './entities/transaction.entity';
+import { CleanupService } from '../../service/cleanup.service';
 
 /**
  * Payment Cleanup Service
@@ -15,10 +16,11 @@ export class PaymentCleanupService {
   private readonly logger = new Logger(PaymentCleanupService.name);
   
   // Payment expiration time in minutes
-  private readonly PAYMENT_EXPIRATION_MINUTES = 15;
+  private readonly PAYMENT_EXPIRATION_MINUTES = 5;
   
   constructor(
     @InjectModel(Transaction.name) private readonly transactionModel: Model<Transaction>,
+    private readonly cleanupService: CleanupService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -33,35 +35,111 @@ export class PaymentCleanupService {
     try {
       this.logger.log('🔍 Starting expired payments cleanup...');
       
-      // Calculate expiration threshold (15 minutes ago)
-      const expirationThreshold = new Date();
+      // Calculate expiration threshold (5 minutes ago)
+      const now = new Date();
+      const expirationThreshold = new Date(now);
       expirationThreshold.setMinutes(
         expirationThreshold.getMinutes() - this.PAYMENT_EXPIRATION_MINUTES
       );
 
-      // Find all pending transactions older than 15 minutes
-      const expiredPayments = await this.transactionModel.find({
+      this.logger.debug(`[Cleanup] Current time: ${now.toISOString()}`);
+      this.logger.debug(`[Cleanup] Expiration threshold: ${expirationThreshold.toISOString()}`);
+      this.logger.debug(`[Cleanup] Looking for payments created before: ${expirationThreshold.toISOString()}`);
+
+      // Debug: Check all pending payments first
+      const allPendingPayments = await this.transactionModel.find({
         status: TransactionStatus.PENDING,
         type: TransactionType.PAYMENT,
-        createdAt: { $lt: expirationThreshold },
-      }).populate('booking').populate('user', 'email fullName');
+      }).select('_id createdAt status type').lean();
 
-      if (expiredPayments.length === 0) {
+      this.logger.debug(`[Cleanup] Found ${allPendingPayments.length} total pending payments`);
+      // Note: Detailed logging with booking reference is done in the filter function below
+
+      // Find all pending payments (we'll filter by time in JavaScript to avoid timezone issues)
+      // This approach is more reliable when dealing with timezone differences
+      const query = {
+        status: TransactionStatus.PENDING, // 'pending'
+        type: TransactionType.PAYMENT, // 'payment'
+      };
+      
+      this.logger.debug(`[Cleanup] Query: ${JSON.stringify({
+        status: query.status,
+        type: query.type,
+      })}`);
+
+      // Find all pending payments
+      const allPendingPaymentsWithDetails = await this.transactionModel.find(query)
+        .populate('booking')
+        .populate('user', 'email fullName');
+      
+      this.logger.debug(`[Cleanup] Found ${allPendingPaymentsWithDetails.length} pending payments to check`);
+      
+      // Filter payments that are actually expired
+      // Use booking.createdAt as reference point because:
+      // 1. Both booking and transaction use the same currentTime() function (UTC+7 offset)
+      // 2. They are created almost simultaneously (in same transaction)
+      // 3. Comparing relative times avoids timezone issues
+      const validExpiredPayments = allPendingPaymentsWithDetails.filter((payment: any) => {
+        const booking = payment.booking;
+        
+        // If no booking, skip (shouldn't happen for payment transactions)
+        if (!booking) {
+          this.logger.warn(`[Cleanup] ⚠️ Payment ${payment._id} has no booking, skipping`);
+          return false;
+        }
+        
+        // ⚠️ DATA INCONSISTENCY CHECK: If booking is confirmed but transaction is still pending,
+        // this is a data integrity issue. We'll mark both transaction and booking as FAILED/CANCELLED.
+        const hasDataInconsistency = (booking as any).status === 'confirmed';
+        if (hasDataInconsistency) {
+          this.logger.warn(
+            `[Cleanup] ⚠️ DATA INCONSISTENCY: Payment ${payment._id} is PENDING but booking ${(booking as any)._id} is CONFIRMED. ` +
+            `This should not happen. Will mark both transaction and booking as FAILED/CANCELLED to fix data integrity.`
+          );
+        }
+        
+        // Use booking creation time as reference
+        // Both booking.createdAt and payment.createdAt have the same UTC+7 offset
+        // So comparing relative time is safe and accurate
+        const bookingCreatedAt = new Date((booking as any).createdAt);
+        const timeSinceBookingMs = now.getTime() - bookingCreatedAt.getTime();
+        const timeSinceBookingMinutes = timeSinceBookingMs / 1000 / 60;
+        
+        // Payment is expired if booking was created >= 5 minutes ago
+        // OR if there's a data inconsistency (needs immediate fix)
+        const isExpired = timeSinceBookingMinutes >= this.PAYMENT_EXPIRATION_MINUTES || hasDataInconsistency;
+        
+        this.logger.debug(
+          `[Cleanup] Payment ${payment._id}: ` +
+          `booking created ${timeSinceBookingMinutes.toFixed(2)} minutes ago ` +
+          `(${bookingCreatedAt.toISOString()}) ` +
+          `booking status: ${(booking as any).status} ` +
+          `${isExpired ? (hasDataInconsistency ? '⚠️ DATA INCONSISTENCY - Will fix' : '⚠️ EXPIRED') : '⏳ Still valid'}`
+        );
+        
+        return isExpired;
+      });
+
+      this.logger.debug(`[Cleanup] Found ${allPendingPaymentsWithDetails.length} pending payments, ${validExpiredPayments.length} are actually expired`);
+
+      if (validExpiredPayments.length === 0) {
         this.logger.log('✅ No expired payments found');
         return;
       }
 
       this.logger.warn(
-        `⚠️  Found ${expiredPayments.length} expired payment(s), cancelling...`
+        `⚠️  Found ${validExpiredPayments.length} expired payment(s), cancelling...`
       );
 
       // Cancel each expired payment
       let successCount = 0;
       let errorCount = 0;
 
-      for (const payment of expiredPayments) {
+      for (const payment of validExpiredPayments) {
         try {
-          await this.cancelExpiredPayment(payment);
+          const booking = (payment as any).booking;
+          const hasDataInconsistency = booking?.status === 'confirmed';
+          await this.cleanupService.cancelExpiredPaymentAndBooking(payment, hasDataInconsistency);
           successCount++;
         } catch (error) {
           errorCount++;
@@ -81,44 +159,6 @@ export class PaymentCleanupService {
   }
 
   /**
-   * Cancel a single expired transaction
-   */
-  private async cancelExpiredPayment(payment: Transaction): Promise<void> {
-    const paymentId = (payment._id as any).toString();
-    const bookingId = (payment.booking as any)?._id?.toString() || payment.booking;
-    const userId = (payment.user as any)?._id?.toString() || payment.user;
-
-    // Update transaction status to FAILED
-    await this.transactionModel.findByIdAndUpdate(paymentId, {
-      status: TransactionStatus.FAILED,
-      notes: 'Transaction expired - automatically cancelled after 15 minutes',
-      errorMessage: 'Payment timeout',
-      metadata: {
-        ...((payment as any).metadata || {}),
-        cancelledAt: new Date(),
-        cancelReason: 'timeout',
-        autoCancel: true,
-      },
-    });
-
-    this.logger.warn(
-      `⚠️  Cancelled expired payment ${paymentId} (Booking: ${bookingId})`
-    );
-
-    // Emit payment.expired event for other services to handle
-    // (e.g., cancel booking, send notification)
-    this.eventEmitter.emit('payment.expired', {
-      paymentId,
-      bookingId,
-      userId,
-      amount: payment.amount,
-      method: payment.method,
-      createdAt: payment.createdAt,
-      cancelledAt: new Date(),
-    });
-  }
-
-  /**
    * Manual trigger to cancel a specific payment
    * Can be called from API endpoint for immediate cancellation
    */
@@ -126,46 +166,7 @@ export class PaymentCleanupService {
     paymentId: string,
     reason: string = 'User cancelled'
   ): Promise<void> {
-    const payment = await this.transactionModel
-      .findById(paymentId)
-      .populate('booking')
-      .populate('user', 'email fullName');
-
-    if (!payment) {
-      throw new Error(`Transaction ${paymentId} not found`);
-    }
-
-    if (payment.status !== TransactionStatus.PENDING) {
-      throw new Error(
-        `Cannot cancel transaction ${paymentId} - status is ${payment.status}`
-      );
-    }
-
-    // Update transaction status
-    await this.transactionModel.findByIdAndUpdate(paymentId, {
-      status: TransactionStatus.FAILED,
-      notes: `Manually cancelled: ${reason}`,
-      errorMessage: reason,
-      metadata: {
-        ...((payment as any).metadata || {}),
-        cancelledAt: new Date(),
-        cancelReason: 'manual',
-        manualCancelReason: reason,
-      },
-    });
-
-    this.logger.log(`✅ Manually cancelled payment ${paymentId}: ${reason}`);
-
-    // Emit payment.cancelled event
-    this.eventEmitter.emit('payment.cancelled', {
-      paymentId: paymentId,
-      bookingId: (payment.booking as any)?._id?.toString() || payment.booking,
-      userId: (payment.user as any)?._id?.toString() || payment.user,
-      amount: payment.amount,
-      method: payment.method,
-      reason,
-      cancelledAt: new Date(),
-    });
+    await this.cleanupService.cancelPaymentManually(paymentId, reason);
   }
 
   /**
@@ -271,7 +272,7 @@ export class PaymentCleanupService {
       return new Date(metadata.extendedExpirationTime);
     }
 
-    // Otherwise, use original expiration (createdAt + 15 minutes)
+    // Otherwise, use original expiration (createdAt + 5 minutes)
     const originalExpiration = new Date(payment.createdAt);
     originalExpiration.setMinutes(
       originalExpiration.getMinutes() + this.PAYMENT_EXPIRATION_MINUTES

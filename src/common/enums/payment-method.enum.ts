@@ -32,7 +32,9 @@ export enum PaymentMethod {
 
   /** Giao dịch nội bộ hệ thống (payout, fee) */
   INTERNAL = 10,
-  WALLET,
+
+  /** Cổng thanh toán PayOS */
+  PAYOS = 11,
 }
 
 /**
@@ -49,7 +51,7 @@ export const PaymentMethodLabels: Record<PaymentMethod, string> = {
   [PaymentMethod.BANK_TRANSFER]: 'Chuyển khoản ngân hàng',
   [PaymentMethod.QR_CODE]: 'QR Code',
   [PaymentMethod.INTERNAL]: 'Giao dịch nội bộ',
-  [PaymentMethod.WALLET]: ""
+  [PaymentMethod.PAYOS]: 'PayOS',
 };
 
 /**
@@ -66,7 +68,7 @@ export const PaymentMethodNames: Record<PaymentMethod, string> = {
   [PaymentMethod.BANK_TRANSFER]: 'bank_transfer',
   [PaymentMethod.QR_CODE]: 'qr_code',
   [PaymentMethod.INTERNAL]: 'internal',
-  [PaymentMethod.WALLET]: ""
+  [PaymentMethod.PAYOS]: 'payos',
 };
 
 /**

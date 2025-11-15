@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { FieldsController } from './fields.controller';
 import { FieldsService } from './fields.service';
@@ -31,10 +31,12 @@ import { Amenity, AmenitySchema } from '../amenities/entities/amenities.entity';
       { name: User.name, schema: UserSchema },
       { name: Amenity.name, schema: AmenitySchema },
     ]),
-    ServiceModule,
+    forwardRef(() => ServiceModule),
   ],
   controllers: [FieldsController],
   providers: [FieldsService, PriceSchedulerService],
   exports: [FieldsService], // PriceFormatService được export từ ServiceModule
 })
 export class FieldsModule { }
+
+

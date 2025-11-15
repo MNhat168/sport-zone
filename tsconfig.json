@@ -5,8 +5,8 @@
       "jest",
       "node"
     ],
-    "declaration": true,
-    "removeComments": true,
+    "declaration": false, //open if you need .d.ts files
+    "removeComments": false,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "allowSyntheticDefaultImports": true,
@@ -22,6 +22,7 @@
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
+    "noEmit": false,
     "paths": {
       "@modules/*": ["src/modules/*"],
       "@common/*": ["src/common/*"],
