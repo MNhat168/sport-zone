@@ -2,7 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { SportType } from 'src/common/enums/sport-type.enum';
 import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
-
+import { HydratedDocument } from 'mongoose';
 export enum BookingType {
   FIELD = 'field',
   COACH = 'coach',
@@ -110,6 +110,7 @@ export class Booking extends BaseEntity {
   };
 }
 
+export type BookingDocument = HydratedDocument<Booking>;
 export const BookingSchema = SchemaFactory.createForClass(Booking);
 
 // Cấu hình timestamps từ BaseEntity
