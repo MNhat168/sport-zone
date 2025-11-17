@@ -379,16 +379,13 @@ export class TransactionsController {
             console.log('[Verify VNPay] Payment already processed by IPN:', payment.status);
             // Convert to string to ensure comparison works correctly
             const paymentStatusStr = String(payment.status);
-            const isSucceeded = paymentStatusStr === TransactionStatus.SUCCEEDED || 
-                                 paymentStatusStr === TransactionStatus.COMPLETED ||
-                                 paymentStatusStr === 'succeeded' ||
-                                 paymentStatusStr === 'completed';
+            const isSucceeded = paymentStatusStr === TransactionStatus.SUCCEEDED ||
+                                 paymentStatusStr === 'succeeded';
             
             console.log('[Verify VNPay] Status check:', {
                 paymentStatus: paymentStatusStr,
                 isSucceeded,
-                enumSucceeded: TransactionStatus.SUCCEEDED,
-                enumCompleted: TransactionStatus.COMPLETED
+                enumSucceeded: TransactionStatus.SUCCEEDED
             });
             
             // Ensure bookingId is a string
@@ -1069,7 +1066,7 @@ export class TransactionsController {
         name: 'status', 
         description: 'Filter by transaction status',
         required: false,
-        enum: ['pending', 'processing', 'completed', 'failed', 'cancelled']
+        enum: ['pending', 'processing', 'succeeded', 'failed', 'cancelled', 'refunded']
     })
     @ApiQuery({ 
         name: 'startDate', 
@@ -1352,7 +1349,64 @@ export class TransactionsController {
     @ApiResponse({ status: 201, description: 'Payment link created successfully', type: PayOSPaymentLinkResponseDto })
     @ApiResponse({ status: 400, description: 'Invalid request data' })
     async createPayOSPayment(@Body() dto: CreatePayOSUrlDto): Promise<PayOSPaymentLinkResponseDto> {
-        return await this.payosService.createPaymentUrl(dto);
+        console.log(`[Create PayOS Payment] Received orderId: ${dto.orderId}`);
+        
+        // ✅ CRITICAL: dto.orderId is the PAYMENT ID (transaction ID), not booking ID
+        // Lookup transaction by payment ID to get externalTransactionId (PayOS orderCode)
+        const transaction = await this.transactionsService.getPaymentById(dto.orderId);
+        
+        if (!transaction) {
+            console.log(`[Create PayOS Payment] Transaction not found by ID, trying booking ID...`);
+            // If not found by transaction ID, try finding by booking ID
+            const transactionByBooking = await this.transactionsService.getPaymentByBookingId(dto.orderId);
+            if (!transactionByBooking) {
+                console.error(`[Create PayOS Payment] Transaction not found with either transaction ID or booking ID: ${dto.orderId}`);
+                throw new NotFoundException(`Transaction not found with ID: ${dto.orderId}. Please check if the transaction/booking exists.`);
+            }
+            console.log(`[Create PayOS Payment] Found transaction by booking ID: ${(transactionByBooking._id as any).toString()}`);
+            // Use the transaction found by booking ID
+            return this.createPaymentLinkWithTransaction(dto, transactionByBooking);
+        }
+        
+        console.log(`[Create PayOS Payment] Found transaction by ID: ${(transaction._id as any).toString()}`);
+        return this.createPaymentLinkWithTransaction(dto, transaction);
+    }
+
+    /**
+     * Helper method to create PayOS payment link with transaction
+     */
+    private async createPaymentLinkWithTransaction(dto: CreatePayOSUrlDto, transaction: any): Promise<PayOSPaymentLinkResponseDto> {
+        // ✅ If transaction has externalTransactionId, use it as PayOS orderCode
+        // Otherwise, generate a new one (fallback for backward compatibility)
+        let orderCodeToUse: number;
+        
+        if (transaction.externalTransactionId) {
+            orderCodeToUse = Number(transaction.externalTransactionId);
+            console.log(`[Create PayOS Payment] Using existing orderCode from transaction: ${orderCodeToUse}`);
+        } else {
+            // Fallback: generate new orderCode and update transaction
+            const { generatePayOSOrderCode } = await import('./utils/payos.utils');
+            orderCodeToUse = generatePayOSOrderCode();
+            
+            // Update transaction with new orderCode
+            await this.transactionsService.updatePaymentStatus(
+                (transaction._id as any).toString(),
+                transaction.status, // Keep current status
+                undefined,
+                { payosOrderCode: orderCodeToUse }
+            );
+            
+            console.log(`[Create PayOS Payment] Generated new orderCode: ${orderCodeToUse}`);
+        }
+        
+        // ✅ Create payment link with the orderCode
+        // Pass orderCode to PayOSService so it uses the same orderCode
+        const result = await this.payosService.createPaymentUrl({
+            ...dto,
+            orderCode: orderCodeToUse, // ✅ FIX: Pass orderCode from transaction
+        });
+        
+        return result;
     }
 
     /**
@@ -1574,11 +1628,12 @@ export class TransactionsController {
     /**
      * PayOS Return URL Handler
      * Called when user returns from PayOS payment page
+     * ✅ CRITICAL: Updates transaction status and emits payment events (similar to webhook)
      */
     @Get('payos/return')
     @ApiOperation({
         summary: 'PayOS Return URL',
-        description: 'Handle return from PayOS payment page'
+        description: 'Handle return from PayOS payment page. Updates transaction status and triggers booking confirmation.'
     })
     @ApiQuery({ name: 'orderCode', description: 'PayOS order code', required: false })
     @ApiQuery({ name: 'status', description: 'Payment status', required: false })
@@ -1598,6 +1653,8 @@ export class TransactionsController {
                 };
             }
 
+            console.log(`[PayOS Return] Processing return for orderCode: ${orderCode}`);
+
             // Query transaction from PayOS
             const payosTransaction = await this.payosService.queryTransaction(orderCode);
 
@@ -1605,6 +1662,7 @@ export class TransactionsController {
             const transaction = await this.transactionsService.getPaymentByExternalId(String(orderCode));
 
             if (!transaction) {
+                console.warn(`[PayOS Return] Transaction not found for orderCode: ${orderCode}`);
                 return {
                     success: false,
                     paymentStatus: 'failed',
@@ -1615,16 +1673,124 @@ export class TransactionsController {
                 };
             }
 
-            // Map PayOS status to our status
+            // Map PayOS status to our TransactionStatus enum
+            let newStatus: TransactionStatus;
             let paymentStatus: 'succeeded' | 'failed' | 'pending' | 'cancelled';
+            
             if (payosTransaction.status === 'PAID') {
+                newStatus = TransactionStatus.SUCCEEDED;
                 paymentStatus = 'succeeded';
             } else if (payosTransaction.status === 'CANCELLED' || payosTransaction.status === 'EXPIRED') {
+                newStatus = TransactionStatus.FAILED;
                 paymentStatus = 'failed';
             } else if (payosTransaction.status === 'PENDING' || payosTransaction.status === 'PROCESSING') {
+                newStatus = TransactionStatus.PROCESSING;
                 paymentStatus = 'pending';
             } else {
+                newStatus = TransactionStatus.FAILED;
                 paymentStatus = 'cancelled';
+            }
+
+            // ✅ CRITICAL: Only update if status has changed and transaction is not already finalized
+            if (transaction.status !== TransactionStatus.SUCCEEDED && transaction.status !== TransactionStatus.FAILED) {
+                console.log(`[PayOS Return] Updating transaction ${transaction._id} from ${transaction.status} to ${newStatus}`);
+                
+                // Update transaction status (similar to webhook)
+                const updated = await this.transactionsService.updatePaymentStatus(
+                    (transaction._id as any).toString(),
+                    newStatus,
+                    undefined,
+                    {
+                        payosOrderCode: payosTransaction.orderCode,
+                        payosReference: payosTransaction.reference,
+                        payosAccountNumber: payosTransaction.accountNumber,
+                        payosTransactionDateTime: payosTransaction.transactionDateTime,
+                    }
+                );
+
+                // Emit payment.failed event if transaction was cancelled or expired
+                if (newStatus === TransactionStatus.FAILED) {
+                    const bookingIdStr = updated.booking 
+                        ? (typeof updated.booking === 'string' 
+                            ? updated.booking 
+                            : (updated.booking as any)?._id 
+                                ? String((updated.booking as any)._id)
+                                : String(updated.booking))
+                        : undefined;
+                    
+                    const userIdStr = updated.user
+                        ? (typeof updated.user === 'string'
+                            ? updated.user
+                            : (updated.user as any)?._id
+                                ? String((updated.user as any)._id)
+                                : String(updated.user))
+                        : undefined;
+
+                    const reason = payosTransaction.status === 'CANCELLED' 
+                        ? 'PayOS transaction cancelled' 
+                        : 'PayOS transaction expired';
+
+                    this.eventEmitter.emit('payment.failed', {
+                        paymentId: String(updated._id),
+                        bookingId: bookingIdStr,
+                        userId: userIdStr,
+                        amount: updated.amount,
+                        method: updated.method,
+                        transactionId: payosTransaction.reference || String(payosTransaction.orderCode),
+                        reason,
+                    });
+
+                    console.log(`[PayOS Return] ❌ Payment failed (${payosTransaction.status}), emitted payment.failed event`);
+                }
+
+                // ✅ CRITICAL: Emit payment.success event if payment succeeded
+                if (newStatus === TransactionStatus.SUCCEEDED) {
+                    // Double-check transaction status to ensure it's actually succeeded
+                    const verifiedTransaction = await this.transactionsService.getPaymentById(
+                        (updated._id as any).toString()
+                    );
+                    
+                    if (!verifiedTransaction) {
+                        console.error(`[PayOS Return] ❌ Transaction ${updated._id} not found after update`);
+                    } else if (verifiedTransaction.status !== TransactionStatus.SUCCEEDED) {
+                        console.error(
+                            `[PayOS Return] ❌ Transaction ${updated._id} status mismatch: ` +
+                            `expected SUCCEEDED, got ${verifiedTransaction.status}`
+                        );
+                    } else {
+                        console.log(`[PayOS Return] ✅ Transaction ${updated._id} verified as SUCCEEDED, emitting event`);
+                        
+                        const bookingIdStr = updated.booking
+                            ? (typeof updated.booking === 'string'
+                                ? updated.booking
+                                : (updated.booking as any)?._id
+                                    ? String((updated.booking as any)._id)
+                                    : String(updated.booking))
+                            : undefined;
+
+                        const userIdStr = updated.user
+                            ? (typeof updated.user === 'string'
+                                ? updated.user
+                                : (updated.user as any)?._id
+                                    ? String((updated.user as any)._id)
+                                    : String(updated.user))
+                            : undefined;
+
+                        // Emit payment.success event to trigger booking confirmation
+                        this.eventEmitter.emit('payment.success', {
+                            paymentId: String(updated._id),
+                            bookingId: bookingIdStr,
+                            userId: userIdStr,
+                            amount: updated.amount,
+                            method: updated.method,
+                            transactionId: payosTransaction.reference,
+                        });
+
+                        console.log(`[PayOS Return] ✅ Payment success event emitted for booking ${bookingIdStr}`);
+                    }
+                }
+            } else {
+                console.log(`[PayOS Return] ℹ️ Transaction ${transaction._id} already processed: ${transaction.status}`);
             }
 
             const bookingId = transaction.booking

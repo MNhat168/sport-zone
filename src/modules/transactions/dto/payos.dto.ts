@@ -123,6 +123,14 @@ export class CreatePayOSUrlDto {
   @IsNumber()
   @Min(5)
   expiredAt?: number;
+
+  @ApiPropertyOptional({
+    description: 'PayOS order code (if already generated). If not provided, will generate new one.',
+    example: 251116131019218
+  })
+  @IsOptional()
+  @IsNumber()
+  orderCode?: number;
 }
 
 /**

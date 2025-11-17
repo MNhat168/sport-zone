@@ -18,6 +18,8 @@ import { BookingSchema } from '../bookings/entities/booking.entity';
 import { User, UserSchema } from '../users/entities/user.entity';
 // Import Amenities for field amenities integration
 import { Amenity, AmenitySchema } from '../amenities/entities/amenities.entity';
+// Import Transaction for transaction status filtering
+import { Transaction, TransactionSchema } from '../transactions/entities/transaction.entity';
 // Removed separate PendingPriceUpdate collection; use embedded pendingPriceUpdates in Field
 
 @Module({
@@ -30,6 +32,7 @@ import { Amenity, AmenitySchema } from '../amenities/entities/amenities.entity';
       { name: Booking.name, schema: BookingSchema },
       { name: User.name, schema: UserSchema },
       { name: Amenity.name, schema: AmenitySchema },
+      { name: Transaction.name, schema: TransactionSchema },
     ]),
     forwardRef(() => ServiceModule),
   ],

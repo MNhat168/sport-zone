@@ -14,6 +14,7 @@ export interface CreatePaymentData {
   method: PaymentMethod;
   paymentNote?: string;
   transactionId?: string;
+  externalTransactionId?: string; // ✅ PayOS orderCode or VNPay transaction ID
 }
 
 @Injectable()
@@ -41,6 +42,8 @@ export class TransactionsService {
         status: TransactionStatus.PENDING,
         type: TransactionType.PAYMENT,
         notes: data.paymentNote || null,
+        // ✅ CRITICAL: Store externalTransactionId for PayOS/VNPay lookup
+        ...(data.externalTransactionId && { externalTransactionId: data.externalTransactionId }),
       });
 
       // ✅ CRITICAL: Save with session if provided (for transaction atomicity)
@@ -49,6 +52,9 @@ export class TransactionsService {
         : await transaction.save();
       
       this.logger.log(`Created transaction ${savedTransaction._id} for booking ${data.bookingId}`);
+      if (data.externalTransactionId) {
+        this.logger.log(`  - External Transaction ID: ${data.externalTransactionId}`);
+      }
       
       return savedTransaction;
     } catch (error) {
@@ -126,7 +132,7 @@ export class TransactionsService {
     }
 
     // Update timestamps based on status
-    if (status === TransactionStatus.SUCCEEDED || status === TransactionStatus.COMPLETED) {
+    if (status === TransactionStatus.SUCCEEDED) {
       updateData.completedAt = new Date();
     } else if (status === TransactionStatus.FAILED) {
       updateData.failedAt = new Date();
@@ -384,7 +390,7 @@ export class TransactionsService {
     }
 
     // Validate transaction can be refunded
-    if (originalTransaction.status !== TransactionStatus.SUCCEEDED && originalTransaction.status !== TransactionStatus.COMPLETED) {
+    if (originalTransaction.status !== TransactionStatus.SUCCEEDED) {
       throw new BadRequestException(
         `Transaction cannot be refunded. Current status: ${originalTransaction.status}. Only succeeded transactions can be refunded.`
       );
@@ -411,7 +417,7 @@ export class TransactionsService {
       amount: finalRefundAmount,
       direction: 'out',
       method: originalTransaction.method,
-      status: TransactionStatus.COMPLETED,
+      status: TransactionStatus.SUCCEEDED,
       type: refundType,
       relatedTransaction: new Types.ObjectId(transactionId),
       user: originalTransaction.user,
@@ -721,7 +727,7 @@ export class TransactionsService {
         direction: 'in',
         type: TransactionType.FEE,
         method: PaymentMethod.INTERNAL,
-        status: TransactionStatus.COMPLETED,
+        status: TransactionStatus.SUCCEEDED,
         user: userId,
         feeRate: feeRate || undefined,
         notes: 'Platform fee',

@@ -15,6 +15,7 @@ import { User } from '../users/entities/user.entity';
 import { timeToMinutes } from '../../utils/utils';
 import { Amenity } from '../amenities/entities/amenities.entity';
 import { PriceFormatService } from '../../service/price-format.service';
+import { Transaction } from '../transactions/entities/transaction.entity';
 
 
 @Injectable()
@@ -32,6 +33,7 @@ export class FieldsService {
         @InjectModel(Booking.name) private bookingModel: Model<Booking>,
         @InjectModel(User.name) private userModel: Model<User>,
         @InjectModel(Amenity.name) private amenityModel: Model<Amenity>,
+        @InjectModel(Transaction.name) private transactionModel: Model<Transaction>,
         private priceFormatService: PriceFormatService,
         private awsS3Service: AwsS3Service,
     ) {}
@@ -390,6 +392,7 @@ export class FieldsService {
     async getAllBookingsByOwner(userId: string, filters: {
         fieldName?: string;
         status?: string;
+        transactionStatus?: string;
         startDate?: string;
         endDate?: string;
         page?: number;
@@ -499,6 +502,36 @@ export class FieldsService {
                 }
             }
 
+            // Filter by transaction status if provided
+            if (filters.transactionStatus) {
+                // Find transaction IDs with the specified status
+                const transactions = await this.transactionModel
+                    .find({ status: filters.transactionStatus })
+                    .select('_id')
+                    .lean()
+                    .exec();
+                
+                const transactionIds = transactions.map(t => t._id);
+                
+                // Filter bookings that have transactions with the specified status
+                if (transactionIds.length > 0) {
+                    bookingFilter.transaction = { $in: transactionIds };
+                } else {
+                    // If no transactions match, return empty result
+                    return {
+                        bookings: [],
+                        pagination: {
+                            total: 0,
+                            page: filters.page || 1,
+                            limit: filters.limit || 10,
+                            totalPages: 0,
+                            hasNextPage: false,
+                            hasPrevPage: false
+                        }
+                    };
+                }
+            }
+
             // Pagination setup
             const page = filters.page || 1;
             const limit = filters.limit || 10;
@@ -522,6 +555,10 @@ export class FieldsService {
                     path: 'selectedAmenities',
                     select: 'name price'
                 })
+                .populate({
+                    path: 'transaction',
+                    select: 'status'
+                })
                 .sort({ date: -1, startTime: -1 }) // Mới nhất trước, sau đó theo thời gian
                 .skip(skip)
                 .limit(limit)
@@ -536,6 +573,7 @@ export class FieldsService {
                 startTime: booking.startTime,
                 endTime: booking.endTime,
                 status: booking.status,
+                transactionStatus: (booking.transaction as any)?.status || null,
                 totalPrice: booking.totalPrice,
                 customer: {
                     fullName: (booking.user as any)?.fullName || 'Unknown',
