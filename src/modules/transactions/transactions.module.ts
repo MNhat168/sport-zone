@@ -24,7 +24,7 @@ import { ServiceModule } from '../../service/service.module';
   controllers: [TransactionsController],
   providers: [
     TransactionsService, 
-    PaymentCleanupService, 
+    PaymentCleanupService,
     VNPayService,
     PayOSService,
   ],

@@ -379,16 +379,13 @@ export class TransactionsController {
             console.log('[Verify VNPay] Payment already processed by IPN:', payment.status);
             // Convert to string to ensure comparison works correctly
             const paymentStatusStr = String(payment.status);
-            const isSucceeded = paymentStatusStr === TransactionStatus.SUCCEEDED || 
-                                 paymentStatusStr === TransactionStatus.COMPLETED ||
-                                 paymentStatusStr === 'succeeded' ||
-                                 paymentStatusStr === 'completed';
+            const isSucceeded = paymentStatusStr === TransactionStatus.SUCCEEDED ||
+                                 paymentStatusStr === 'succeeded';
             
             console.log('[Verify VNPay] Status check:', {
                 paymentStatus: paymentStatusStr,
                 isSucceeded,
-                enumSucceeded: TransactionStatus.SUCCEEDED,
-                enumCompleted: TransactionStatus.COMPLETED
+                enumSucceeded: TransactionStatus.SUCCEEDED
             });
             
             // Ensure bookingId is a string
@@ -1069,7 +1066,7 @@ export class TransactionsController {
         name: 'status', 
         description: 'Filter by transaction status',
         required: false,
-        enum: ['pending', 'processing', 'completed', 'failed', 'cancelled']
+        enum: ['pending', 'processing', 'succeeded', 'failed', 'cancelled', 'refunded']
     })
     @ApiQuery({ 
         name: 'startDate', 
@@ -1352,7 +1349,64 @@ export class TransactionsController {
     @ApiResponse({ status: 201, description: 'Payment link created successfully', type: PayOSPaymentLinkResponseDto })
     @ApiResponse({ status: 400, description: 'Invalid request data' })
     async createPayOSPayment(@Body() dto: CreatePayOSUrlDto): Promise<PayOSPaymentLinkResponseDto> {
-        return await this.payosService.createPaymentUrl(dto);
+        console.log(`[Create PayOS Payment] Received orderId: ${dto.orderId}`);
+        
+        // ✅ CRITICAL: dto.orderId is the PAYMENT ID (transaction ID), not booking ID
+        // Lookup transaction by payment ID to get externalTransactionId (PayOS orderCode)
+        const transaction = await this.transactionsService.getPaymentById(dto.orderId);
+        
+        if (!transaction) {
+            console.log(`[Create PayOS Payment] Transaction not found by ID, trying booking ID...`);
+            // If not found by transaction ID, try finding by booking ID
+            const transactionByBooking = await this.transactionsService.getPaymentByBookingId(dto.orderId);
+            if (!transactionByBooking) {
+                console.error(`[Create PayOS Payment] Transaction not found with either transaction ID or booking ID: ${dto.orderId}`);
+                throw new NotFoundException(`Transaction not found with ID: ${dto.orderId}. Please check if the transaction/booking exists.`);
+            }
+            console.log(`[Create PayOS Payment] Found transaction by booking ID: ${(transactionByBooking._id as any).toString()}`);
+            // Use the transaction found by booking ID
+            return this.createPaymentLinkWithTransaction(dto, transactionByBooking);
+        }
+        
+        console.log(`[Create PayOS Payment] Found transaction by ID: ${(transaction._id as any).toString()}`);
+        return this.createPaymentLinkWithTransaction(dto, transaction);
+    }
+
+    /**
+     * Helper method to create PayOS payment link with transaction
+     */
+    private async createPaymentLinkWithTransaction(dto: CreatePayOSUrlDto, transaction: any): Promise<PayOSPaymentLinkResponseDto> {
+        // ✅ If transaction has externalTransactionId, use it as PayOS orderCode
+        // Otherwise, generate a new one (fallback for backward compatibility)
+        let orderCodeToUse: number;
+        
+        if (transaction.externalTransactionId) {
+            orderCodeToUse = Number(transaction.externalTransactionId);
+            console.log(`[Create PayOS Payment] Using existing orderCode from transaction: ${orderCodeToUse}`);
+        } else {
+            // Fallback: generate new orderCode and update transaction
+            const { generatePayOSOrderCode } = await import('./utils/payos.utils');
+            orderCodeToUse = generatePayOSOrderCode();
+            
+            // Update transaction with new orderCode
+            await this.transactionsService.updatePaymentStatus(
+                (transaction._id as any).toString(),
+                transaction.status, // Keep current status
+                undefined,
+                { payosOrderCode: orderCodeToUse }
+            );
+            
+            console.log(`[Create PayOS Payment] Generated new orderCode: ${orderCodeToUse}`);
+        }
+        
+        // ✅ Create payment link with the orderCode
+        // Pass orderCode to PayOSService so it uses the same orderCode
+        const result = await this.payosService.createPaymentUrl({
+            ...dto,
+            orderCode: orderCodeToUse, // ✅ FIX: Pass orderCode from transaction
+        });
+        
+        return result;
     }
 
     /**

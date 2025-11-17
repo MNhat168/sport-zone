@@ -2,15 +2,20 @@ import { Prop, Schema } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
 
 /**
- * Base Entity với timezone Việt Nam mặc định
- * Tất cả entities khác sẽ extend từ class này
+ * Base Entity with proper UTC timestamps
+ * All other entities will extend from this class
+ * 
+ * ⚠️ IMPORTANT: MongoDB always stores timestamps in UTC
+ * - Use new Date() to get current UTC time
+ * - Never add timezone offsets to stored timestamps
+ * - Display in Vietnam timezone (UTC+7) only when rendering to user
  */
 @Schema({
   timestamps: {
     createdAt: true,
     updatedAt: true,
-    // Cấu hình timezone cho Việt Nam (UTC+7)
-    currentTime: () => new Date(Date.now() + (7 * 60 * 60 * 1000))
+    // ✅ Use UTC time - MongoDB stores in UTC, we convert to Vietnam time for display
+    currentTime: () => new Date()
   },
   toJSON: {
     transform: function(_, ret: any) {
@@ -67,26 +72,26 @@ import { Document } from 'mongoose';
 })
 export abstract class BaseEntity extends Document {
   /**
-   * Thời gian tạo (Vietnam timezone)
+   * Creation time (stored in UTC, display in Vietnam timezone when needed)
    */
   @Prop({ type: Date })
   createdAt: Date;
 
   /**
-   * Thời gian cập nhật cuối (Vietnam timezone)  
+   * Last update time (stored in UTC, display in Vietnam timezone when needed)
    */
   @Prop({ type: Date })
   updatedAt: Date;
 }
 
 /**
- * Helper function để cấu hình timestamps cho schema extends BaseEntity
+ * Helper function to configure timestamps for schemas extending BaseEntity
  */
 export function configureBaseEntitySchema(schema: any) {
   schema.set('timestamps', {
     createdAt: true,
     updatedAt: true,
-    // Cấu hình timezone cho Việt Nam (UTC+7)
-    currentTime: () => new Date(Date.now() + (7 * 60 * 60 * 1000))
+    // ✅ Use UTC time - MongoDB stores in UTC, we convert to Vietnam time for display
+    currentTime: () => new Date()
   });
 }

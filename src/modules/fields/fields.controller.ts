@@ -588,6 +588,7 @@ export class FieldsController {
         @Request() req: any,
         @Query('fieldName') fieldName?: string,
         @Query('status') status?: string,
+        @Query('transactionStatus') transactionStatus?: string,
         @Query('startDate') startDate?: string,
         @Query('endDate') endDate?: string,
         @Query('page') page: number = 1,
@@ -598,6 +599,7 @@ export class FieldsController {
         const queryParams = {
             fieldName,
             status,
+            transactionStatus,
             startDate,
             endDate,
             page: Number(page),

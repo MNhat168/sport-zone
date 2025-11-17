@@ -129,11 +129,10 @@ export class PaymentHandlerService implements OnModuleInit {
         return;
       }
       
-      if (transaction.status !== TransactionStatus.SUCCEEDED && 
-          transaction.status !== TransactionStatus.COMPLETED) {
+      if (transaction.status !== TransactionStatus.SUCCEEDED) {
         this.logger.warn(
           `[Payment Success] Transaction ${event.paymentId} status is ${transaction.status}, ` +
-          `not SUCCEEDED/COMPLETED - cannot confirm booking. Waiting for transaction to be updated.`
+          `not SUCCEEDED - cannot confirm booking. Waiting for transaction to be updated.`
         );
         await session.abortTransaction();
         return;
@@ -210,7 +209,7 @@ export class PaymentHandlerService implements OnModuleInit {
         return;
       }
 
-      // Step 2: Add to admin systemBalance (FULL amount)
+      // Step 2: Add to admin systemBalance (FULL amount - includes system fee)
       const adminWallet = await this.walletService.getOrCreateWallet(
         'ADMIN_SYSTEM_ID',
         WalletRole.ADMIN,
@@ -225,12 +224,32 @@ export class PaymentHandlerService implements OnModuleInit {
         `New balance: ${adminWallet.systemBalance}₫`
       );
 
-      // Step 3: Calculate platform fee and revenue for field owner
-      const platformFeeRate = 0.05; // 5% for field owner
-      const platformFee = Math.round(event.amount * platformFeeRate);
-      const ownerRevenue = event.amount - platformFee;
+      // Step 3: Calculate owner revenue from booking data
+      // Use bookingAmount directly (no reverse calculation needed)
+      // For backward compatibility: if bookingAmount doesn't exist, calculate from totalPrice
+      let ownerRevenue: number;
+      let platformFee: number;
+      let totalAmount: number;
 
-      // Step 4: Add to field owner pendingBalance (revenue after fee)
+      if (bookingWithField.bookingAmount !== undefined && bookingWithField.platformFee !== undefined) {
+        // New booking structure: use bookingAmount and platformFee directly
+        ownerRevenue = bookingWithField.bookingAmount;
+        platformFee = bookingWithField.platformFee;
+        totalAmount = ownerRevenue + platformFee;
+      } else {
+        // Old booking structure: calculate backwards from totalPrice for backward compatibility
+        const bookingTotalPrice = bookingWithField.totalPrice || event.amount;
+        const systemFeeRate = 0.05;
+        ownerRevenue = Math.round(bookingTotalPrice / (1 + systemFeeRate));
+        platformFee = bookingTotalPrice - ownerRevenue;
+        totalAmount = bookingTotalPrice;
+        this.logger.warn(
+          `[Payment Success V2] ⚠️ Old booking structure detected for ${event.bookingId}. ` +
+          `Calculated ownerRevenue: ${ownerRevenue}₫, platformFee: ${platformFee}₫ from totalPrice: ${bookingTotalPrice}₫`
+        );
+      }
+
+      // Step 4: Add to field owner pendingBalance (bookingAmount without platform fee)
       const ownerWallet = await this.walletService.getOrCreateWallet(
         fieldOwnerId,
         WalletRole.FIELD_OWNER,
@@ -242,8 +261,8 @@ export class PaymentHandlerService implements OnModuleInit {
       await ownerWallet.save({ session });
 
       this.logger.log(
-        `[Payment Success V2] ✅ Added ${ownerRevenue}₫ (${event.amount}₫ - ${platformFee}₫ fee) ` +
-        `to field owner ${fieldOwnerId} pendingBalance. New balance: ${ownerWallet.pendingBalance}₫`
+        `[Payment Success V2] ✅ Added ${ownerRevenue}₫ (bookingAmount) to field owner ${fieldOwnerId} pendingBalance. ` +
+        `Platform fee: ${platformFee}₫, Total: ${totalAmount}₫. New balance: ${ownerWallet.pendingBalance}₫`
       );
 
       // Commit transaction
@@ -379,7 +398,11 @@ export class PaymentHandlerService implements OnModuleInit {
         return;
       }
 
-      const amount = refundAmount || booking.totalPrice;
+      // Use totalAmount (bookingAmount + platformFee) or fallback to totalPrice for backward compatibility
+      const totalAmount = booking.bookingAmount !== undefined && booking.platformFee !== undefined
+        ? booking.bookingAmount + booking.platformFee
+        : (booking.totalPrice || 0);
+      const amount = refundAmount || totalAmount;
       const userId = booking.user.toString();
 
       // Step 1: Deduct from admin systemBalance
@@ -595,7 +618,10 @@ export class PaymentHandlerService implements OnModuleInit {
         return;
       }
 
-      const amount = booking.totalPrice;
+      // Use bookingAmount (owner revenue) or fallback to calculated value from totalPrice for backward compatibility
+      const amount = booking.bookingAmount !== undefined
+        ? booking.bookingAmount
+        : (booking.totalPrice ? Math.round(booking.totalPrice / 1.05) : 0);
 
       // Step 1: Get admin wallet and deduct from systemBalance
       const adminWallet = await this.walletService.getOrCreateWallet(
@@ -699,8 +725,12 @@ export class PaymentHandlerService implements OnModuleInit {
         },
         pricing: {
           services: [],
-          fieldPriceFormatted: toVnd(booking.totalPrice),
-          totalFormatted: toVnd(booking.totalPrice),
+          fieldPriceFormatted: toVnd(booking.bookingAmount || booking.totalPrice || 0),
+          totalFormatted: toVnd(
+            (booking.bookingAmount !== undefined && booking.platformFee !== undefined)
+              ? booking.bookingAmount + booking.platformFee
+              : (booking.totalPrice || 0)
+          ),
         },
         paymentMethod,
       };
