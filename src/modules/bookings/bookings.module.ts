@@ -8,8 +8,6 @@ import { Schedule, ScheduleSchema } from '../schedules/entities/schedule.entity'
 import { Field, FieldSchema } from '../fields/entities/field.entity';
 import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../fields/entities/field-owner-profile.entity';
 import { User, UserSchema } from '../users/entities/user.entity';
-import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../fields/entities/field-owner-profile.entity';
-import { User, UserSchema } from '../users/entities/user.entity';
 
 // Services and Controllers
 import { BookingsService } from './bookings.service';

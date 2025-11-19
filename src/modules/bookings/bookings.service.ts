@@ -6,8 +6,6 @@ import { Schedule } from '../schedules/entities/schedule.entity';
 import { Field } from '../fields/entities/field.entity';
 import { FieldOwnerProfile } from '../fields/entities/field-owner-profile.entity';
 import { User } from '../users/entities/user.entity';
-import { FieldOwnerProfile } from '../fields/entities/field-owner-profile.entity';
-import { User } from '../users/entities/user.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { TransactionsService } from '../transactions/transactions.service';
 import { FieldsService } from '../fields/fields.service';
@@ -768,9 +766,7 @@ export class BookingsService {
       endTime: data.endTime,
       type: BookingType.FIELD,
       status: data.note ? BookingStatus.PENDING : BookingStatus.CONFIRMED,
-      status: data.note ? BookingStatus.PENDING : BookingStatus.CONFIRMED,
       totalPrice: data.totalPrice,
-      note: data.note,
       note: data.note,
     });
     await booking.save();

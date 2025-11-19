@@ -23,12 +23,18 @@ export class CreateTournamentDto {
   @IsString()
   location: string;
 
+  // Tournament date (when it actually happens)
   @IsDateString()
-  startDate: string;
+  tournamentDate: string;
+
+  // Registration period
+  @IsDateString()
+  registrationStart: string;
 
   @IsDateString()
-  endDate: string;
+  registrationEnd: string;
 
+  // Tournament time slot
   @IsString()
   @Matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, {
     message: 'Start time must be in HH:mm format'

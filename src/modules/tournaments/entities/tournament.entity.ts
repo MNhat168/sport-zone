@@ -23,12 +23,18 @@ export class Tournament extends BaseEntity {
   @Prop({ required: true })
   location: string;
 
+  // Tournament date (when it actually happens)
   @Prop({ required: true, type: Date })
-  startDate: Date;
+  tournamentDate: Date;
+
+  // Registration period
+  @Prop({ required: true, type: Date })
+  registrationStart: Date;
 
   @Prop({ required: true, type: Date })
-  endDate: Date;
+  registrationEnd: Date;
 
+  // Tournament time slot
   @Prop({ required: true })
   startTime: string;
 
@@ -127,5 +133,6 @@ export const TournamentSchema = SchemaFactory.createForClass(Tournament);
 configureBaseEntitySchema(TournamentSchema);
 
 TournamentSchema.index({ sportType: 1, status: 1 });
-TournamentSchema.index({ startDate: 1 });
+TournamentSchema.index({ tournamentDate: 1 });
+TournamentSchema.index({ registrationEnd: 1 });
 TournamentSchema.index({ organizer: 1 });

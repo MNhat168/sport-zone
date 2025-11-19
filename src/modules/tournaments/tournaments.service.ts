@@ -43,6 +43,19 @@ export class TournamentService {
             );
         }
 
+        // Validate registration period
+        const registrationStart = new Date(createTournamentDto.registrationStart);
+        const registrationEnd = new Date(createTournamentDto.registrationEnd);
+        const tournamentDate = new Date(createTournamentDto.tournamentDate);
+
+        if (registrationStart >= registrationEnd) {
+            throw new BadRequestException('Registration end date must be after start date');
+        }
+
+        if (registrationEnd >= tournamentDate) {
+            throw new BadRequestException('Registration must end before tournament date');
+        }
+
         // Validate selected fields exist and are available
         const fields = await this.fieldModel.find({
             _id: { $in: createTournamentDto.selectedFieldIds.map(id => new Types.ObjectId(id)) },
@@ -55,7 +68,6 @@ export class TournamentService {
         }
 
         // Calculate total field cost
-        const startDate = new Date(createTournamentDto.startDate);
         const startTime = createTournamentDto.startTime;
         const endTime = createTournamentDto.endTime;
 
@@ -65,26 +77,26 @@ export class TournamentService {
         const fieldReservations: InstanceType<typeof this.reservationModel>[] = [];
 
         for (const field of fields) {
-            const cost = this.calculateFieldCost(field, startDate, startTime, endTime);
+            const cost = this.calculateFieldCost(field, tournamentDate, startTime, endTime);
             totalFieldCost += cost;
 
             // Create temporary reservation
             const reservation = new this.reservationModel({
                 tournament: null, // Will be set after tournament creation
                 field: field._id,
-                date: startDate,
+                date: tournamentDate,
                 startTime,
                 endTime,
                 estimatedCost: cost,
                 status: ReservationStatus.PENDING,
-                expiresAt: new Date(startDate.getTime() - 48 * 60 * 60 * 1000), // 48 hours before
+                expiresAt: new Date(tournamentDate.getTime() - 48 * 60 * 60 * 1000), // 48 hours before tournament
             });
 
             fieldReservations.push(reservation);
         }
 
         // Calculate confirmation deadline (48 hours before tournament)
-        const confirmationDeadline = new Date(startDate.getTime() - 48 * 60 * 60 * 1000);
+        const confirmationDeadline = new Date(tournamentDate.getTime() - 48 * 60 * 60 * 1000);
 
         // Create tournament
         const tournament = new this.tournamentModel({
@@ -119,6 +131,12 @@ export class TournamentService {
 
         if (!tournament) {
             throw new NotFoundException('Tournament not found');
+        }
+
+        // Check if registration period is active
+        const now = new Date();
+        if (now < tournament.registrationStart || now > tournament.registrationEnd) {
+            throw new BadRequestException('Registration period has ended or not started yet');
         }
 
         if (tournament.status !== TournamentStatus.PENDING) {
@@ -170,7 +188,7 @@ export class TournamentService {
         return tournament;
     }
 
-    private async confirmTournament(tournament: Tournament) {
+        private async confirmTournament(tournament: Tournament) {
         // Update transaction statuses to SUCCEEDED
         for (const participant of tournament.participants) {
             if (participant.transaction) {
@@ -279,7 +297,7 @@ export class TournamentService {
         return this.tournamentModel
             .find(filters)
             .populate('organizer', 'fullName email avatarUrl')
-            .sort({ startDate: -1 });
+            .sort({ tournamentDate: -1 });
     }
 
     async findOne(id: string) {

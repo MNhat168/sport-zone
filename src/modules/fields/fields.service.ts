@@ -15,8 +15,6 @@ import { User } from '../users/entities/user.entity';
 import { timeToMinutes } from '../../utils/utils';
 import { Amenity } from '../amenities/entities/amenities.entity';
 import { PriceFormatService } from '../../service/price-format.service';
-import { Amenity } from '../amenities/entities/amenities.entity';
-import { PriceFormatService } from '../../service/price-format.service';
 
 
 @Injectable()
