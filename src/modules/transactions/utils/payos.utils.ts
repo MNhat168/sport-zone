@@ -54,6 +54,16 @@ export function createPayOSSignature(
  *      "signature": "abc123..."
  *    }
  * 
+ * CRITICAL FIX: PayOS webhook sends EXTRA fields (virtualAccountNumber, currency, 
+ * paymentLinkId, code, desc, counterAccountBankId, etc.) but signature is ONLY 
+ * calculated from these 6 STANDARD fields:
+ * - accountNumber
+ * - amount
+ * - description
+ * - orderCode
+ * - reference
+ * - transactionDateTime
+ * 
  * @param data - Data WITHOUT signature field (will be removed if present)
  * @param receivedSignature - Signature to verify
  * @param checksumKey - PayOS checksum key
@@ -65,15 +75,27 @@ export function verifyPayOSSignature(
   checksumKey: string
 ): boolean {
   try {
-    // Remove signature from data before verification
-    const { signature, ...dataToSign } = data;
+    // ✅ FIX: Extract ONLY the 6 standard fields used for signature calculation
+    // PayOS webhook may include extra fields, but signature is only based on these 6
+    const standardFields = {
+      accountNumber: data.accountNumber,
+      amount: data.amount,
+      description: data.description,
+      orderCode: data.orderCode,
+      reference: data.reference,
+      transactionDateTime: data.transactionDateTime,
+    };
+    
+    // Log all received fields for debugging
+    console.log('[PayOS Signature] All received fields:', Object.keys(data).sort().join(', '));
+    console.log('[PayOS Signature] Using standard 6 fields for verification');
     
     // Sort keys alphabetically (CRITICAL for PayOS)
-    const sortedKeys = Object.keys(dataToSign).sort();
+    const sortedKeys = Object.keys(standardFields).sort();
     
     // Build query string: key1=value1&key2=value2
     const dataString = sortedKeys
-      .map(key => `${key}=${dataToSign[key]}`)
+      .map(key => `${key}=${standardFields[key]}`)
       .join('&');
     
     console.log('[PayOS Signature] Data to sign (query):', dataString);

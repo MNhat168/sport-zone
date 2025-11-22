@@ -91,8 +91,15 @@ export class PayOSService {
 
             this.logger.log(`[Create Payment URL] Order: ${dto.orderId}, Amount: ${dto.amount} VND`);
 
-            // Generate order code (numeric, max 17 digits)
-            const orderCode = generatePayOSOrderCode();
+            // ✅ FIX: Use orderCode from DTO if provided, otherwise generate new one
+            let orderCode: number;
+            if (dto.orderCode) {
+                orderCode = dto.orderCode;
+                this.logger.log(`[Create Payment URL] Using provided orderCode: ${orderCode}`);
+            } else {
+                orderCode = generatePayOSOrderCode();
+                this.logger.log(`[Create Payment URL] Generated new orderCode: ${orderCode}`);
+            }
 
             // Calculate total from items
             const calculatedAmount = dto.items.reduce((sum, item) => sum + (item.quantity * item.price), 0);

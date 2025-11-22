@@ -112,6 +112,12 @@ export class FieldBookingService {
           amenitiesFee = 0; // Placeholder
         }
 
+        // Calculate booking amount and platform fee
+        const bookingAmount = pricingInfo.totalPrice + amenitiesFee; // Court fee + amenities
+        const platformFeeRate = 0.05; // 5% platform fee
+        const platformFee = Math.round(bookingAmount * platformFeeRate);
+        const totalPrice = bookingAmount + platformFee; // For backward compatibility
+
         // Determine booking status based on payment method and note
         // ✅ CRITICAL: Online payments (PayOS, VNPay, etc.) must be PENDING until payment succeeds
         // Only CASH payments can be CONFIRMED immediately (if no note)
@@ -143,7 +149,9 @@ export class FieldBookingService {
           endTime: bookingData.endTime,
           numSlots,
           status: bookingStatus,
-          totalPrice: pricingInfo.totalPrice + amenitiesFee,
+          bookingAmount: bookingAmount,
+          platformFee: platformFee,
+          totalPrice: totalPrice, // For backward compatibility
           amenitiesFee,
           selectedAmenities: bookingData.selectedAmenities?.map(id => new Types.ObjectId(id)) || [],
           note: bookingData.note,
@@ -158,10 +166,12 @@ export class FieldBookingService {
 
         // ✅ CRITICAL: Create Payment record WITHIN transaction session
         // This ensures payment is rolled back if booking fails
+        // Use totalAmount (bookingAmount + platformFee) for payment amount
+        const totalAmount = bookingAmount + platformFee;
         const payment = await this.transactionsService.createPayment({
           bookingId: (booking._id as Types.ObjectId).toString(),
           userId: userId,
-          amount: booking.totalPrice,
+          amount: totalAmount,
           method: bookingData.paymentMethod ?? PaymentMethod.CASH,
           paymentNote: bookingData.paymentNote
         }, session);

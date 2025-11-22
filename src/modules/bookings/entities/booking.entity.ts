@@ -66,8 +66,16 @@ export class Booking extends BaseEntity {
   })
   status: BookingStatus;
 
+  // New price structure: bookingAmount + platformFee = totalAmount
   @Prop({ required: true, min: 0 })
-  totalPrice: number;
+  bookingAmount: number; // Court fee + amenities (base amount before platform fee)
+
+  @Prop({ required: true, min: 0, default: 0 })
+  platformFee: number; // System/platform fee (5% of bookingAmount)
+
+  // @deprecated Use bookingAmount + platformFee instead. Kept for backward compatibility
+  @Prop({ required: false, min: 0 })
+  totalPrice?: number;
 
   @Prop({ type: Types.ObjectId, ref: 'Transaction' })
   transaction?: Types.ObjectId;
@@ -106,6 +114,26 @@ export const BookingSchema = SchemaFactory.createForClass(Booking);
 
 // Cấu hình timestamps từ BaseEntity
 configureBaseEntitySchema(BookingSchema);
+
+// Virtual getter for totalAmount (bookingAmount + platformFee)
+BookingSchema.virtual('totalAmount').get(function() {
+  return (this.bookingAmount || 0) + (this.platformFee || 0);
+});
+
+// Ensure virtual fields are included in JSON output
+BookingSchema.set('toJSON', { virtuals: true });
+BookingSchema.set('toObject', { virtuals: true });
+
+// Pre-save hook: Calculate totalPrice from bookingAmount + platformFee for backward compatibility
+BookingSchema.pre('save', function(next) {
+  if (this.bookingAmount !== undefined && this.platformFee !== undefined) {
+    // Auto-calculate totalPrice if not set (for backward compatibility)
+    if (this.totalPrice === undefined || this.totalPrice === null) {
+      this.totalPrice = this.bookingAmount + this.platformFee;
+    }
+  }
+  next();
+});
 
 // Add compound index for efficient field + date queries
 BookingSchema.index({ field: 1, date: 1 });

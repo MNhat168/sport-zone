@@ -247,6 +247,12 @@ export class BookingsService {
           amenitiesFee = 0; // Placeholder
         }
 
+        // Calculate booking amount and platform fee
+        const bookingAmount = pricingInfo.totalPrice + amenitiesFee; // Court fee + amenities
+        const platformFeeRate = 0.05; // 5% platform fee
+        const platformFee = Math.round(bookingAmount * platformFeeRate);
+        const totalPrice = bookingAmount + platformFee; // For backward compatibility
+
         // Determine booking status based on payment method and note
         // ✅ CRITICAL: Online payments (PayOS, VNPay, etc.) must be PENDING until payment succeeds
         // Only CASH payments can be CONFIRMED immediately (if no note)
@@ -278,7 +284,9 @@ export class BookingsService {
           endTime: bookingData.endTime,
           numSlots,
           status: bookingStatus,
-          totalPrice: pricingInfo.totalPrice + amenitiesFee,
+          bookingAmount: bookingAmount,
+          platformFee: platformFee,
+          totalPrice: totalPrice, // For backward compatibility
           amenitiesFee,
           selectedAmenities: bookingData.selectedAmenities?.map(id => new Types.ObjectId(id)) || [],
           note: bookingData.note,
@@ -293,12 +301,26 @@ export class BookingsService {
 
         // ✅ CRITICAL: Create Payment record WITHIN transaction session
         // This ensures payment is rolled back if booking fails
+        // Use totalAmount (bookingAmount + platformFee) for payment amount
+        const totalAmount = bookingAmount + platformFee;
+        
+        // ✅ CRITICAL: Generate PayOS orderCode if using PayOS payment method
+        // This allows webhook/return URL to find the transaction later
+        let externalTransactionId: string | undefined;
+        if (bookingData.paymentMethod === PaymentMethod.PAYOS) {
+          // Import generatePayOSOrderCode at top of file if not already imported
+          const { generatePayOSOrderCode } = await import('../transactions/utils/payos.utils');
+          externalTransactionId = generatePayOSOrderCode().toString();
+          this.logger.log(`Generated PayOS orderCode: ${externalTransactionId} for booking ${createdBooking._id}`);
+        }
+        
         const payment = await this.transactionsService.createPayment({
           bookingId: (createdBooking._id as Types.ObjectId).toString(),
           userId: userId,
-          amount: createdBooking.totalPrice,
+          amount: totalAmount,
           method: bookingData.paymentMethod ?? PaymentMethod.CASH,
-          paymentNote: bookingData.paymentNote
+          paymentNote: bookingData.paymentNote,
+          externalTransactionId, // ✅ Pass PayOS orderCode
         }, session);
 
         // Update booking with transaction reference
@@ -1262,17 +1284,15 @@ export class BookingsService {
               date: populatedBooking.date.toLocaleDateString('vi-VN'),
               startTime: populatedBooking.startTime,
               endTime: populatedBooking.endTime,
-              services: [],
-            },
-            pricing: {
-              services: [],
-              fieldPriceFormatted: toVnd(populatedBooking.totalPrice),
-              totalFormatted: toVnd(populatedBooking.totalPrice),
-            },
-            paymentMethod: event.method,
-          };
-
-          // Get field owner email (non-blocking)
+            services: [],
+          },
+          pricing: {
+            services: [],
+            fieldPriceFormatted: toVnd(populatedBooking.totalPrice || 0),
+            totalFormatted: toVnd(populatedBooking.totalPrice || 0),
+          },
+          paymentMethod: event.method,
+        };          // Get field owner email (non-blocking)
           const ownerProfileId = field.owner?.toString();
           if (ownerProfileId) {
             let fieldOwnerProfile = await this.fieldOwnerProfileModel
