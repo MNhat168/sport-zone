@@ -129,12 +129,17 @@ export class EmailService {
 
 	async sendResetPassword(email: string, token: string) {
 		const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+		// Use VITE_API_URL as backend base if configured, otherwise use frontend URL
+		const backendUrl = this.configService.get<string>('VITE_API_URL') || '';
 		await this.mailerService.sendMail({
 			to: email,
 			subject: 'Đặt lại mật khẩu SportZone',
 			template: 'reset-password.hbs',
 			context: {
-				link: `${frontendUrl}/reset-password?token=${token}`,
+				// Link có thể là backend endpoint hoặc frontend page
+				link: backendUrl
+					? `${backendUrl}/auth/reset-password?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`
+					: `${frontendUrl}/reset-password?token=${encodeURIComponent(token)}`,
 			},
 		});
 	}
