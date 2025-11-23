@@ -38,15 +38,6 @@ export class User extends BaseEntity {
   isVerified: boolean;
 
   @Prop({ type: String })
-  verificationToken?: string;
-
-  @Prop({ type: String })
-  resetPasswordToken?: string;
-
-  @Prop({ type: Date })
-  resetPasswordExpires?: Date;
-
-  @Prop({ type: String })
   googleId?: string;
 
   @Prop({ type: [String] })
