@@ -44,4 +44,26 @@ export class UserRepository implements UserRepositoryInterface {
     return this.userModel.find(condition).exec();
   }
 
+  async getAllUsers(
+    filter: FilterQuery<User>,
+    sortBy: string = 'createdAt',
+    sortOrder: 'asc' | 'desc' = 'desc',
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{ data: User[]; total: number }> {
+    const skip = (page - 1) * limit;
+    const sortDirection = sortOrder === 'asc' ? 1 : -1;
+
+    const query = this.userModel.find(filter);
+    const total = await this.userModel.countDocuments(filter);
+
+    const data = await query
+      .sort({ [sortBy]: sortDirection })
+      .skip(skip)
+      .limit(limit)
+      .exec();
+
+    return { data, total };
+  }
+
 }
