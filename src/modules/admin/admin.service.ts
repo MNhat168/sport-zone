@@ -7,6 +7,7 @@ import { Booking, BookingDocument } from '../bookings/entities/booking.entity';
 import { UserRoleStatDto } from './dto/user-role-stats.dto';
 import { UserMonthlyStatsDto } from './dto/user-monthly-stats.dto';
 import { BookingMonthlyStatsDto } from './dto/booking-monthly-stats.dto';
+import { PaymentDto } from './dto/payment.dto';
 @Injectable()
 export class AdminService {
     constructor(
@@ -32,15 +33,8 @@ export class AdminService {
 
     async getRoleDistribution(): Promise<UserRoleStatDto[]> {
         const result = await this.userModel.aggregate([
-            {
-                $match: { role: { $ne: UserRole.ADMIN } },
-            },
-            {
-                $group: {
-                    _id: '$role',
-                    count: { $sum: 1 },
-                },
-            },
+            { $match: { role: { $ne: UserRole.ADMIN } } },
+            { $group: { _id: '$role', count: { $sum: 1 } } },
         ]);
 
         const validRoles = [UserRole.USER, UserRole.COACH, UserRole.FIELD_OWNER];
@@ -50,6 +44,13 @@ export class AdminService {
             return {
                 role,
                 count: found ? found.count : 0,
+                displayName: (() => {
+                    switch (role) {
+                        case UserRole.USER: return "User";
+                        case UserRole.COACH: return "Coach";
+                        case UserRole.FIELD_OWNER: return "Field Owner";
+                    }
+                })(),
             };
         });
     }
@@ -79,10 +80,9 @@ export class AdminService {
     }
 
     async getMonthlyBookingsByYear(year: number): Promise<BookingMonthlyStatsDto[]> {
-        // If no year provided → use current year
         const targetYear = year ?? new Date().getFullYear();
 
-        return this.bookingModel.aggregate([
+        const bookings = await this.bookingModel.aggregate([
             {
                 $match: {
                     createdAt: {
@@ -93,11 +93,7 @@ export class AdminService {
             },
             {
                 $group: {
-                    _id: {
-                        month: { $month: "$createdAt" },
-                        year: { $year: "$createdAt" },
-                        type: "$type",
-                    },
+                    _id: { month: { $month: "$createdAt" }, type: "$type" },
                     count: { $sum: 1 },
                 },
             },
@@ -105,14 +101,32 @@ export class AdminService {
                 $project: {
                     _id: 0,
                     month: "$_id.month",
-                    year: "$_id.year",
                     type: "$_id.type",
                     count: 1,
                 },
             },
-            { $sort: { year: 1, month: 1, type: 1 } },
         ]);
+
+        const types = Array.from(new Set(bookings.map(b => b.type)));
+
+        const filled: BookingMonthlyStatsDto[] = [];
+        types.forEach(type => {
+            for (let month = 1; month <= 12; month++) {
+                const existing = bookings.find(b => b.month === month && b.type === type);
+                filled.push({
+                    year: targetYear,
+                    month,
+                    type,
+                    count: existing ? existing.count : 0,
+                });
+            }
+        });
+
+        filled.sort((a, b) => a.month - b.month || a.type.localeCompare(b.type));
+
+        return filled;
     }
+
 
     async getSuccessfulPayments(range: '1y' | '6m' | '3m' | '1m', year: number) {
         const now = new Date();
@@ -142,12 +156,18 @@ export class AdminService {
 
         if (startDate < startOfYear) startDate = startOfYear;
 
-        return this.transactionModel
-            .find({
-                type: 'payment',
-                status: 'succeeded',
-                createdAt: { $gte: startDate, $lte: endDate },
-            })
-            .exec();
+        const transactions = await this.transactionModel.find({
+            type: 'payment',
+            status: 'succeeded',
+            createdAt: { $gte: startDate, $lte: endDate },
+        });
+
+        return transactions.map((t) => ({
+            id: t.id,
+            amount: t.amount,
+            type: t.type,
+            status: t.status,
+            createdAt: t.createdAt
+        }));
     }
 }

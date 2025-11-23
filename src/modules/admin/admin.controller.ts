@@ -4,6 +4,7 @@ import { AdminService } from './admin.service';
 import { UserRoleStatDto } from './dto/user-role-stats.dto';
 import { UserMonthlyStatsDto } from './dto/user-monthly-stats.dto';
 import { BookingMonthlyStatsDto } from './dto/booking-monthly-stats.dto';
+import { PaymentDto } from './dto/payment.dto';
 @Controller('admin')
 export class AdminController {
     constructor(private readonly adminService: AdminService) { }
@@ -45,10 +46,10 @@ export class AdminController {
     }
 
     @Get('statistic/payments')
-    getPayments(
+    async getPayments(
         @Query('year') year?: string,
         @Query('range') range: '1y' | '6m' | '3m' | '1m' = '1m',
-    ) {
+    ): Promise<PaymentDto[]> {
         const selectedYear = year ? parseInt(year, 10) : new Date().getFullYear();
         return this.adminService.getSuccessfulPayments(range, selectedYear);
     }
