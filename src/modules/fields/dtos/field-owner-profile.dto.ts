@@ -9,6 +9,12 @@ export class FieldOwnerProfileDto {
     @ApiProperty({ example: '507f1f77bcf86cd799439012', description: 'ID của user' })
     user: string;
 
+    @ApiPropertyOptional({ example: 'John Doe', description: 'Tên đầy đủ của chủ sân' })
+    userFullName?: string;
+
+    @ApiPropertyOptional({ example: 'owner@example.com', description: 'Email của chủ sân' })
+    userEmail?: string;
+
     // Intentionally do not expose private user information
 
     @ApiProperty({ example: 'Sân bóng Phú Nhuận', description: 'Tên cơ sở vật chất' })

@@ -13,6 +13,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { AwsS3Service } from 'src/service/aws-s3.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { GetAllUsersDto } from './dto/get-all-users.dto';
+import { GetAllUsersResponseDto, UserListDto } from './dto/get-all-users-response.dto';
 import { Model } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 
@@ -128,5 +130,78 @@ export class UsersService {
     user.favouriteSports.push(...newSports);
     await user.save();
     return user;
+  }
+
+  async getAllUsers(query: GetAllUsersDto): Promise<GetAllUsersResponseDto> {
+    const {
+      search,
+      role,
+      status,
+      page = 1,
+      limit = 10,
+      sortBy = 'createdAt',
+      sortOrder = 'desc',
+    } = query;
+
+    // Build filter object
+    const filter: FilterQuery<User> = {};
+
+    // Search by fullName or email
+    if (search) {
+      filter.$or = [
+        { fullName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    // Filter by role
+    if (role) {
+      filter.role = role;
+    }
+
+    // Filter by status (active/inactive)
+    if (status) {
+      filter.isActive = status === 'active';
+    }
+
+    // Validate page and limit
+    const validatedPage = Math.max(1, page);
+    const validatedLimit = Math.min(Math.max(1, limit), 100);
+
+    // Get data from repository
+    const { data, total } = await this.userRepository.getAllUsers(
+      filter,
+      sortBy,
+      sortOrder,
+      validatedPage,
+      validatedLimit,
+    );
+
+    // Map to response DTO
+    const mappedData: UserListDto[] = data.map((user) => ({
+      _id: user._id?.toString(),
+      fullName: user.fullName,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      status: user.isActive ? 'active' : 'inactive',
+      isVerified: user.isVerified,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    }));
+
+    const totalPages = Math.ceil(total / validatedLimit);
+    const hasNextPage = validatedPage < totalPages;
+    const hasPrevPage = validatedPage > 1;
+
+    return {
+      data: mappedData,
+      total,
+      page: validatedPage,
+      limit: validatedLimit,
+      totalPages,
+      hasNextPage,
+      hasPrevPage,
+    };
   }
 }

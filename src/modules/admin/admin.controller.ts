@@ -44,6 +44,22 @@ export class AdminController {
         return this.adminService.getMonthlyBookingsByYear(parsedYear);
     }
 
+    @Get('booking-monthly-stats/field')
+    async getFieldBookingMonthlyStats(
+        @Query('year') year?: string
+    ): Promise<BookingMonthlyStatsDto[]> {
+        const parsedYear = year ? parseInt(year, 10) : new Date().getFullYear();
+        return this.adminService.getMonthlyFieldBookingsByYear(parsedYear);
+    }
+
+    @Get('booking-monthly-stats/coach')
+    async getCoachBookingMonthlyStats(
+        @Query('year') year?: string
+    ): Promise<BookingMonthlyStatsDto[]> {
+        const parsedYear = year ? parseInt(year, 10) : new Date().getFullYear();
+        return this.adminService.getMonthlyCoachBookingsByYear(parsedYear);
+    }
+
     @Get('statistic/payments')
     getPayments(
         @Query('year') year?: string,

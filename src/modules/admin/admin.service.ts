@@ -114,6 +114,78 @@ export class AdminService {
         ]);
     }
 
+    async getMonthlyFieldBookingsByYear(year: number): Promise<BookingMonthlyStatsDto[]> {
+        // Get field bookings only by year
+        const targetYear = year ?? new Date().getFullYear();
+
+        return this.bookingModel.aggregate([
+            {
+                $match: {
+                    type: 'field',
+                    createdAt: {
+                        $gte: new Date(targetYear, 0, 1),
+                        $lte: new Date(targetYear, 11, 31, 23, 59, 59),
+                    },
+                },
+            },
+            {
+                $group: {
+                    _id: {
+                        month: { $month: "$createdAt" },
+                        year: { $year: "$createdAt" },
+                    },
+                    count: { $sum: 1 },
+                },
+            },
+            {
+                $project: {
+                    _id: 0,
+                    month: "$_id.month",
+                    year: "$_id.year",
+                    type: { $literal: 'field' },
+                    count: 1,
+                },
+            },
+            { $sort: { year: 1, month: 1 } },
+        ]);
+    }
+
+    async getMonthlyCoachBookingsByYear(year: number): Promise<BookingMonthlyStatsDto[]> {
+        // Get coach bookings only by year
+        const targetYear = year ?? new Date().getFullYear();
+
+        return this.bookingModel.aggregate([
+            {
+                $match: {
+                    type: 'coach',
+                    createdAt: {
+                        $gte: new Date(targetYear, 0, 1),
+                        $lte: new Date(targetYear, 11, 31, 23, 59, 59),
+                    },
+                },
+            },
+            {
+                $group: {
+                    _id: {
+                        month: { $month: "$createdAt" },
+                        year: { $year: "$createdAt" },
+                    },
+                    count: { $sum: 1 },
+                },
+            },
+            {
+                $project: {
+                    _id: 0,
+                    month: "$_id.month",
+                    year: "$_id.year",
+                    type: { $literal: 'coach' },
+                    count: 1,
+                },
+            },
+            { $sort: { year: 1, month: 1 } },
+        ]);
+    }
+
     async getSuccessfulPayments(range: '1y' | '6m' | '3m' | '1m', year: number) {
         const now = new Date();
         const currentYear = now.getFullYear();

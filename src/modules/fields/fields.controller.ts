@@ -1,11 +1,15 @@
 import { Controller, Get, Query, Param, Post, Body, Delete, Put, UseGuards, Request, UseInterceptors, UploadedFiles, BadRequestException, NotFoundException, Patch, ForbiddenException } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiConsumes } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiConsumes, ApiQuery } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { FieldsService } from './fields.service';
 import { FieldsDto, CreateFieldDto, UpdateFieldDto, CreateFieldWithFilesDto, OwnerFieldsResponseDto } from './dtos/fields.dto';
 import { FieldOwnerProfileDto, CreateFieldOwnerProfileDto, UpdateFieldOwnerProfileDto } from './dtos/field-owner-profile.dto';
 import type { IFile } from '../../interfaces/file.interface';
+import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
+import { Roles } from 'src/decorators/roles.decorator';
+import { RolesGuard } from 'src/common/guards/roles.guard';
+import { UserRole } from '../users/entities/user.entity';
  
 
 /**
@@ -648,6 +652,44 @@ export class FieldsController {
         const userId = req.user._id || req.user.id || req.user.userId;
         const ownerId = await this.getOwnerProfileId(userId);
         return this.fieldsService.updateFieldAmenities(fieldId, body.amenities, ownerId);
+    }
+
+    /**
+     * Get all field owner profiles (Admin only)
+     */
+    @UseGuards(JwtAccessTokenGuard, RolesGuard)
+    @Roles(UserRole.ADMIN)
+    @Get('admin/list-owner-profiles')
+    @ApiOperation({ summary: 'Get all field owner profiles (Admin only)' })
+    @ApiResponse({ status: 200, description: 'Field owner profiles retrieved successfully' })
+    @ApiResponse({ status: 401, description: 'Unauthorized' })
+    @ApiResponse({ status: 403, description: 'Access denied. Admin only.' })
+    @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
+    @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 10)' })
+    @ApiQuery({ name: 'search', required: false, type: String, description: 'Search by facility name or location' })
+    @ApiQuery({ name: 'isVerified', required: false, type: Boolean, description: 'Filter by verification status' })
+    @ApiQuery({ name: 'sortBy', required: false, enum: ['facilityName', 'rating', 'createdAt'], description: 'Sort field (default: createdAt)' })
+    @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'], description: 'Sort order (default: desc)' })
+    async getAllFieldOwnerProfiles(
+        @Query('page') page: string = '1',
+        @Query('limit') limit: string = '10',
+        @Query('search') search?: string,
+        @Query('isVerified') isVerified?: string,
+        @Query('sortBy') sortBy: string = 'createdAt',
+        @Query('sortOrder') sortOrder: 'asc' | 'desc' = 'desc',
+    ) {
+        const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+        const parsedLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
+        const parsedIsVerified = isVerified === 'true' ? true : isVerified === 'false' ? false : undefined;
+
+        return this.fieldsService.getAllFieldOwnerProfiles(
+            parsedPage,
+            parsedLimit,
+            search,
+            parsedIsVerified,
+            sortBy,
+            sortOrder,
+        );
     }
 
     // (removed duplicate Field Owner Profile endpoints defined earlier)
