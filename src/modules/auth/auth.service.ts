@@ -33,6 +33,32 @@ export class AuthService {
       expiresIn: Number(this.config_service.get('JWT_REFRESH_TOKEN_EXPIRATION_TIME')) || 25200,
     });
   }
+
+  /**
+   * Generate JWT token for email verification
+   * Token contains email and expires in 5 minutes
+   */
+  generateVerificationToken(email: string) {
+    return this.jwt_service.sign(
+      { email, type: 'email_verification' },
+      {
+        expiresIn: '5m', // Verification token expires in 5 minutes
+      },
+    );
+  }
+
+  /**
+   * Generate JWT token for reset password
+   * Token contains email and expires in 15 minutes
+   */
+  generateResetPasswordToken(email: string) {
+    return this.jwt_service.sign(
+      { email, type: 'reset_password' },
+      {
+        expiresIn: '15m', // Reset password token expires in 15 minutes
+      },
+    );
+  }
   // Register a new user
   async register(body: {
     fullName: string;
@@ -64,12 +90,11 @@ export class AuthService {
     const existing = await this.userModel.findOne({ email });
     if (existing) throw new BadRequestException('Email already registered');
     const hashed = await bcrypt.hash(password, 10);
-    const verificationToken = Math.floor(
-      100000 + Math.random() * 900000,
-    ).toString();
+    // Generate JWT verification token (no need to store in database)
+    const verificationToken = this.generateVerificationToken(email);
     // Send email using template verify-email.hbs
     await this.emailService.sendEmailVerification(email, verificationToken);
-    // Save user with isVerified: false
+    // Save user with isVerified: false (no verificationToken field needed)
     const user = new this.userModel({
       fullName,
       email,
@@ -78,7 +103,6 @@ export class AuthService {
       password: hashed,
       role: UserRole.USER,
       isVerified: false,
-      verificationToken,
     });
     await user.save();
     return { message: 'Verification code sent to email' };
@@ -88,25 +112,57 @@ export class AuthService {
     const user = await this.userModel.findOne({ email });
     if (!user) throw new BadRequestException('User not found');
     if (user.isVerified) return { message: 'Already verified' };
-    if (user.verificationToken !== verificationToken)
-      throw new BadRequestException('Invalid code');
+    
+    // Verify JWT token
+    try {
+      const payload = this.jwt_service.verify(verificationToken);
+      // Check if token is for email verification and matches email
+      if (payload.type !== 'email_verification' || payload.email !== email) {
+        throw new BadRequestException('Invalid verification token');
+      }
+    } catch (error) {
+      if (error.name === 'TokenExpiredError') {
+        throw new BadRequestException('Verification token đã hết hạn. Vui lòng đăng ký lại.');
+      }
+      throw new BadRequestException('Invalid verification token');
+    }
+    
     user.isVerified = true;
-    user.verificationToken = undefined;
     await user.save();
     return { message: 'Account verified and created' };
   }
 
   /**
    * Verify account using token only (no email). Intended for one-click flows.
+   * Token is JWT containing email
    */
   async verifyByToken(verificationToken: string) {
-    const user = await this.userModel.findOne({ verificationToken });
-    if (!user) throw new BadRequestException('Invalid or expired token');
-    if (user.isVerified) return { message: 'Already verified' };
-    user.isVerified = true;
-    user.verificationToken = undefined;
-    await user.save();
-    return { message: 'Account verified and created' };
+    try {
+      // Verify JWT token
+      const payload = this.jwt_service.verify(verificationToken);
+      
+      // Check if token is for email verification
+      if (payload.type !== 'email_verification' || !payload.email) {
+        throw new BadRequestException('Invalid verification token');
+      }
+      
+      // Find user by email from token
+      const user = await this.userModel.findOne({ email: payload.email });
+      if (!user) throw new BadRequestException('User not found');
+      if (user.isVerified) return { message: 'Already verified' };
+      
+      user.isVerified = true;
+      await user.save();
+      return { message: 'Account verified and created' };
+    } catch (error) {
+      if (error.name === 'TokenExpiredError') {
+        throw new BadRequestException('Verification token đã hết hạn. Vui lòng đăng ký lại.');
+      }
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Invalid or expired token');
+    }
   }
 
   // Deprecated: replaced by EmailService.sendEmailVerification
@@ -116,10 +172,10 @@ export class AuthService {
   async login(body: { email: string; password: string; rememberMe: boolean }) {
     const { email, password } = body;
     const user = await this.userModel.findOne({ email });
-    if (!user) throw new BadRequestException('Invalid credentials');
+    if (!user) throw new BadRequestException('Email không tồn tại');
     if (!user.isVerified) throw new BadRequestException('Account not verified');
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) throw new BadRequestException('Invalid credentials');
+    if (!isMatch) throw new BadRequestException('Mật khẩu không đúng');
     const accessToken = this.generateAccessToken({
       userId: (user._id as any).toString(),
       email: user.email,
@@ -149,49 +205,35 @@ export class AuthService {
   async forgotPassword(email: string) {
     const user = await this.userModel.findOne({ email });
     if (!user) throw new BadRequestException('User not found');
-    const resetPasswordToken = Math.floor(100000 + Math.random() * 900000).toString();
-    const expires = new Date(Date.now() + 60 * 1000); // 1 minute from now
-    user.resetPasswordToken = resetPasswordToken;
-    user.resetPasswordExpires = expires;
-    await user.save();
-    // Send email
-    await this.sendResetPasswordEmail(email, resetPasswordToken);
-    return { message: 'Reset password code sent to email' };
-  }
-
-  async sendResetPasswordEmail(email: string, code: string) {
-    const transporter = nodemailer.createTransport({
-      host: process.env.MAIL_HOST,
-      port: Number(process.env.MAIL_PORT),
-      secure: Number(process.env.MAIL_PORT) === 465,
-      auth: {
-        user: process.env.MAIL_USER,
-        pass: process.env.MAIL_PASS,
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
-      family: 4,
-    } as any);
-    await transporter.sendMail({
-      from: process.env.DEFAULT_MAIL_FROM!,
-      to: email,
-      subject: 'SportZone Reset Password Code',
-      text: `Your reset password code is: ${code}`,
-    });
+    // Generate JWT token for reset password (no need to store in database)
+    const resetPasswordToken = this.generateResetPasswordToken(email);
+    // Send email using EmailService
+    await this.emailService.sendResetPassword(email, resetPasswordToken);
+    return { message: 'Reset password link sent to email' };
   }
 
   async resetPassword(body: { email: string; resetPasswordToken: string; newPassword: string; confirmPassword: string }) {
     const { email, resetPasswordToken, newPassword, confirmPassword } = body;
     if (newPassword !== confirmPassword) throw new BadRequestException('Mật khẩu xác nhận không khớp');
+    
+    // Verify JWT token
+    try {
+      const payload = this.jwt_service.verify(resetPasswordToken);
+      // Check if token is for reset password and matches email
+      if (payload.type !== 'reset_password' || payload.email !== email) {
+        throw new BadRequestException('Invalid reset password token');
+      }
+    } catch (error) {
+      if (error.name === 'TokenExpiredError') {
+        throw new BadRequestException('Reset password token đã hết hạn. Vui lòng yêu cầu lại.');
+      }
+      throw new BadRequestException('Invalid or expired reset password token');
+    }
+    
     const user = await this.userModel.findOne({ email });
     if (!user) throw new BadRequestException('User not found');
-    if (!user.resetPasswordToken || !user.resetPasswordExpires) throw new BadRequestException('No reset token');
-    if (user.resetPasswordToken !== resetPasswordToken) throw new BadRequestException('Invalid code');
-    if (user.resetPasswordExpires < new Date()) throw new BadRequestException('Reset token expired');
+    
     user.password = await bcrypt.hash(newPassword, 10);
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpires = undefined;
     await user.save();
     return { message: 'Password reset successful' };
   }

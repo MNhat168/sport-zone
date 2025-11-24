@@ -12,10 +12,13 @@ import {
   Post,
   Request,
   Patch,
+  Query,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
-import { ApiTags, ApiConsumes, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiConsumes, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { GetAllUsersDto } from './dto/get-all-users.dto';
+import { GetAllUsersResponseDto } from './dto/get-all-users-response.dto';
 // import { UserProfileDto } from './dtos/user-profile.dto';
 import { UserRepository } from '@modules/users/repositories/user.repository';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
@@ -27,6 +30,8 @@ import { Multer } from 'multer';
 import { AuthGuard } from '@nestjs/passport';
 import { UserRole } from './entities/user.entity';
 import { SetFavouriteSportsDto } from './dto/set-favourite-sports.dto';
+import { Roles } from 'src/decorators/roles.decorator';
+import { RolesGuard } from 'src/common/guards/roles.guard';
 @ApiTags('Users')
 @Controller('users')
 @ApiBearerAuth('token')
@@ -81,5 +86,21 @@ export class UsersController {
       userEmail,
       body.favouriteSports,
     );
+  }
+
+  @UseGuards(JwtAccessTokenGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Get('list')
+  @ApiQuery({ name: 'search', required: false, description: 'Search by fullName or email' })
+  @ApiQuery({ name: 'role', required: false, enum: UserRole, description: 'Filter by role' })
+  @ApiQuery({ name: 'status', required: false, enum: ['active', 'inactive'], description: 'Filter by status' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 10, max: 100)' })
+  @ApiQuery({ name: 'sortBy', required: false, enum: ['fullName', 'email', 'createdAt', 'updatedAt'], description: 'Sort field (default: createdAt)' })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'], description: 'Sort order (default: desc)' })
+  async getAllUsers(
+    @Query() query: GetAllUsersDto,
+  ): Promise<GetAllUsersResponseDto> {
+    return this.usersService.getAllUsers(query);
   }
 }

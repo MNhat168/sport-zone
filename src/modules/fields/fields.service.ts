@@ -2437,10 +2437,91 @@ export class FieldsService {
     /**
      * Helper method để map FieldOwnerProfile entity sang DTO
      */
+    /**
+     * Lấy danh sách tất cả FieldOwnerProfile (dành cho Admin)
+     * @param page - Số trang (mặc định: 1)
+     * @param limit - Số item trên 1 trang (mặc định: 10)
+     * @param search - Tìm kiếm theo facilityName hoặc facilityLocation
+     * @param isVerified - Lọc theo trạng thái xác minh
+     * @param sortBy - Sắp xếp theo field nào (facilityName, rating, createdAt)
+     * @param sortOrder - Thứ tự sắp xếp (asc, desc)
+     * @returns Danh sách field owner profiles + pagination info
+     */
+    async getAllFieldOwnerProfiles(
+        page: number = 1,
+        limit: number = 10,
+        search?: string,
+        isVerified?: boolean,
+        sortBy: string = 'createdAt',
+        sortOrder: 'asc' | 'desc' = 'desc',
+    ): Promise<{
+        data: FieldOwnerProfileDto[];
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+            totalPages: number;
+        };
+    }> {
+        try {
+            // Build filter conditions
+            const filter: any = {};
+
+            if (search) {
+                filter.$or = [
+                    { facilityName: { $regex: search, $options: 'i' } },
+                    { facilityLocation: { $regex: search, $options: 'i' } },
+                ];
+            }
+
+            if (isVerified !== undefined) {
+                filter.isVerified = isVerified;
+            }
+
+            // Validate and set sort order
+            const sortValue = sortOrder === 'asc' ? 1 : -1;
+            const sortField = ['facilityName', 'rating', 'createdAt'].includes(sortBy) ? sortBy : 'createdAt';
+
+            // Calculate pagination
+            const skip = (page - 1) * limit;
+
+            // Query database
+            const [profiles, total] = await Promise.all([
+                this.fieldOwnerProfileModel
+                    .find(filter)
+                    .populate('user', 'fullName email phone role')
+                    .sort({ [sortField]: sortValue })
+                    .skip(skip)
+                    .limit(limit)
+                    .exec(),
+                this.fieldOwnerProfileModel.countDocuments(filter),
+            ]);
+            
+            const data = profiles
+            .filter(profile => profile.user !== null) // Skip profiles without valid user reference
+            .map(profile => this.mapToFieldOwnerProfileDto(profile));
+
+            return {
+                data,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    totalPages: Math.ceil(total / limit),
+                },
+            };
+        } catch (error) {
+            this.logger.error('Error getting all field owner profiles', error);
+            throw new InternalServerErrorException('Failed to get field owner profiles');
+        }
+    }
+
     private mapToFieldOwnerProfileDto(profile: any): FieldOwnerProfileDto {
         return {
             id: profile._id.toString(),
-            user: profile.user._id?.toString() || profile.user.toString(),
+            user: profile.user?._id?.toString() || profile.user?.toString() || '',
+            userFullName: profile.user?.fullName || undefined,
+            userEmail: profile.user?.email || undefined,
             facilityName: profile.facilityName,
             facilityLocation: profile.facilityLocation,
             supportedSports: profile.supportedSports,
