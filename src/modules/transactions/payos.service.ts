@@ -413,6 +413,106 @@ export class PayOSService {
     }
 
     /**
+     * Validate bank account via PayOS API
+     * Calls PayOS bank account validation API to verify account exists and get account name
+     * 
+     * @param bankCode - Bank code (e.g., 'VCB' for Vietcombank)
+     * @param accountNumber - Bank account number
+     * @returns Validation result with account name and validity status
+     */
+    async validateBankAccount(bankCode: string, accountNumber: string): Promise<{
+        isValid: boolean;
+        accountName: string;
+    }> {
+        try {
+            const config = this.getPayOSConfig();
+
+            this.logger.log(`[Validate Bank Account] Bank: ${bankCode}, Account: ${accountNumber.substring(0, 4)}****`);
+
+            // Call PayOS Bank Account Validation API
+            // Note: PayOS API endpoint may vary, using /v1/bank-account/validate as per plan
+            const response = await axios.post(
+                `${this.PAYOS_API_URL}/v1/bank-account/validate`,
+                {
+                    bankCode,
+                    accountNumber,
+                },
+                {
+                    headers: this.getHeaders(config),
+                    timeout: 30000,
+                }
+            );
+
+            // Check if response indicates success
+            if (response.data.success === true && response.data.data) {
+                const { accountName, isValid } = response.data.data;
+                
+                this.logger.log(
+                    `[Validate Bank Account] ✅ Validation result: isValid=${isValid}, accountName=${accountName}`
+                );
+
+                return {
+                    isValid: isValid === true,
+                    accountName: accountName || '',
+                };
+            }
+
+            // Handle different response formats
+            if (response.data.code === '00' && response.data.data) {
+                const { accountName, isValid } = response.data.data;
+                
+                this.logger.log(
+                    `[Validate Bank Account] ✅ Validation result: isValid=${isValid}, accountName=${accountName}`
+                );
+
+                return {
+                    isValid: isValid === true,
+                    accountName: accountName || '',
+                };
+            }
+
+            // If response doesn't match expected format, treat as invalid
+            this.logger.warn(`[Validate Bank Account] ⚠️ Unexpected response format: ${JSON.stringify(response.data)}`);
+            return {
+                isValid: false,
+                accountName: '',
+            };
+
+        } catch (error) {
+            this.logger.error(`[Validate Bank Account] ❌ Error: ${this.extractErrorMessage(error)}`);
+
+            if (axios.isAxiosError(error)) {
+                const axiosError = error as AxiosError;
+                
+                // Handle 404 - account not found
+                if (axiosError.response?.status === 404) {
+                    this.logger.warn(`[Validate Bank Account] Account not found`);
+                    return {
+                        isValid: false,
+                        accountName: '',
+                    };
+                }
+
+                // Handle 400 - invalid request
+                if (axiosError.response?.status === 400) {
+                    const errorData = axiosError.response.data as any;
+                    this.logger.warn(`[Validate Bank Account] Invalid request: ${errorData.desc || errorData.message}`);
+                    return {
+                        isValid: false,
+                        accountName: '',
+                    };
+                }
+            }
+
+            // For other errors, return invalid
+            return {
+                isValid: false,
+                accountName: '',
+            };
+        }
+    }
+
+    /**
      * Extract error message from various error types
      */
     private extractErrorMessage(error: any): string {

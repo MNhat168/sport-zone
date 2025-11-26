@@ -267,4 +267,111 @@ export class EmailService {
 			`,
 		});
 	}
+
+	/**
+	 * Send email when field owner registration is submitted
+	 */
+	async sendFieldOwnerRegistrationSubmitted(email: string, fullName: string) {
+		const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+		await this.mailerService.sendMail({
+			to: email,
+			subject: 'Đăng ký làm chủ sân đã được gửi - SportZone',
+			template: 'field-owner-registration-submitted.hbs',
+			context: {
+				fullName,
+				frontendUrl: frontendUrl || 'https://sportzone.vn',
+			},
+		});
+	}
+
+	/**
+	 * Send email when field owner registration is approved
+	 */
+	async sendFieldOwnerRegistrationApproved(email: string, fullName: string) {
+		const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+		await this.mailerService.sendMail({
+			to: email,
+			subject: 'Đăng ký làm chủ sân đã được duyệt - SportZone',
+			template: 'field-owner-registration-approved.hbs',
+			context: {
+				fullName,
+				frontendUrl: frontendUrl || 'https://sportzone.vn',
+			},
+		});
+	}
+
+	/**
+	 * Send email when field owner registration is rejected
+	 */
+	async sendFieldOwnerRegistrationRejected(email: string, fullName: string, reason: string) {
+		const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+		await this.mailerService.sendMail({
+			to: email,
+			subject: 'Đăng ký làm chủ sân bị từ chối - SportZone',
+			template: 'field-owner-registration-rejected.hbs',
+			context: {
+				fullName,
+				reason,
+				frontendUrl: frontendUrl || 'https://sportzone.vn',
+			},
+		});
+	}
+
+	/**
+	 * Send email when bank account is submitted
+	 */
+	async sendBankAccountSubmitted(email: string, fullName: string) {
+		const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+		await this.mailerService.sendMail({
+			to: email,
+			subject: 'Khai báo tài khoản ngân hàng đã được gửi - SportZone',
+			html: `
+				<div>
+					<p>Xin chào ${fullName},</p>
+					<p>Yêu cầu khai báo tài khoản ngân hàng của bạn đã được gửi thành công.</p>
+					<p>Chúng tôi sẽ xem xét và phản hồi trong vòng 24 giờ.</p>
+					<p>Trân trọng,<br>Đội ngũ SportZone</p>
+				</div>
+			`,
+		});
+	}
+
+	/**
+	 * Send email when bank account is verified
+	 */
+	async sendBankAccountVerified(email: string, fullName: string) {
+		const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+		await this.mailerService.sendMail({
+			to: email,
+			subject: 'Tài khoản ngân hàng đã được xác minh - SportZone',
+			html: `
+				<div>
+					<p>Xin chào ${fullName},</p>
+					<p>Tài khoản ngân hàng của bạn đã được xác minh thành công.</p>
+					<p>Bạn có thể bắt đầu nhận thanh toán từ khách đặt sân.</p>
+					<p>Trân trọng,<br>Đội ngũ SportZone</p>
+				</div>
+			`,
+		});
+	}
+
+	/**
+	 * Send email when bank account is rejected
+	 */
+	async sendBankAccountRejected(email: string, fullName: string, reason: string) {
+		const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+		await this.mailerService.sendMail({
+			to: email,
+			subject: 'Tài khoản ngân hàng bị từ chối - SportZone',
+			html: `
+				<div>
+					<p>Xin chào ${fullName},</p>
+					<p>Tài khoản ngân hàng của bạn đã bị từ chối.</p>
+					<p><strong>Lý do:</strong> ${reason}</p>
+					<p>Vui lòng kiểm tra lại thông tin và khai báo lại.</p>
+					<p>Trân trọng,<br>Đội ngũ SportZone</p>
+				</div>
+			`,
+		});
+	}
 }

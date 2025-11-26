@@ -7,7 +7,9 @@ import { PriceSchedulerService } from './services/price-scheduler.service';
 
 import { MongooseModule } from '@nestjs/mongoose';
 import { Field, FieldSchema } from './entities/field.entity';
-import { FieldOwnerProfile, FieldOwnerProfileSchema } from './entities/field-owner-profile.entity';
+import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entities/field-owner-profile.entity';
+import { FieldOwnerRegistrationRequest, FieldOwnerRegistrationRequestSchema } from '../field-owner/entities/field-owner-registration-request.entity';
+import { BankAccount, BankAccountSchema } from '../field-owner/entities/bank-account.entity';
 import { ServiceModule } from '../../service/service.module';
 // Import Schedule and Booking for availability checking
 import { Schedule } from '../schedules/entities/schedule.entity';
@@ -20,6 +22,9 @@ import { User, UserSchema } from '../users/entities/user.entity';
 import { Amenity, AmenitySchema } from '../amenities/entities/amenities.entity';
 // Import Transaction for transaction status filtering
 import { Transaction, TransactionSchema } from '../transactions/entities/transaction.entity';
+// Import PayOS and Email services
+import { TransactionsModule } from '../transactions/transactions.module';
+import { EmailModule } from '../email/email.module';
 // Removed separate PendingPriceUpdate collection; use embedded pendingPriceUpdates in Field
 
 @Module({
@@ -28,6 +33,8 @@ import { Transaction, TransactionSchema } from '../transactions/entities/transac
     MongooseModule.forFeature([
       { name: Field.name, schema: FieldSchema },
       { name: FieldOwnerProfile.name, schema: FieldOwnerProfileSchema },
+      { name: FieldOwnerRegistrationRequest.name, schema: FieldOwnerRegistrationRequestSchema },
+      { name: BankAccount.name, schema: BankAccountSchema },
       { name: Schedule.name, schema: ScheduleSchema },
       { name: Booking.name, schema: BookingSchema },
       { name: User.name, schema: UserSchema },
@@ -35,6 +42,8 @@ import { Transaction, TransactionSchema } from '../transactions/entities/transac
       { name: Transaction.name, schema: TransactionSchema },
     ]),
     forwardRef(() => ServiceModule),
+    forwardRef(() => TransactionsModule),
+    EmailModule,
   ],
   controllers: [FieldsController],
   providers: [FieldsService, PriceSchedulerService],

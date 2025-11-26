@@ -8,7 +8,7 @@ import { NotificationRepository } from './repositories/notification.repository';
 import { NOTIFICATION_REPOSITORY } from './interfaces/notifications.interface';
 import { Booking, BookingSchema } from '../bookings/entities/booking.entity';
 import { Field, FieldSchema } from '../fields/entities/field.entity';
-import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../fields/entities/field-owner-profile.entity';
+import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entities/field-owner-profile.entity';
 import { User, UserSchema } from '../users/entities/user.entity';
 import { EmailModule } from '../email/email.module';
 

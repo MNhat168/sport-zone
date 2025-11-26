@@ -6,7 +6,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { Booking, BookingSchema } from './entities/booking.entity';
 import { Schedule, ScheduleSchema } from '../schedules/entities/schedule.entity';
 import { Field, FieldSchema } from '../fields/entities/field.entity';
-import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../fields/entities/field-owner-profile.entity';
+import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entities/field-owner-profile.entity';
 import { User, UserSchema } from '../users/entities/user.entity';
 
 // Services and Controllers

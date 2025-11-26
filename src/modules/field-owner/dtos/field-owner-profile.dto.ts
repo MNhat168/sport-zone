@@ -51,6 +51,18 @@ export class FieldOwnerProfileDto {
     isVerified: boolean;
 
     @ApiPropertyOptional({
+        example: '2025-10-02T23:32:00.000+07:00',
+        description: 'Thời gian được xác minh'
+    })
+    verifiedAt?: Date;
+
+    @ApiPropertyOptional({
+        example: '507f1f77bcf86cd799439013',
+        description: 'ID của admin đã xác minh'
+    })
+    verifiedBy?: string;
+
+    @ApiPropertyOptional({
         example: 'https://example.com/business-license.jpg',
         description: 'URL tài liệu xác minh (giấy phép kinh doanh)'
     })

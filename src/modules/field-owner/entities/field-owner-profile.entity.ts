@@ -15,22 +15,29 @@ export class FieldOwnerProfile extends BaseEntity {
   @Prop({ required: true })
   facilityLocation: string;
 
-  @Prop({ type: [String], enum: SportType, required: true })
-  supportedSports: SportType[];
+  @Prop({ type: [String], enum: SportType })
+  supportedSports?: SportType[];
 
   @Prop({ required: true })
   description: string;
 
   @Prop({ type: [String] })
-  amenities: string[];
+  amenities?: string[];
+
   @Prop({ type: Number, default: 0, min: 0, max: 5 })
-  rating: number;
+  rating?: number;
 
   @Prop({ type: Number, default: 0 })
-  totalReviews: number;
+  totalReviews?: number;
 
   @Prop({ type: Boolean, default: false })
   isVerified: boolean;
+
+  @Prop({ type: Date })
+  verifiedAt?: Date;
+
+  @Prop({ type: Types.ObjectId, ref: 'User' })
+  verifiedBy?: Types.ObjectId;
 
   @Prop({ type: String })
   verificationDocument?: string;  // URL to business license or verification doc

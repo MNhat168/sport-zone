@@ -81,13 +81,6 @@ export class Wallet extends BaseEntity {
    */
   @Prop({ type: Date })
   lastTransactionAt?: Date;
-
-  /**
-   * Trường metadata để lưu các thông tin phụ trợ khác
-   * Ví dụ: bank account info, last hold reason, etc.
-   */
-  @Prop({ type: Object })
-  metadata?: Record<string, any>;
 }
 
 export const WalletSchema = SchemaFactory.createForClass(Wallet);

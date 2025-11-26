@@ -7,7 +7,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Booking } from '../bookings/entities/booking.entity';
 import { Field } from '../fields/entities/field.entity';
-import { FieldOwnerProfile } from '../fields/entities/field-owner-profile.entity';
+import { FieldOwnerProfile } from '../field-owner/entities/field-owner-profile.entity';
 import { User } from '../users/entities/user.entity';
 import { EmailService } from '../email/email.service';
 

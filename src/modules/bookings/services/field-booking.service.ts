@@ -5,7 +5,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Booking, BookingStatus, BookingType } from '../entities/booking.entity';
 import { Schedule } from '../../schedules/entities/schedule.entity';
 import { Field } from '../../fields/entities/field.entity';
-import { FieldOwnerProfile } from '../../fields/entities/field-owner-profile.entity';
+import { FieldOwnerProfile } from '../../field-owner/entities/field-owner-profile.entity';
 import { User } from '../../users/entities/user.entity';
 import { TransactionsService } from '../../transactions/transactions.service';
 import { EmailService } from '../../email/email.service';
