@@ -12,8 +12,15 @@ async function bootstrap() {
   const logger = new Logger(bootstrap.name);
   const app = await NestFactory.create(AppModule);
 
+  // setInterval(() => {
+  //   const used = process.memoryUsage();
+  //   logger.log(
+  //     `Memory: ${Math.round(used.heapUsed / 1024 / 1024)}MB / ${Math.round(used.heapTotal / 1024 / 1024)}MB`,
+  //   );
+  // }, 5000);
+
   app.enableCors({
-    origin: ['http://localhost:5173', 'http://localhost:5174', 'https://sportzone-fe.vercel.app'],
+    origin: ['http://localhost:5173', 'http://localhost:5174', 'https://sport-zone-fe-deploy.vercel.app'],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
     credentials: true,
