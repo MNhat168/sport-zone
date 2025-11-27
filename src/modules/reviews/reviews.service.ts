@@ -1,14 +1,16 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, ClientSession } from 'mongoose';
 import { Review, ReviewType } from './entities/review.entity';
 import { Booking, BookingType } from '../bookings/entities/booking.entity';
+import { CoachProfile } from 'src/modules/coaches/entities/coach-profile.entity';
 
 @Injectable()
 export class ReviewsService {
   constructor(
     @InjectModel(Review.name) private readonly reviewModel: Model<Review>,
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
+    @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
   ) {}
 
   // Create coach review service *
@@ -61,16 +63,49 @@ export class ReviewsService {
       }
     }
 
-    const review = new this.reviewModel({
-      user: data.user,
-      coach: data.coach,
-      booking: bookingId,
-      type: ReviewType.COACH,
-      rating: data.rating,
-      comment: data.comment,
-    });
-    await review.save();
-    return review;
+    // Use a transaction to ensure review creation and coach profile update are atomic
+    const session: ClientSession = await this.reviewModel.db.startSession();
+    session.startTransaction();
+    try {
+      const review = await this.reviewModel.create([
+        {
+          user: data.user,
+          coach: data.coach,
+          booking: bookingId,
+          type: ReviewType.COACH,
+          rating: data.rating,
+          comment: data.comment,
+        },
+      ], { session });
+
+      // update coach profile counters and rating
+      if (data.coach) {
+        const profile = await this.coachProfileModel.findById(data.coach).session(session).exec();
+        if (profile) {
+          const oldCount = (profile.totalReviews ?? 0);
+          const oldAvg = (profile.rating ?? 0);
+          const newCount = oldCount + 1;
+          const newAvg = (oldAvg * oldCount + data.rating) / newCount;
+
+          await this.coachProfileModel.findByIdAndUpdate(
+            data.coach,
+            {
+              $inc: { totalReviews: 1 },
+              $set: { rating: newAvg },
+            },
+            { session }
+          ).exec();
+        }
+      }
+
+      await session.commitTransaction();
+      session.endSession();
+      return review[0];
+    } catch (err) {
+      await session.abortTransaction();
+      session.endSession();
+      throw err;
+    }
   }
 
   // Create field review service *
