@@ -1,0 +1,17 @@
+node_modules
+dist
+.git
+.github
+docs
+test
+*.log
+Dockerfile
+docker-compose.yml
+.env
+.env.*
+coverage
+tmp
+pnpm-lock.yaml
+yarn.lock
+*.tsbuildinfo
+

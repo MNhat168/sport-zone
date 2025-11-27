@@ -1,0 +1,388 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsString,
+  IsEnum,
+  IsObject,
+  IsArray,
+  IsOptional,
+  ValidateNested,
+  IsUrl,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+import { OwnerType, RegistrationStatus } from '../entities/field-owner-registration-request.entity';
+import { SportType } from 'src/common/enums/sport-type.enum';
+
+class PersonalInfoDto {
+  @ApiProperty({ example: 'Nguyễn Văn A', description: 'Họ tên đầy đủ' })
+  @IsString()
+  fullName: string;
+
+  @ApiProperty({ example: '001234567890', description: 'Số CMND/CCCD' })
+  @IsString()
+  idNumber: string;
+
+  @ApiProperty({ example: '123 Đường ABC, Quận 1, TP.HCM', description: 'Địa chỉ thường trú' })
+  @IsString()
+  address: string;
+}
+
+class DocumentsDto {
+  @ApiPropertyOptional({ 
+    example: 'https://s3.../cccd-front.jpg', 
+    description: 'URL ảnh mặt trước CCCD (deprecated - use eKYC instead)',
+    deprecated: true 
+  })
+  @IsOptional()
+  @IsUrl()
+  idFront?: string; // @deprecated - replaced by eKYC
+
+  @ApiPropertyOptional({ 
+    example: 'https://s3.../cccd-back.jpg', 
+    description: 'URL ảnh mặt sau CCCD (deprecated - use eKYC instead)',
+    deprecated: true 
+  })
+  @IsOptional()
+  @IsUrl()
+  idBack?: string; // @deprecated - replaced by eKYC
+
+  @ApiPropertyOptional({ example: 'https://s3.../business-license.jpg', description: 'URL giấy ĐKKD (cho doanh nghiệp/hộ KD)' })
+  @IsOptional()
+  @IsUrl()
+  businessLicense?: string;
+}
+
+export class CreateFieldOwnerRegistrationDto {
+  @ApiProperty({ description: 'Thông tin cá nhân' })
+  @ValidateNested()
+  @Type(() => PersonalInfoDto)
+  personalInfo: PersonalInfoDto;
+
+  @ApiPropertyOptional({ description: 'Giấy tờ pháp lý (deprecated - use eKYC for identity verification)' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DocumentsDto)
+  documents?: DocumentsDto; // @deprecated - idFront/idBack replaced by eKYC, businessLicense still used
+
+  @ApiPropertyOptional({ 
+    example: 'ekyc-session-12345', 
+    description: 'didit eKYC session ID (required if not using deprecated documents)' 
+  })
+  @IsOptional()
+  @IsString()
+  ekycSessionId?: string;
+
+  @ApiPropertyOptional({ 
+    description: 'Personal info extracted from eKYC (auto-filled from eKYC result)' 
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PersonalInfoDto)
+  ekycData?: PersonalInfoDto;
+
+  @ApiProperty({ example: 'Sân bóng Phú Nhuận', description: 'Tên cơ sở vật chất' })
+  @IsString()
+  facilityName: string;
+
+  @ApiProperty({ example: 'District 3, Ho Chi Minh City', description: 'Địa điểm cơ sở vật chất' })
+  @IsString()
+  facilityLocation: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    enum: SportType,
+    example: ['football', 'tennis'],
+    description: 'Các môn thể thao hỗ trợ',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsEnum(SportType, { each: true })
+  supportedSports?: SportType[];
+
+  @ApiProperty({ example: 'Cơ sở vật chất hiện đại với sân bóng đá và tennis', description: 'Mô tả cơ sở vật chất' })
+  @IsString()
+  description: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['wifi', 'parking', 'changing_room'],
+    description: 'Danh sách tiện ích',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  amenities?: string[];
+
+  @ApiPropertyOptional({
+    example: 'https://example.com/business-license.jpg',
+    description: 'Tài liệu xác minh',
+  })
+  @IsOptional()
+  @IsString()
+  verificationDocument?: string;
+
+  @ApiPropertyOptional({
+    example: 'Monday-Sunday: 6:00-22:00',
+    description: 'Giờ hoạt động',
+  })
+  @IsOptional()
+  @IsString()
+  businessHours?: string;
+
+  @ApiProperty({ example: '0901234567', description: 'Số điện thoại liên hệ' })
+  @IsString()
+  contactPhone: string;
+
+  @ApiPropertyOptional({ example: 'https://example.com', description: 'Website' })
+  @IsOptional()
+  @IsString()
+  website?: string;
+}
+
+export class UpdateFieldOwnerRegistrationDto {
+  @ApiPropertyOptional({ enum: OwnerType })
+  @IsOptional()
+  @IsEnum(OwnerType)
+  ownerType?: OwnerType;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PersonalInfoDto)
+  personalInfo?: PersonalInfoDto;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DocumentsDto)
+  documents?: DocumentsDto;
+
+  @ApiPropertyOptional({ example: 'Sân bóng Phú Nhuận', description: 'Tên cơ sở vật chất' })
+  @IsOptional()
+  @IsString()
+  facilityName?: string;
+
+  @ApiPropertyOptional({ example: 'District 3, Ho Chi Minh City', description: 'Địa điểm cơ sở vật chất' })
+  @IsOptional()
+  @IsString()
+  facilityLocation?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    enum: SportType,
+    example: ['football', 'tennis'],
+    description: 'Các môn thể thao hỗ trợ',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsEnum(SportType, { each: true })
+  supportedSports?: SportType[];
+
+  @ApiPropertyOptional({ example: 'Cơ sở vật chất hiện đại với sân bóng đá và tennis', description: 'Mô tả cơ sở vật chất' })
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['wifi', 'parking', 'changing_room'],
+    description: 'Danh sách tiện ích',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  amenities?: string[];
+
+  @ApiPropertyOptional({
+    example: 'https://example.com/business-license.jpg',
+    description: 'Tài liệu xác minh',
+  })
+  @IsOptional()
+  @IsString()
+  verificationDocument?: string;
+
+  @ApiPropertyOptional({
+    example: 'Monday-Sunday: 6:00-22:00',
+    description: 'Giờ hoạt động',
+  })
+  @IsOptional()
+  @IsString()
+  businessHours?: string;
+
+  @ApiPropertyOptional({ example: '0901234567', description: 'Số điện thoại liên hệ' })
+  @IsOptional()
+  @IsString()
+  contactPhone?: string;
+
+  @ApiPropertyOptional({ example: 'https://example.com', description: 'Website' })
+  @IsOptional()
+  @IsString()
+  website?: string;
+}
+
+export class ApproveFieldOwnerRegistrationDto {
+  @ApiPropertyOptional({ example: 'Sân bóng Phú Nhuận', description: 'Tên cơ sở vật chất' })
+  @IsOptional()
+  @IsString()
+  facilityName?: string;
+
+  @ApiPropertyOptional({ example: 'District 3, Ho Chi Minh City', description: 'Địa điểm cơ sở vật chất' })
+  @IsOptional()
+  @IsString()
+  facilityLocation?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    enum: SportType,
+    example: ['football', 'tennis'],
+    description: 'Các môn thể thao hỗ trợ',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsEnum(SportType, { each: true })
+  supportedSports?: SportType[];
+
+  @ApiPropertyOptional({ example: 'Cơ sở vật chất hiện đại với sân bóng đá và tennis', description: 'Mô tả cơ sở vật chất' })
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['wifi', 'parking', 'changing_room'],
+    description: 'Danh sách tiện ích',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  amenities?: string[];
+
+  @ApiPropertyOptional({
+    example: 'https://example.com/business-license.jpg',
+    description: 'Tài liệu xác minh',
+  })
+  @IsOptional()
+  @IsString()
+  verificationDocument?: string;
+
+  @ApiPropertyOptional({
+    example: 'Monday-Sunday: 6:00-22:00',
+    description: 'Giờ hoạt động',
+  })
+  @IsOptional()
+  @IsString()
+  businessHours?: string;
+
+  @ApiPropertyOptional({ example: '0901234567', description: 'Số điện thoại liên hệ' })
+  @IsOptional()
+  @IsString()
+  contactPhone?: string;
+
+  @ApiPropertyOptional({ example: 'https://example.com', description: 'Website' })
+  @IsOptional()
+  @IsString()
+  website?: string;
+
+  @ApiPropertyOptional({ example: 'Đã xác minh giấy tờ và sân bóng', description: 'Ghi chú phê duyệt' })
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
+
+export class RejectFieldOwnerRegistrationDto {
+  @ApiProperty({ example: 'Giấy tờ không hợp lệ', description: 'Lý do từ chối' })
+  @IsString()
+  reason: string;
+}
+
+export class FieldOwnerRegistrationResponseDto {
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty()
+  userId: string;
+
+  @ApiProperty({ enum: OwnerType })
+  ownerType: OwnerType;
+
+  @ApiProperty()
+  personalInfo: PersonalInfoDto;
+
+  @ApiPropertyOptional()
+  documents?: DocumentsDto; // @deprecated - idFront/idBack replaced by eKYC
+
+  @ApiPropertyOptional()
+  ekycSessionId?: string;
+
+  @ApiPropertyOptional({ enum: ['pending', 'verified', 'failed'] })
+  ekycStatus?: 'pending' | 'verified' | 'failed';
+
+  @ApiPropertyOptional()
+  ekycVerifiedAt?: Date;
+
+  @ApiPropertyOptional()
+  ekycData?: PersonalInfoDto;
+
+  @ApiProperty({ enum: RegistrationStatus })
+  status: RegistrationStatus;
+
+  @ApiProperty({ example: 'Sân bóng Phú Nhuận', description: 'Tên cơ sở vật chất' })
+  facilityName: string;
+
+  @ApiProperty({ example: 'District 3, Ho Chi Minh City', description: 'Địa điểm cơ sở vật chất' })
+  facilityLocation: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    enum: SportType,
+    example: ['football', 'tennis'],
+    description: 'Các môn thể thao hỗ trợ',
+  })
+  supportedSports?: SportType[];
+
+  @ApiProperty({ example: 'Cơ sở vật chất hiện đại với sân bóng đá và tennis', description: 'Mô tả cơ sở vật chất' })
+  description: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['wifi', 'parking', 'changing_room'],
+    description: 'Danh sách tiện ích',
+  })
+  amenities?: string[];
+
+  @ApiPropertyOptional({
+    example: 'https://example.com/business-license.jpg',
+    description: 'Tài liệu xác minh',
+  })
+  verificationDocument?: string;
+
+  @ApiPropertyOptional({
+    example: 'Monday-Sunday: 6:00-22:00',
+    description: 'Giờ hoạt động',
+  })
+  businessHours?: string;
+
+  @ApiProperty({ example: '0901234567', description: 'Số điện thoại liên hệ' })
+  contactPhone: string;
+
+  @ApiPropertyOptional({ example: 'https://example.com', description: 'Website' })
+  website?: string;
+
+  @ApiPropertyOptional()
+  rejectionReason?: string;
+
+  @ApiProperty()
+  submittedAt: Date;
+
+  @ApiPropertyOptional()
+  processedAt?: Date;
+
+  @ApiPropertyOptional()
+  processedBy?: string;
+
+  @ApiPropertyOptional()
+  reviewedAt?: Date;
+
+  @ApiPropertyOptional()
+  reviewedBy?: string;
+}
+

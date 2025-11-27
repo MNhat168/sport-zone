@@ -162,7 +162,6 @@ export class WalletService {
     const wallet = new this.walletModel({
       user: this.toObjectId(userId),
       currency: dto.currency ?? 'VND',
-      metadata: dto.metadata ?? {},
       status: WalletStatus.ACTIVE,
       // TODO: Add role field based on user type
       role: WalletRole.FIELD_OWNER, // Default for backward compatibility

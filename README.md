@@ -44,6 +44,25 @@ $ npm run start:dev
 $ npm run start:prod
 ```
 
+## Docker
+
+Build an optimized production image:
+
+```bash
+docker build -t sport-zone-api .
+```
+
+Run the container (pass required env vars such as `PORT`, database credentials, etc.):
+
+```bash
+docker run \
+  -p 3000:3000 \
+  --env-file .env \
+  sport-zone-api
+```
+
+> The container listens on the port specified by the `PORT` environment variable (defaults to `3000` if not provided).
+
 ## Run tests
 
 ```bash

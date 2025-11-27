@@ -3,19 +3,25 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Field } from './entities/field.entity';
 import { Model, Types } from 'mongoose';
 import { FieldsDto, CreateFieldDto, UpdateFieldDto, CreateFieldWithFilesDto } from './dtos/fields.dto';
-import { FieldOwnerProfileDto, CreateFieldOwnerProfileDto, UpdateFieldOwnerProfileDto } from './dtos/field-owner-profile.dto';
-import { FieldOwnerProfile } from './entities/field-owner-profile.entity';
+import { FieldOwnerProfileDto, CreateFieldOwnerProfileDto, UpdateFieldOwnerProfileDto } from '../field-owner/dtos/field-owner-profile.dto';
+import { FieldOwnerProfile } from '../field-owner/entities/field-owner-profile.entity';
+import { FieldOwnerRegistrationRequest, RegistrationStatus, OwnerType } from '../field-owner/entities/field-owner-registration-request.entity';
+import { BankAccount, BankAccountStatus } from '../field-owner/entities/bank-account.entity';
+import { CreateFieldOwnerRegistrationDto, FieldOwnerRegistrationResponseDto, ApproveFieldOwnerRegistrationDto, RejectFieldOwnerRegistrationDto } from '../field-owner/dtos/field-owner-registration.dto';
+import { CreateBankAccountDto, BankAccountResponseDto, UpdateBankAccountStatusDto, PayOSBankAccountValidationResponseDto } from '../field-owner/dtos/bank-account.dto';
 import { AwsS3Service } from '../../service/aws-s3.service';
 import type { IFile } from '../../interfaces/file.interface';
 // Import Schedule and Booking models for availability checking
 import { Schedule } from '../schedules/entities/schedule.entity';
 import { Booking } from '../bookings/entities/booking.entity';
-import { User } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 // Import utility function
 import { timeToMinutes } from '../../utils/utils';
 import { Amenity } from '../amenities/entities/amenities.entity';
 import { PriceFormatService } from '../../service/price-format.service';
 import { Transaction } from '../transactions/entities/transaction.entity';
+import { PayOSService } from '../transactions/payos.service';
+import { EmailService } from '../email/email.service';
 
 
 @Injectable()
@@ -29,6 +35,8 @@ export class FieldsService {
     constructor(
         @InjectModel(Field.name) private fieldModel: Model<Field>,
         @InjectModel(FieldOwnerProfile.name) private fieldOwnerProfileModel: Model<FieldOwnerProfile>,
+        @InjectModel(FieldOwnerRegistrationRequest.name) private registrationRequestModel: Model<FieldOwnerRegistrationRequest>,
+        @InjectModel(BankAccount.name) private bankAccountModel: Model<BankAccount>,
         @InjectModel(Schedule.name) private scheduleModel: Model<Schedule>,
         @InjectModel(Booking.name) private bookingModel: Model<Booking>,
         @InjectModel(User.name) private userModel: Model<User>,
@@ -36,6 +44,8 @@ export class FieldsService {
         @InjectModel(Transaction.name) private transactionModel: Model<Transaction>,
         private priceFormatService: PriceFormatService,
         private awsS3Service: AwsS3Service,
+        private payosService: PayOSService,
+        private emailService: EmailService,
     ) {}
 
 
@@ -2530,12 +2540,532 @@ export class FieldsService {
             rating: profile.rating,
             totalReviews: profile.totalReviews,
             isVerified: profile.isVerified,
+            verifiedAt: profile.verifiedAt,
+            verifiedBy: profile.verifiedBy?._id?.toString() || profile.verifiedBy?.toString() || undefined,
             verificationDocument: profile.verificationDocument,
             businessHours: profile.businessHours,
             contactPhone: profile.contactPhone,
             website: profile.website,
             createdAt: profile.createdAt,
             updatedAt: profile.updatedAt,
+        };
+    }
+
+    // ============================================================================
+    // FIELD OWNER REGISTRATION REQUEST OPERATIONS
+    // ============================================================================
+
+    /**
+     * Create a new field owner registration request
+     */
+    async createRegistrationRequest(userId: string, dto: CreateFieldOwnerRegistrationDto): Promise<FieldOwnerRegistrationResponseDto> {
+        try {
+            // Check if user already has a pending or approved request
+            const existingRequest = await this.registrationRequestModel.findOne({
+                userId: new Types.ObjectId(userId),
+                status: { $in: [RegistrationStatus.PENDING, RegistrationStatus.APPROVED] },
+            }).exec();
+
+            if (existingRequest) {
+                throw new BadRequestException('You already have a pending or approved registration request');
+            }
+
+            // Check if user is already a field owner
+            const existingProfile = await this.fieldOwnerProfileModel.findOne({
+                user: new Types.ObjectId(userId),
+            }).exec();
+
+            if (existingProfile) {
+                throw new BadRequestException('You are already a field owner');
+            }
+
+            // Create registration request
+            const registrationRequest = new this.registrationRequestModel({
+                userId: new Types.ObjectId(userId),
+                personalInfo: dto.personalInfo,
+                documents: dto.documents,
+                status: RegistrationStatus.PENDING,
+                submittedAt: new Date(),
+            });
+
+            const savedRequest = await registrationRequest.save();
+
+            // Send notification email
+            try {
+                const user = await this.userModel.findById(userId).exec();
+                if (user) {
+                    await this.emailService.sendFieldOwnerRegistrationSubmitted(user.email, user.fullName);
+                }
+            } catch (emailError) {
+                this.logger.warn('Failed to send registration email', emailError);
+            }
+
+            return this.mapToRegistrationResponseDto(savedRequest);
+        } catch (error) {
+            if (error instanceof BadRequestException) {
+                throw error;
+            }
+            this.logger.error('Error creating registration request', error);
+            throw new InternalServerErrorException('Failed to create registration request');
+        }
+    }
+
+    /**
+     * Get registration request by ID
+     */
+    async getRegistrationRequest(requestId: string): Promise<FieldOwnerRegistrationResponseDto> {
+        try {
+            const request = await this.registrationRequestModel
+                .findById(requestId)
+                .populate('userId', 'fullName email phone')
+                .populate('reviewedBy', 'fullName email')
+                .exec();
+
+            if (!request) {
+                throw new NotFoundException('Registration request not found');
+            }
+
+            return this.mapToRegistrationResponseDto(request);
+        } catch (error) {
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            this.logger.error('Error getting registration request', error);
+            throw new InternalServerErrorException('Failed to get registration request');
+        }
+    }
+
+    /**
+     * Get user's own registration request
+     */
+    async getMyRegistrationRequest(userId: string): Promise<FieldOwnerRegistrationResponseDto | null> {
+        try {
+            const request = await this.registrationRequestModel
+                .findOne({ userId: new Types.ObjectId(userId) })
+                .sort({ submittedAt: -1 })
+                .populate('reviewedBy', 'fullName email')
+                .exec();
+
+            if (!request) {
+                return null;
+            }
+
+            return this.mapToRegistrationResponseDto(request);
+        } catch (error) {
+            this.logger.error('Error getting my registration request', error);
+            throw new InternalServerErrorException('Failed to get registration request');
+        }
+    }
+
+    /**
+     * Approve registration request and create FieldOwnerProfile
+     */
+    async approveRegistrationRequest(requestId: string, adminId: string, dto: ApproveFieldOwnerRegistrationDto): Promise<FieldOwnerProfileDto> {
+        const session = await this.fieldModel.db.startSession();
+        session.startTransaction();
+
+        try {
+            const request = await this.registrationRequestModel.findById(requestId).session(session).exec();
+
+            if (!request) {
+                throw new NotFoundException('Registration request not found');
+            }
+
+            if (request.status !== RegistrationStatus.PENDING) {
+                throw new BadRequestException(`Cannot approve request with status: ${request.status}`);
+            }
+
+            // Check if user already has a profile
+            const existingProfile = await this.fieldOwnerProfileModel
+                .findOne({ user: request.userId })
+                .session(session)
+                .exec();
+
+            if (existingProfile) {
+                throw new BadRequestException('User already has a field owner profile');
+            }
+
+            // Update user role to FIELD_OWNER
+            await this.userModel.findByIdAndUpdate(
+                request.userId,
+                { role: UserRole.FIELD_OWNER },
+                { session }
+            ).exec();
+
+            // Create FieldOwnerProfile from registration request
+            // Only include public/operational info - sensitive data stays in request only
+            const fieldOwnerProfile = new this.fieldOwnerProfileModel({
+                user: request.userId,
+                facilityName: 'Cơ sở thể thao', // Field owner will update this later
+                facilityLocation: '', // Field owner will update this later
+                supportedSports: [], // Will be set when fields are created
+                description: 'Chủ sân đã đăng ký',
+                amenities: [],
+                rating: 0,
+                totalReviews: 0,
+                isVerified: true,
+                verifiedAt: new Date(),
+                verifiedBy: new Types.ObjectId(adminId),
+                verificationDocument: request.documents?.businessLicense || request.documents?.idFront,
+                contactPhone: '', // Will be updated by field owner
+            });
+
+            const savedProfile = await fieldOwnerProfile.save({ session });
+
+            // Update registration request status
+            request.status = RegistrationStatus.APPROVED;
+            request.reviewedAt = new Date();
+            request.reviewedBy = new Types.ObjectId(adminId);
+            await request.save({ session });
+
+            await session.commitTransaction();
+
+            // Send notification email
+            try {
+                const user = await this.userModel.findById(request.userId).exec();
+                if (user) {
+                    await this.emailService.sendFieldOwnerRegistrationApproved(user.email, user.fullName);
+                }
+            } catch (emailError) {
+                this.logger.warn('Failed to send approval email', emailError);
+            }
+
+            // Populate and return
+            const populatedProfile = await this.fieldOwnerProfileModel
+                .findById(savedProfile._id)
+                .populate('user', 'fullName phone email')
+                .exec();
+
+            return this.mapToFieldOwnerProfileDto(populatedProfile);
+        } catch (error) {
+            await session.abortTransaction();
+            if (error instanceof NotFoundException || error instanceof BadRequestException) {
+                throw error;
+            }
+            this.logger.error('Error approving registration request', error);
+            throw new InternalServerErrorException('Failed to approve registration request');
+        } finally {
+            session.endSession();
+        }
+    }
+
+    /**
+     * Reject registration request
+     */
+    async rejectRegistrationRequest(requestId: string, adminId: string, dto: RejectFieldOwnerRegistrationDto): Promise<FieldOwnerRegistrationResponseDto> {
+        try {
+            const request = await this.registrationRequestModel.findById(requestId).exec();
+
+            if (!request) {
+                throw new NotFoundException('Registration request not found');
+            }
+
+            if (request.status !== RegistrationStatus.PENDING) {
+                throw new BadRequestException(`Cannot reject request with status: ${request.status}`);
+            }
+
+            request.status = RegistrationStatus.REJECTED;
+            request.rejectionReason = dto.reason;
+            request.reviewedAt = new Date();
+            request.reviewedBy = new Types.ObjectId(adminId);
+
+            const savedRequest = await request.save();
+
+            // Send notification email
+            try {
+                const user = await this.userModel.findById(request.userId).exec();
+                if (user) {
+                    await this.emailService.sendFieldOwnerRegistrationRejected(user.email, user.fullName, dto.reason);
+                }
+            } catch (emailError) {
+                this.logger.warn('Failed to send rejection email', emailError);
+            }
+
+            return this.mapToRegistrationResponseDto(savedRequest);
+        } catch (error) {
+            if (error instanceof NotFoundException || error instanceof BadRequestException) {
+                throw error;
+            }
+            this.logger.error('Error rejecting registration request', error);
+            throw new InternalServerErrorException('Failed to reject registration request');
+        }
+    }
+
+    /**
+     * Get pending registration requests (Admin only)
+     */
+    async getPendingRegistrationRequests(page: number = 1, limit: number = 10): Promise<{
+        data: FieldOwnerRegistrationResponseDto[];
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+            totalPages: number;
+        };
+    }> {
+        try {
+            const skip = (page - 1) * limit;
+
+            const [requests, total] = await Promise.all([
+                this.registrationRequestModel
+                    .find({ status: RegistrationStatus.PENDING })
+                    .sort({ submittedAt: -1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .populate('userId', 'fullName email phone')
+                    .exec(),
+                this.registrationRequestModel.countDocuments({ status: RegistrationStatus.PENDING }).exec(),
+            ]);
+
+            return {
+                data: requests.map(req => this.mapToRegistrationResponseDto(req)),
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    totalPages: Math.ceil(total / limit),
+                },
+            };
+        } catch (error) {
+            this.logger.error('Error getting pending registration requests', error);
+            throw new InternalServerErrorException('Failed to get pending registration requests');
+        }
+    }
+
+    /**
+     * Map registration request to response DTO
+     */
+    private mapToRegistrationResponseDto(request: any): FieldOwnerRegistrationResponseDto {
+        return {
+            id: request._id.toString(),
+            userId: request.userId?._id?.toString() || request.userId?.toString() || '',
+            ownerType: request.ownerType,
+            personalInfo: request.personalInfo,
+            documents: request.documents,
+
+            // eKYC fields
+            ekycSessionId: request.ekycSessionId,
+            ekycStatus: request.ekycStatus,
+            ekycVerifiedAt: request.ekycVerifiedAt,
+            ekycData: request.ekycData,
+
+            // Status
+            status: request.status,
+
+            // Facility information
+            facilityName: request.facilityName,
+            facilityLocation: request.facilityLocation,
+            supportedSports: request.supportedSports,
+            description: request.description,
+            amenities: request.amenities,
+            verificationDocument: request.verificationDocument,
+            businessHours: request.businessHours,
+            contactPhone: request.contactPhone,
+            website: request.website,
+
+            // Audit fields
+            rejectionReason: request.rejectionReason,
+            submittedAt: request.submittedAt,
+            processedAt: request.processedAt,
+            processedBy: request.processedBy?._id?.toString() || request.processedBy?.toString() || undefined,
+            reviewedAt: request.reviewedAt,
+            reviewedBy: request.reviewedBy?._id?.toString() || request.reviewedBy?.toString() || undefined,
+        };
+    }
+
+    // ============================================================================
+    // BANK ACCOUNT OPERATIONS
+    // ============================================================================
+
+    /**
+     * Add bank account for field owner with PayOS validation
+     */
+    async addBankAccount(fieldOwnerId: string, dto: CreateBankAccountDto): Promise<BankAccountResponseDto> {
+        try {
+            // Verify field owner exists
+            const fieldOwnerProfile = await this.fieldOwnerProfileModel.findById(fieldOwnerId).exec();
+            if (!fieldOwnerProfile) {
+                throw new NotFoundException('Field owner profile not found');
+            }
+
+            // Validate bank account via PayOS
+            const validationResult = await this.payosService.validateBankAccount(
+                dto.bankCode,
+                dto.accountNumber
+            );
+
+            if (!validationResult.isValid) {
+                throw new BadRequestException('Bank account validation failed. Please check your account number and bank code.');
+            }
+
+            // Normalize account names for comparison (uppercase, remove diacritics)
+            const normalizeName = (name: string) => {
+                return name
+                    .toUpperCase()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '') // Remove diacritics
+                    .trim();
+            };
+
+            const providedName = normalizeName(dto.accountName);
+            const payosName = normalizeName(validationResult.accountName);
+
+            if (providedName !== payosName) {
+                this.logger.warn(
+                    `Account name mismatch: provided="${dto.accountName}", payos="${validationResult.accountName}"`
+                );
+                // Still allow, but mark for admin review
+            }
+
+            // Create bank account
+            const bankAccount = new this.bankAccountModel({
+                fieldOwner: new Types.ObjectId(fieldOwnerId),
+                accountName: dto.accountName,
+                accountNumber: dto.accountNumber,
+                bankCode: dto.bankCode,
+                bankName: dto.bankName,
+                branch: dto.branch,
+                verificationDocument: dto.verificationDocument,
+                status: BankAccountStatus.PENDING,
+                accountNameFromPayOS: validationResult.accountName,
+                isValidatedByPayOS: validationResult.isValid,
+            });
+
+            const savedAccount = await bankAccount.save();
+
+            // Send notification email
+            try {
+                const profile = await this.fieldOwnerProfileModel
+                    .findById(fieldOwnerId)
+                    .populate('user', 'email fullName')
+                    .exec();
+                if (profile?.user) {
+                    await this.emailService.sendBankAccountSubmitted(
+                        (profile.user as any).email,
+                        (profile.user as any).fullName
+                    );
+                }
+            } catch (emailError) {
+                this.logger.warn('Failed to send bank account email', emailError);
+            }
+
+            return this.mapToBankAccountResponseDto(savedAccount);
+        } catch (error) {
+            if (error instanceof NotFoundException || error instanceof BadRequestException) {
+                throw error;
+            }
+            this.logger.error('Error adding bank account', error);
+            throw new InternalServerErrorException('Failed to add bank account');
+        }
+    }
+
+    /**
+     * Validate bank account via PayOS (standalone validation)
+     */
+    async verifyBankAccountViaPayOS(bankCode: string, accountNumber: string): Promise<PayOSBankAccountValidationResponseDto> {
+        try {
+            const result = await this.payosService.validateBankAccount(bankCode, accountNumber);
+            return {
+                isValid: result.isValid,
+                accountName: result.accountName,
+            };
+        } catch (error) {
+            this.logger.error('Error validating bank account via PayOS', error);
+            throw new InternalServerErrorException('Failed to validate bank account');
+        }
+    }
+
+    /**
+     * Update bank account status (Admin only)
+     */
+    async updateBankAccountStatus(accountId: string, status: BankAccountStatus, adminId: string, notes?: string, rejectionReason?: string): Promise<BankAccountResponseDto> {
+        try {
+            const bankAccount = await this.bankAccountModel.findById(accountId).exec();
+
+            if (!bankAccount) {
+                throw new NotFoundException('Bank account not found');
+            }
+
+            bankAccount.status = status;
+            bankAccount.verifiedAt = new Date();
+            bankAccount.verifiedBy = new Types.ObjectId(adminId);
+
+            if (rejectionReason) {
+                bankAccount.rejectionReason = rejectionReason;
+            }
+
+            const savedAccount = await bankAccount.save();
+
+            // Send notification email
+            try {
+                const profile = await this.fieldOwnerProfileModel
+                    .findById(bankAccount.fieldOwner)
+                    .populate('user', 'email fullName')
+                    .exec();
+                if (profile?.user) {
+                    const email = (profile.user as any).email;
+                    const fullName = (profile.user as any).fullName;
+                    if (status === BankAccountStatus.VERIFIED) {
+                        await this.emailService.sendBankAccountVerified(email, fullName);
+                    } else if (status === BankAccountStatus.REJECTED) {
+                        await this.emailService.sendBankAccountRejected(email, fullName, rejectionReason || '');
+                    }
+                }
+            } catch (emailError) {
+                this.logger.warn('Failed to send bank account status email', emailError);
+            }
+
+            return this.mapToBankAccountResponseDto(savedAccount);
+        } catch (error) {
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            this.logger.error('Error updating bank account status', error);
+            throw new InternalServerErrorException('Failed to update bank account status');
+        }
+    }
+
+    /**
+     * Get bank accounts by field owner
+     */
+    async getBankAccountsByFieldOwner(fieldOwnerId: string): Promise<BankAccountResponseDto[]> {
+        try {
+            const bankAccounts = await this.bankAccountModel
+                .find({ fieldOwner: new Types.ObjectId(fieldOwnerId) })
+                .sort({ createdAt: -1 })
+                .populate('verifiedBy', 'fullName email')
+                .exec();
+
+            return bankAccounts.map(account => this.mapToBankAccountResponseDto(account));
+        } catch (error) {
+            this.logger.error('Error getting bank accounts', error);
+            throw new InternalServerErrorException('Failed to get bank accounts');
+        }
+    }
+
+    /**
+     * Map bank account to response DTO
+     */
+    private mapToBankAccountResponseDto(account: any): BankAccountResponseDto {
+        return {
+            id: account._id.toString(),
+            fieldOwner: account.fieldOwner?.toString() || '',
+            accountName: account.accountName,
+            accountNumber: account.accountNumber,
+            bankCode: account.bankCode,
+            bankName: account.bankName,
+            branch: account.branch,
+            verificationDocument: account.verificationDocument,
+            status: account.status,
+            isDefault: account.isDefault ?? false,
+            accountNameFromPayOS: account.accountNameFromPayOS,
+            isValidatedByPayOS: account.isValidatedByPayOS,
+            verifiedAt: account.verifiedAt,
+            verifiedBy: account.verifiedBy?._id?.toString() || account.verifiedBy?.toString() || undefined,
+            notes: account.notes,
+            rejectionReason: account.rejectionReason,
+            createdAt: account.createdAt,
+            updatedAt: account.updatedAt,
         };
     }
 }

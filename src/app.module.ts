@@ -9,6 +9,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
 import { FieldsModule } from './modules/fields/fields.module';
+import { FieldOwnerModule } from './modules/field-owner/field-owner.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
 import { TournamentsModule } from './modules/tournaments/tournaments.module';
@@ -50,6 +51,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     UsersModule,
     ProfilesModule,
     FieldsModule,
+    FieldOwnerModule,
     BookingsModule,
     TransactionsModule,
     TournamentsModule,

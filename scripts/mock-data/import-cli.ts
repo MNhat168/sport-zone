@@ -3,7 +3,7 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../../src/app.module';
 import { AmenitiesService } from '../../src/modules/amenities/amenities.service';
-import { FieldsService } from '@modules/fields/fields.service';
+import { FieldOwnerService } from '@modules/field-owner/field-owner.service';
 
 const amenitiesLibrary = require('./amenities-library.json');
 const fieldLibrary = require('./field-library.json');
@@ -20,12 +20,12 @@ interface ImportOptions {
 class CLIImporter {
   private app: any;
   private amenitiesService: AmenitiesService;
-  private fieldsService: FieldsService;
+  private fieldOwnerService: FieldOwnerService;
   async initialize() {
     console.log('🚀 Initializing CLI Mock Data Importer...');
     this.app = await NestFactory.createApplicationContext(AppModule);
     this.amenitiesService = this.app.get(AmenitiesService);
-    this.fieldsService = this.app.get(FieldsService);
+    this.fieldOwnerService = this.app.get(FieldOwnerService);
     console.log('✅ Application context initialized');
   }
 
@@ -83,12 +83,12 @@ class CLIImporter {
         try {
           // Skip duplicates by name (and sportType) when enabled
           if (options.skipDuplicates !== false) {
-            const existing = await this.fieldsService.findAll({
+            const existing = await this.fieldOwnerService.findByOwner(fieldData.owner, {
               name: fieldData.name,
               sportType: fieldData.sportType,
             });
 
-            if (existing && existing.length > 0) {
+            if (existing?.fields?.length > 0) {
               console.log(`⏭️  Skipping existing field: ${fieldData.name}`);
               skippedCount++;
               continue;
@@ -119,7 +119,7 @@ class CLIImporter {
           // Owner comes from JSON
           const ownerId: string = fieldData.owner;
 
-          await this.fieldsService.create(createFieldDto, ownerId);
+          await this.fieldOwnerService.create(createFieldDto, ownerId);
           console.log(`✅ Imported field: ${fieldData.name}`);
           importedCount++;
 
