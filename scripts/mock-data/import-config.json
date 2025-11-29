@@ -1,9 +1,11 @@
 {
   "enabled": {
-    "amenities": true,
+    "amenities": false,
     "users": false,
     "fields": false,
-    "bookings": false,
+    "bookings": true,
+    "schedules": true,
+    "transactions": true,
     "reviews": false
   },
   "options": {
@@ -12,6 +14,21 @@
     "batchSize": 50
   },
   "amenities": {
+    "enabled": false,
+    "clearExisting": false,
+    "skipDuplicates": true
+  },
+  "bookings": {
+    "enabled": true,
+    "clearExisting": false,
+    "skipDuplicates": true
+  },
+  "schedules": {
+    "enabled": true,
+    "clearExisting": false,
+    "skipDuplicates": true
+  },
+  "transactions": {
     "enabled": true,
     "clearExisting": false,
     "skipDuplicates": true

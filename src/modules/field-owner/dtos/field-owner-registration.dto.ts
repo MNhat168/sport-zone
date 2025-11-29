@@ -27,24 +27,6 @@ class PersonalInfoDto {
 }
 
 class DocumentsDto {
-  @ApiPropertyOptional({ 
-    example: 'https://s3.../cccd-front.jpg', 
-    description: 'URL ảnh mặt trước CCCD (deprecated - use eKYC instead)',
-    deprecated: true 
-  })
-  @IsOptional()
-  @IsUrl()
-  idFront?: string; // @deprecated - replaced by eKYC
-
-  @ApiPropertyOptional({ 
-    example: 'https://s3.../cccd-back.jpg', 
-    description: 'URL ảnh mặt sau CCCD (deprecated - use eKYC instead)',
-    deprecated: true 
-  })
-  @IsOptional()
-  @IsUrl()
-  idBack?: string; // @deprecated - replaced by eKYC
-
   @ApiPropertyOptional({ example: 'https://s3.../business-license.jpg', description: 'URL giấy ĐKKD (cho doanh nghiệp/hộ KD)' })
   @IsOptional()
   @IsUrl()
@@ -57,11 +39,11 @@ export class CreateFieldOwnerRegistrationDto {
   @Type(() => PersonalInfoDto)
   personalInfo: PersonalInfoDto;
 
-  @ApiPropertyOptional({ description: 'Giấy tờ pháp lý (deprecated - use eKYC for identity verification)' })
+  @ApiPropertyOptional({ description: 'Giấy tờ pháp lý (giấy ĐKKD cho doanh nghiệp/hộ KD). Identity dùng eKYC.' })
   @IsOptional()
   @ValidateNested()
   @Type(() => DocumentsDto)
-  documents?: DocumentsDto; // @deprecated - idFront/idBack replaced by eKYC, businessLicense still used
+  documents?: DocumentsDto; // Business documents only; identity docs handled via eKYC
 
   @ApiPropertyOptional({ 
     example: 'ekyc-session-12345', 
@@ -79,13 +61,15 @@ export class CreateFieldOwnerRegistrationDto {
   @Type(() => PersonalInfoDto)
   ekycData?: PersonalInfoDto;
 
-  @ApiProperty({ example: 'Sân bóng Phú Nhuận', description: 'Tên cơ sở vật chất' })
+  @ApiPropertyOptional({ example: 'Sân bóng Phú Nhuận', description: 'Tên cơ sở vật chất (có thể điền sau khi approve)' })
+  @IsOptional()
   @IsString()
-  facilityName: string;
+  facilityName?: string;
 
-  @ApiProperty({ example: 'District 3, Ho Chi Minh City', description: 'Địa điểm cơ sở vật chất' })
+  @ApiPropertyOptional({ example: 'District 3, Ho Chi Minh City', description: 'Địa điểm cơ sở vật chất (có thể điền sau khi approve)' })
+  @IsOptional()
   @IsString()
-  facilityLocation: string;
+  facilityLocation?: string;
 
   @ApiPropertyOptional({
     type: [String],
@@ -98,9 +82,10 @@ export class CreateFieldOwnerRegistrationDto {
   @IsEnum(SportType, { each: true })
   supportedSports?: SportType[];
 
-  @ApiProperty({ example: 'Cơ sở vật chất hiện đại với sân bóng đá và tennis', description: 'Mô tả cơ sở vật chất' })
+  @ApiPropertyOptional({ example: 'Cơ sở vật chất hiện đại với sân bóng đá và tennis', description: 'Mô tả cơ sở vật chất (có thể điền sau khi approve)' })
+  @IsOptional()
   @IsString()
-  description: string;
+  description?: string;
 
   @ApiPropertyOptional({
     type: [String],
@@ -113,14 +98,6 @@ export class CreateFieldOwnerRegistrationDto {
   amenities?: string[];
 
   @ApiPropertyOptional({
-    example: 'https://example.com/business-license.jpg',
-    description: 'Tài liệu xác minh',
-  })
-  @IsOptional()
-  @IsString()
-  verificationDocument?: string;
-
-  @ApiPropertyOptional({
     example: 'Monday-Sunday: 6:00-22:00',
     description: 'Giờ hoạt động',
   })
@@ -128,14 +105,25 @@ export class CreateFieldOwnerRegistrationDto {
   @IsString()
   businessHours?: string;
 
-  @ApiProperty({ example: '0901234567', description: 'Số điện thoại liên hệ' })
+  @ApiPropertyOptional({ example: '0901234567', description: 'Số điện thoại liên hệ (có thể điền sau khi approve)' })
+  @IsOptional()
   @IsString()
-  contactPhone: string;
+  contactPhone?: string;
 
   @ApiPropertyOptional({ example: 'https://example.com', description: 'Website' })
   @IsOptional()
   @IsString()
   website?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['https://s3.../field1.jpg', 'https://s3.../field2.jpg'],
+    description: 'Danh sách URL ảnh sân (tối thiểu 5 ảnh)',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  fieldImages?: string[];
 }
 
 export class UpdateFieldOwnerRegistrationDto {
@@ -191,14 +179,6 @@ export class UpdateFieldOwnerRegistrationDto {
   @IsArray()
   @IsString({ each: true })
   amenities?: string[];
-
-  @ApiPropertyOptional({
-    example: 'https://example.com/business-license.jpg',
-    description: 'Tài liệu xác minh',
-  })
-  @IsOptional()
-  @IsString()
-  verificationDocument?: string;
 
   @ApiPropertyOptional({
     example: 'Monday-Sunday: 6:00-22:00',
@@ -257,14 +237,6 @@ export class ApproveFieldOwnerRegistrationDto {
   amenities?: string[];
 
   @ApiPropertyOptional({
-    example: 'https://example.com/business-license.jpg',
-    description: 'Tài liệu xác minh',
-  })
-  @IsOptional()
-  @IsString()
-  verificationDocument?: string;
-
-  @ApiPropertyOptional({
     example: 'Monday-Sunday: 6:00-22:00',
     description: 'Giờ hoạt động',
   })
@@ -308,7 +280,7 @@ export class FieldOwnerRegistrationResponseDto {
   personalInfo: PersonalInfoDto;
 
   @ApiPropertyOptional()
-  documents?: DocumentsDto; // @deprecated - idFront/idBack replaced by eKYC
+  documents?: DocumentsDto; // Business documents only; identity docs handled via eKYC
 
   @ApiPropertyOptional()
   ekycSessionId?: string;
@@ -350,12 +322,6 @@ export class FieldOwnerRegistrationResponseDto {
   amenities?: string[];
 
   @ApiPropertyOptional({
-    example: 'https://example.com/business-license.jpg',
-    description: 'Tài liệu xác minh',
-  })
-  verificationDocument?: string;
-
-  @ApiPropertyOptional({
     example: 'Monday-Sunday: 6:00-22:00',
     description: 'Giờ hoạt động',
   })
@@ -366,6 +332,13 @@ export class FieldOwnerRegistrationResponseDto {
 
   @ApiPropertyOptional({ example: 'https://example.com', description: 'Website' })
   website?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['https://s3.../field1.jpg', 'https://s3.../field2.jpg'],
+    description: 'Danh sách URL ảnh sân',
+  })
+  fieldImages?: string[];
 
   @ApiPropertyOptional()
   rejectionReason?: string;

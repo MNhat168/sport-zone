@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Đăng Ký Làm Chủ Sân Đã Được Duyệt - SportZone</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            color: #333333;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #ffffff;
+        }
+
+        .header {
+            text-align: center;
+            padding: 20px 0;
+            border-bottom: 1px solid #eeeeee;
+        }
+
+        .logo {
+            max-width: 150px;
+            height: auto;
+        }
+
+        .content {
+            padding: 30px 20px;
+            line-height: 1.6;
+        }
+
+        .success-box {
+            background-color: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 12px 24px;
+            background-color: #097E52;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            font-size: 12px;
+            color: #777777;
+            border-top: 1px solid #eeeeee;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1
+                style="font-size: 24px; letter-spacing: 4px; background-color: #097E52; color: white; padding: 4px 8px; border-radius: 6px; display: inline-block;">
+                SPORTS ZONE
+            </h1>
+        </div>
+
+        <div class="content">
+            <h2>Xin chào {{fullName}}!</h2>
+            <p>Chúc mừng bạn! Đơn đăng ký làm chủ sân của bạn tại <strong>SportZone</strong> đã được duyệt thành công.</p>
+            
+            <div class="success-box">
+                <p style="margin: 0; font-weight: bold; color: #155724;">✓ Đơn đăng ký của bạn đã được phê duyệt!</p>
+            </div>
+
+            <p>Từ bây giờ, bạn có thể:</p>
+            <ul>
+                <li>Đăng nhập vào hệ thống quản lý của chủ sân</li>
+                <li>Thêm thông tin về sân bóng của bạn</li>
+                <li>Bắt đầu nhận đặt sân từ khách hàng</li>
+                <li>Quản lý lịch đặt sân và thanh toán</li>
+            </ul>
+
+            <p style="text-align: center;">
+                <a href="{{frontendUrl}}/field-owner/dashboard" class="button">Truy cập trang quản lý</a>
+            </p>
+
+            <p>Nếu bạn có bất kỳ câu hỏi nào hoặc cần hỗ trợ, vui lòng liên hệ với chúng tôi qua email hoặc hotline.</p>
+
+            <p>Chúc bạn thành công với việc quản lý sân bóng của mình!</p>
+        </div>
+
+        <div class="footer">
+            <p>© 2025 SportZone. Tất cả các quyền được bảo lưu.</p>
+            <p><a href="{{frontendUrl}}" style="color: #9B1C1C;">{{frontendUrl}}</a></p>
+        </div>
+    </div>
+</body>
+
+</html>
+

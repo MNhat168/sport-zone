@@ -5,6 +5,7 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  Logger,
   Param,
   Patch,
   Post,
@@ -51,6 +52,7 @@ import {
   BankAccountResponseDto,
   CreateBankAccountDto,
   PayOSBankAccountValidationResponseDto,
+  UpdateBankAccountDto,
   UpdateBankAccountStatusDto,
   VerifyBankAccountDto,
 } from './dtos/bank-account.dto';
@@ -70,6 +72,8 @@ import {
 @ApiTags('Field Owner')
 @Controller('field-owner')
 export class FieldOwnerController {
+  private readonly logger = new Logger(FieldOwnerController.name);
+
   constructor(
     private readonly fieldOwnerService: FieldOwnerService,
     private readonly awsS3Service: AwsS3Service,
@@ -150,12 +154,6 @@ export class FieldOwnerController {
     }
     const userId = req.user._id || req.user.id;
     return this.fieldOwnerService.updateFieldOwnerProfile(userId, updateDto);
-  }
-
-  @Get('profile/:id')
-  @ApiOperation({ summary: 'Get field owner profile by ID (public)' })
-  async getFieldOwnerProfile(@Param('id') id: string): Promise<FieldOwnerProfileDto> {
-    return this.fieldOwnerService.getFieldOwnerProfile(id);
   }
 
   @Post('fields')
@@ -321,7 +319,14 @@ export class FieldOwnerController {
     @Body() dto: CreateFieldOwnerRegistrationDto,
   ): Promise<FieldOwnerRegistrationResponseDto> {
     const userId = req.user._id || req.user.id;
-    return this.fieldOwnerService.createRegistrationRequest(userId, dto);
+    this.logger.log(`Creating registration request for user ${userId}`);
+    this.logger.debug('Registration DTO:', JSON.stringify(dto, null, 2));
+    try {
+      return await this.fieldOwnerService.createRegistrationRequest(userId, dto);
+    } catch (error: any) {
+      this.logger.error('Failed to create registration request:', error?.message || error);
+      throw error;
+    }
   }
 
   @Get('registration-request/my')
@@ -379,12 +384,11 @@ export class FieldOwnerController {
   })
   async createEkycSession(
     @Request() req: any,
-    @Body() dto: CreateEkycSessionDto,
+    @Body() _dto: CreateEkycSessionDto,
   ): Promise<EkycSessionResponseDto> {
     const userId = req.user._id || req.user.id;
     const { sessionId, redirectUrl } = await this.ekycService.createEkycSession(
       userId,
-      dto.redirectUrlAfterEkyc,
     );
 
     return { sessionId, redirectUrl };
@@ -474,6 +478,73 @@ export class FieldOwnerController {
     @Body() dto: VerifyBankAccountDto,
   ): Promise<PayOSBankAccountValidationResponseDto> {
     return this.fieldOwnerService.verifyBankAccountViaPayOS(dto.bankCode, dto.accountNumber);
+  }
+
+  @Patch('profile/bank-account/:id')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update bank account for owner' })
+  @ApiParam({ name: 'id', description: 'Bank account ID' })
+  async updateBankAccount(
+    @Request() req: any,
+    @Param('id') accountId: string,
+    @Body() dto: UpdateBankAccountDto,
+  ): Promise<BankAccountResponseDto> {
+    if ((req.user?.role || '').toLowerCase() !== 'field_owner') {
+      throw new ForbiddenException('Access denied. Field owner only.');
+    }
+    const userId = req.user._id || req.user.id;
+    const profile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(userId);
+    if (!profile) {
+      throw new BadRequestException('Field owner profile not found');
+    }
+    return this.fieldOwnerService.updateBankAccount(accountId, profile.id, dto);
+  }
+
+  @Delete('profile/bank-account/:id')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Delete bank account for owner' })
+  @ApiParam({ name: 'id', description: 'Bank account ID' })
+  async deleteBankAccount(
+    @Request() req: any,
+    @Param('id') accountId: string,
+  ): Promise<{ success: boolean; message: string }> {
+    if ((req.user?.role || '').toLowerCase() !== 'field_owner') {
+      throw new ForbiddenException('Access denied. Field owner only.');
+    }
+    const userId = req.user._id || req.user.id;
+    const profile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(userId);
+    if (!profile) {
+      throw new BadRequestException('Field owner profile not found');
+    }
+    return this.fieldOwnerService.deleteBankAccount(accountId, profile.id);
+  }
+
+  @Patch('profile/bank-account/:id/set-default')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Set bank account as default for owner' })
+  @ApiParam({ name: 'id', description: 'Bank account ID' })
+  async setDefaultBankAccount(
+    @Request() req: any,
+    @Param('id') accountId: string,
+  ): Promise<BankAccountResponseDto> {
+    if ((req.user?.role || '').toLowerCase() !== 'field_owner') {
+      throw new ForbiddenException('Access denied. Field owner only.');
+    }
+    const userId = req.user._id || req.user.id;
+    const profile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(userId);
+    if (!profile) {
+      throw new BadRequestException('Field owner profile not found');
+    }
+    return this.fieldOwnerService.setDefaultBankAccount(accountId, profile.id);
+  }
+
+  @Get('profile/:id')
+  @ApiOperation({ summary: 'Get field owner profile by ID (public)' })
+  async getFieldOwnerProfile(@Param('id') id: string): Promise<FieldOwnerProfileDto> {
+    return this.fieldOwnerService.getFieldOwnerProfile(id);
   }
 
   @UseGuards(JwtAccessTokenGuard, RolesGuard)

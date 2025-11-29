@@ -7,6 +7,7 @@ import * as cookieParser from 'cookie-parser';
 import { ResponseInterceptor } from './interceptors/response.interceptor';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { execSync } from 'child_process';
 
 async function bootstrap() {
   const logger = new Logger(bootstrap.name);
@@ -118,10 +119,32 @@ async function bootstrap() {
     },
   });
 
-  await app.listen(port, () => {
-    logger.log(`🚀 Server running on: http://localhost:${port}`);
-    logger.log(`📚 Swagger docs available at: http://localhost:${port}/api/docs`);
-  });
+  try {
+    await app.listen(port, () => {
+      logger.log(`🚀 Server running on: http://localhost:${port}`);
+      logger.log(`📚 Swagger docs available at: http://localhost:${port}/api/docs`);
+    });
+  } catch (error: any) {
+    if (error.code === 'EADDRINUSE') {
+      logger.error(`❌ Port ${port} is already in use. Killing existing process...`);
+      // Try to kill the process using the port
+      try {
+        execSync(`lsof -ti:${port} | xargs kill -9`, { stdio: 'ignore' });
+        logger.log(`✅ Killed process on port ${port}. Retrying...`);
+        // Retry after a short delay
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await app.listen(port, () => {
+          logger.log(`🚀 Server running on: http://localhost:${port}`);
+          logger.log(`📚 Swagger docs available at: http://localhost:${port}/api/docs`);
+        });
+      } catch (killError) {
+        logger.error(`❌ Failed to free port ${port}. Please kill the process manually.`);
+        process.exit(1);
+      }
+    } else {
+      throw error;
+    }
+  }
 }
 
 bootstrap();
