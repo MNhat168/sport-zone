@@ -6,6 +6,7 @@ import {
   FieldOwnerRegistrationRequest,
   FieldOwnerRegistrationRequestSchema,
 } from '../field-owner/entities/field-owner-registration-request.entity';
+import { User, UserSchema } from '../users/entities/user.entity';
 
 /**
  * Module xử lý tích hợp didit eKYC
@@ -17,6 +18,10 @@ import {
       {
         name: FieldOwnerRegistrationRequest.name,
         schema: FieldOwnerRegistrationRequestSchema,
+      },
+      {
+        name: User.name,
+        schema: UserSchema,
       },
     ]),
   ],

@@ -67,6 +67,49 @@ export class UpdateBankAccountStatusDto {
   rejectionReason?: string;
 }
 
+export class UpdateBankAccountDto {
+  @ApiPropertyOptional({ example: 'NGUYEN VAN A', description: 'Tên chủ tài khoản (phải trùng với CCCD)' })
+  @IsOptional()
+  @IsString()
+  accountName?: string;
+
+  @ApiPropertyOptional({ example: '1234567890', description: 'Số tài khoản' })
+  @IsOptional()
+  @IsString()
+  accountNumber?: string;
+
+  @ApiPropertyOptional({ example: 'VCB', description: 'Mã ngân hàng (PayOS bank code)' })
+  @IsOptional()
+  @IsString()
+  bankCode?: string;
+
+  @ApiPropertyOptional({ example: 'Vietcombank', description: 'Tên ngân hàng' })
+  @IsOptional()
+  @IsString()
+  bankName?: string;
+
+  @ApiPropertyOptional({ example: 'Chi nhánh Hà Nội', description: 'Chi nhánh' })
+  @IsOptional()
+  @IsString()
+  branch?: string;
+
+  @ApiPropertyOptional({ example: 'https://s3.../bank-screenshot.jpg', description: 'URL ảnh chụp màn hình Internet Banking' })
+  @IsOptional()
+  @IsUrl()
+  verificationDocument?: string;
+
+  @ApiPropertyOptional({ example: true, description: 'Đặt làm tài khoản rút tiền mặc định' })
+  @IsOptional()
+  @IsBoolean()
+  isDefault?: boolean;
+}
+
+export class SetDefaultBankAccountDto {
+  @ApiProperty({ example: true, description: 'Đặt làm tài khoản rút tiền mặc định' })
+  @IsBoolean()
+  isDefault: boolean;
+}
+
 export class BankAccountResponseDto {
   @ApiProperty()
   id: string;

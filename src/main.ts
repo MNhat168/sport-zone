@@ -7,6 +7,7 @@ import * as cookieParser from 'cookie-parser';
 import { ResponseInterceptor } from './interceptors/response.interceptor';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { execSync } from 'child_process';
 
 async function bootstrap() {
   const logger = new Logger(bootstrap.name);
@@ -20,8 +21,24 @@ async function bootstrap() {
   // }, 5000);
 
   app.enableCors({
-    origin: ['http://localhost:5173', 'http://localhost:5174', 'https://sport-zone-fe-deploy.vercel.app'],
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      
+      const allowedPatterns = [
+        /^https:\/\/sport-zone-fe-deploy\.vercel\.app$/,  // Production
+        /^https:\/\/.*\.vercel\.app$/,                     // All Vercel deployments
+        /^http:\/\/localhost:\d+$/,                        // All localhost ports
+      ];
+      
+      const isAllowed = allowedPatterns.some(pattern => pattern.test(origin));
+      
+      if (isAllowed) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
     credentials: true,
   });
@@ -102,10 +119,32 @@ async function bootstrap() {
     },
   });
 
-  await app.listen(port, () => {
-    logger.log(`🚀 Server running on: http://localhost:${port}`);
-    logger.log(`📚 Swagger docs available at: http://localhost:${port}/api/docs`);
-  });
+  try {
+    await app.listen(port, () => {
+      logger.log(`🚀 Server running on: http://localhost:${port}`);
+      logger.log(`📚 Swagger docs available at: http://localhost:${port}/api/docs`);
+    });
+  } catch (error: any) {
+    if (error.code === 'EADDRINUSE') {
+      logger.error(`❌ Port ${port} is already in use. Killing existing process...`);
+      // Try to kill the process using the port
+      try {
+        execSync(`lsof -ti:${port} | xargs kill -9`, { stdio: 'ignore' });
+        logger.log(`✅ Killed process on port ${port}. Retrying...`);
+        // Retry after a short delay
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await app.listen(port, () => {
+          logger.log(`🚀 Server running on: http://localhost:${port}`);
+          logger.log(`📚 Swagger docs available at: http://localhost:${port}/api/docs`);
+        });
+      } catch (killError) {
+        logger.error(`❌ Failed to free port ${port}. Please kill the process manually.`);
+        process.exit(1);
+      }
+    } else {
+      throw error;
+    }
+  }
 }
 
 bootstrap();

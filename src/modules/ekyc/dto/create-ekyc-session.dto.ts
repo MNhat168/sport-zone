@@ -1,20 +1,8 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsUrl } from 'class-validator';
-
 /**
  * DTO cho việc tạo eKYC session
+ *
+ * Hiện tại backend không còn phụ thuộc vào redirect URL do FE gửi lên.
+ * Frontend chỉ cần gọi endpoint này để lấy `sessionId` và `redirectUrl`
+ * từ didit rồi tự handle redirect/popup + polling trạng thái.
  */
-export class CreateEkycSessionDto {
-  /**
-   * URL để redirect sau khi hoàn thành eKYC
-   * @example "https://sportzone.com/field-owner/registration"
-   */
-  @ApiPropertyOptional({
-    description: 'URL để redirect sau khi hoàn thành eKYC',
-    example: 'https://sportzone.com/field-owner/registration',
-  })
-  @IsOptional()
-  @IsString()
-  @IsUrl()
-  redirectUrlAfterEkyc?: string;
-}
+export class CreateEkycSessionDto {}

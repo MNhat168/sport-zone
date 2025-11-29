@@ -10,6 +10,7 @@ import { Model } from 'mongoose';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { FieldOwnerRegistrationRequest } from '../field-owner/entities/field-owner-registration-request.entity';
+import { User } from '../users/entities/user.entity';
 
 /**
  * Service xử lý tích hợp didit eKYC
@@ -27,31 +28,33 @@ export class EkycService {
     private readonly configService: ConfigService,
     @InjectModel(FieldOwnerRegistrationRequest.name)
     private readonly registrationRequestModel: Model<FieldOwnerRegistrationRequest>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<User>,
     private readonly httpService: HttpService,
   ) {
-    this.diditApiKey = this.configService.get<string>('didit.apiKey') || '';
+    this.diditApiKey = this.configService.get<string>('app.didit.apiKey') || '';
     this.diditApiSecret =
-      this.configService.get<string>('didit.apiSecret') || '';
+      this.configService.get<string>('app.didit.apiSecret') || '';
     this.diditBaseUrl =
-      this.configService.get<string>('didit.baseUrl') ||
-      'https://api.didit.com';
+      this.configService.get<string>('app.didit.baseUrl') ||
+      'https://verification.didit.me';
     this.isMockMode =
-      this.configService.get<string>('didit.mockMode') === 'true';
+      this.configService.get<string>('app.didit.mockMode') === 'true';
 
     if (this.isMockMode) {
       this.logger.warn('⚠️  didit eKYC running in MOCK MODE');
+    } else if (!this.diditApiKey) {
+      this.logger.warn('⚠️  DIDIT_API_KEY is not set. Consider enabling MOCK MODE for local development.');
     }
   }
 
   /**
    * Tạo eKYC session với didit
    * @param userId - ID của user đang đăng ký
-   * @param redirectUrlAfterEkyc - URL để redirect sau khi hoàn thành eKYC (optional)
    * @returns sessionId và redirectUrl
    */
   async createEkycSession(
     userId: string,
-    redirectUrlAfterEkyc?: string,
   ): Promise<{ sessionId: string; redirectUrl: string }> {
     try {
       // Mock mode for development/testing
@@ -72,7 +75,6 @@ export class EkycService {
           `${this.diditBaseUrl}/v1/ekyc/sessions`,
           {
             userId,
-            redirectUrl: redirectUrlAfterEkyc,
             // Các params khác theo didit docs
             // locale: 'vi',
             // documentTypes: ['NATIONAL_ID'],
@@ -91,8 +93,18 @@ export class EkycService {
       this.logger.log(`Created eKYC session ${sessionId} for user ${userId}`);
 
       return { sessionId, redirectUrl };
-    } catch (error) {
-      this.logger.error('Failed to create eKYC session:', error);
+    } catch (error: any) {
+      const errorMessage = error?.response?.data?.message || error?.message || 'Unknown error';
+      const errorStatus = error?.response?.status || error?.code;
+      
+      this.logger.error('Failed to create eKYC session:', {
+        message: errorMessage,
+        status: errorStatus,
+        url: `${this.diditBaseUrl}/v1/ekyc/sessions`,
+        hasApiKey: !!this.diditApiKey,
+        isMockMode: this.isMockMode,
+      });
+      
       throw new InternalServerErrorException(
         'Không thể tạo phiên xác thực eKYC. Vui lòng thử lại sau.',
       );
@@ -169,6 +181,11 @@ export class EkycService {
         ekycData,
         verifiedAt,
       );
+
+      // Nếu đã verified và có dữ liệu, đồng bộ sang User
+      if (status === 'verified' && ekycData) {
+        await this.syncUserFromEkyc(sessionId, ekycData);
+      }
 
       return { status, data: ekycData, verifiedAt };
     } catch (error) {
@@ -258,6 +275,41 @@ export class EkycService {
     await request.save();
     this.logger.log(
       `Updated registration ${request._id} with eKYC status: ${status}`,
+    );
+  }
+
+  /**
+   * Đồng bộ một số thông tin từ eKYC sang User (không thay đổi schema User)
+   */
+  private async syncUserFromEkyc(
+    sessionId: string,
+    ekycData: { fullName: string; idNumber: string; address: string },
+  ): Promise<void> {
+    const request = await this.registrationRequestModel.findOne({
+      ekycSessionId: sessionId,
+    });
+
+    if (!request) {
+      this.logger.warn(
+        `No registration found for eKYC session ${sessionId} when syncing user`,
+      );
+      return;
+    }
+
+    const userId = request.userId;
+    if (!userId) {
+      return;
+    }
+
+    await this.userModel.updateOne(
+      { _id: userId },
+      {
+        fullName: ekycData.fullName,
+      },
+    );
+
+    this.logger.log(
+      `Synced user ${userId.toString()} data from eKYC session ${sessionId}`,
     );
   }
 

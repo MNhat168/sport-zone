@@ -33,18 +33,27 @@ export class AuthController {
     rememberMe: boolean
   ): void {
     const isProduction = process.env.NODE_ENV === 'production';
-    
+
     // Đọc thời gian hết hạn từ ENV (cùng giá trị với JwtService)
     const accessExpCfg = this.configService.get<string>('JWT_ACCESS_TOKEN_EXPIRATION_TIME') ?? '1d';
     const refreshExpCfg = this.configService.get<string>('JWT_REFRESH_TOKEN_EXPIRATION_TIME') ?? '7d';
     const accessMs = this.parseExpirationToMs(accessExpCfg);
     const refreshMs = this.parseExpirationToMs(refreshExpCfg);
-    
-    // Cấu hình cookie chung
+
+    /**
+     * Cấu hình cookie chung
+     *
+     * Lưu ý về SameSite:
+     * - DEV (localhost): dùng 'lax' để đơn giản, không bắt buộc HTTPS
+     * - PROD (Vercel FE gọi Railway BE khác domain): bắt buộc dùng 'none' + secure: true
+     *   nếu không browser sẽ KHÔNG lưu/gửi cookie cross-site → JwtAccessTokenGuard luôn nhận user = null
+     */
+    const sameSiteOption = isProduction ? 'none' : 'lax';
+
     const cookieOptions = {
-      httpOnly: true,      // Không thể truy cập từ JavaScript (bảo mật)
-      secure: isProduction, // Chỉ gửi qua HTTPS ở production
-      sameSite: 'strict' as const, // Chống CSRF attack
+      httpOnly: true,          // Không thể truy cập từ JavaScript (bảo mật)
+      secure: isProduction,    // Chỉ gửi qua HTTPS ở production (Railway dùng HTTPS)
+      sameSite: sameSiteOption as 'lax' | 'none',
       path: '/',
     };
 

@@ -1,8 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
-import { User } from '../../users/entities/user.entity';
 import { BaseEntity } from 'src/common/entities/base.entity';
-import { SportType } from 'src/common/enums/sport-type.enum';
+import { FacilityInfo, FacilityInfoSchema } from './facility-info.entity';
 
 export enum OwnerType {
   INDIVIDUAL = 'individual',
@@ -40,20 +39,15 @@ export class FieldOwnerRegistrationRequest extends BaseEntity {
     address: string;
   };
 
-  // Documents
-  // @deprecated idFront and idBack are deprecated - use eKYC instead
+  // Business documents (e.g. business license). Identity docs are handled by eKYC.
   @Prop({
     type: {
-      idFront: { type: String, required: false }, // @deprecated - replaced by eKYC
-      idBack: { type: String, required: false }, // @deprecated - replaced by eKYC
       businessLicense: { type: String, required: false },
     },
-    required: false, // Made optional to support eKYC flow
+    required: false,
     _id: false,
   })
   documents?: {
-    idFront?: string; // @deprecated - URL to CCCD front image (replaced by eKYC)
-    idBack?: string; // @deprecated - URL to CCCD back image (replaced by eKYC)
     businessLicense?: string; // URL to business license (for business/household)
   };
 
@@ -83,33 +77,12 @@ export class FieldOwnerRegistrationRequest extends BaseEntity {
   };
 
   // Facility Information
-  @Prop({ type: String, required: true })
-  
-  facilityName: string;
+  @Prop({ type: FacilityInfoSchema, required: true })
+  facility: FacilityInfo;
 
-  @Prop({ type: String, required: true })
-  facilityLocation: string;
-
-  @Prop({ type: [String], enum: SportType })
-  supportedSports?: SportType[];
-
-  @Prop({ type: String, required: true })
-  description: string;
-
+  // Field Images - Array of all uploaded field image URLs
   @Prop({ type: [String] })
-  amenities?: string[];
-
-  @Prop({ type: String })
-  verificationDocument?: string;
-
-  @Prop({ type: String })
-  businessHours?: string;
-
-  @Prop({ type: String, required: true })
-  contactPhone: string;
-
-  @Prop({ type: String })
-  website?: string;
+  fieldImages?: string[];
 
   // Status
   @Prop({ type: String, enum: RegistrationStatus, default: RegistrationStatus.PENDING, index: true })

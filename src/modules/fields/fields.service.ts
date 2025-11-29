@@ -893,8 +893,9 @@ export class FieldsService {
                     .populate({ path: 'user', select: 'fullName phone' })
                     .exec();
                 if (profile) {
-                    ownerName = profile.facilityName;
-                    ownerPhone = profile.contactPhone || (profile as any).user?.phone;
+                    const facility: any = (profile as any).facility || {};
+                    ownerName = facility.facilityName;
+                    ownerPhone = facility.contactPhone || (profile as any).user?.phone;
                 }
             } catch {}
         }
@@ -2311,15 +2312,17 @@ export class FieldsService {
             // Tạo profile mới
             const newProfile = new this.fieldOwnerProfileModel({
                 user: new Types.ObjectId(userId),
+                facility: {
                 facilityName: createDto.facilityName,
                 facilityLocation: createDto.facilityLocation,
                 supportedSports: createDto.supportedSports,
                 description: createDto.description,
                 amenities: createDto.amenities || [],
-                verificationDocument: createDto.verificationDocument,
                 businessHours: createDto.businessHours,
                 contactPhone: createDto.contactPhone,
                 website: createDto.website,
+                },
+                verificationDocument: createDto.verificationDocument,
                 rating: 0,
                 totalReviews: 0,
                 isVerified: false,
@@ -2706,7 +2709,7 @@ export class FieldsService {
                 isVerified: true,
                 verifiedAt: new Date(),
                 verifiedBy: new Types.ObjectId(adminId),
-                verificationDocument: request.documents?.businessLicense || request.documents?.idFront,
+                verificationDocument: request.documents?.businessLicense,
                 contactPhone: '', // Will be updated by field owner
             });
 
@@ -2853,15 +2856,14 @@ export class FieldsService {
             status: request.status,
 
             // Facility information
-            facilityName: request.facilityName,
-            facilityLocation: request.facilityLocation,
-            supportedSports: request.supportedSports,
-            description: request.description,
-            amenities: request.amenities,
-            verificationDocument: request.verificationDocument,
-            businessHours: request.businessHours,
-            contactPhone: request.contactPhone,
-            website: request.website,
+            facilityName: (request as any).facility?.facilityName,
+            facilityLocation: (request as any).facility?.facilityLocation,
+            supportedSports: (request as any).facility?.supportedSports,
+            description: (request as any).facility?.description,
+            amenities: (request as any).facility?.amenities,
+            businessHours: (request as any).facility?.businessHours,
+            contactPhone: (request as any).facility?.contactPhone,
+            website: (request as any).facility?.website,
 
             // Audit fields
             rejectionReason: request.rejectionReason,

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -38,13 +39,14 @@ import {
 } from './dtos/field-owner-registration.dto';
 import {
   CreateBankAccountDto,
+  UpdateBankAccountDto,
   BankAccountResponseDto,
   PayOSBankAccountValidationResponseDto,
 } from './dtos/bank-account.dto';
 import { AwsS3Service } from '../../service/aws-s3.service';
 import type { IFile } from '../../interfaces/file.interface';
 import { Booking } from '../bookings/entities/booking.entity';
-import { User } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { PriceFormatService } from '../../service/price-format.service';
 import { Transaction } from '../transactions/entities/transaction.entity';
 import { PayOSService } from '../transactions/payos.service';
@@ -988,15 +990,17 @@ export class FieldOwnerService {
 
       const newProfile = new this.fieldOwnerProfileModel({
         user: new Types.ObjectId(userId),
-        facilityName: createDto.facilityName,
-        facilityLocation: createDto.facilityLocation,
-        supportedSports: createDto.supportedSports,
-        description: createDto.description,
-        amenities: createDto.amenities || [],
+        facility: {
+          facilityName: createDto.facilityName,
+          facilityLocation: createDto.facilityLocation,
+          supportedSports: createDto.supportedSports,
+          description: createDto.description,
+          amenities: createDto.amenities || [],
+          businessHours: createDto.businessHours,
+          contactPhone: createDto.contactPhone,
+          website: createDto.website,
+        },
         verificationDocument: createDto.verificationDocument,
-        businessHours: createDto.businessHours,
-        contactPhone: createDto.contactPhone,
-        website: createDto.website,
         rating: 0,
         totalReviews: 0,
         isVerified: false,
@@ -1072,18 +1076,26 @@ export class FieldOwnerService {
       }
 
       const updateData: any = {};
-      if (updateDto.facilityName !== undefined) updateData.facilityName = updateDto.facilityName;
+      const facilityUpdate: any = {};
+      if (updateDto.facilityName !== undefined) facilityUpdate.facilityName = updateDto.facilityName;
       if (updateDto.facilityLocation !== undefined)
-        updateData.facilityLocation = updateDto.facilityLocation;
+        facilityUpdate.facilityLocation = updateDto.facilityLocation;
       if (updateDto.supportedSports !== undefined)
-        updateData.supportedSports = updateDto.supportedSports;
-      if (updateDto.description !== undefined) updateData.description = updateDto.description;
-      if (updateDto.amenities !== undefined) updateData.amenities = updateDto.amenities;
+        facilityUpdate.supportedSports = updateDto.supportedSports;
+      if (updateDto.description !== undefined) facilityUpdate.description = updateDto.description;
+      if (updateDto.amenities !== undefined) facilityUpdate.amenities = updateDto.amenities;
       if (updateDto.verificationDocument !== undefined)
         updateData.verificationDocument = updateDto.verificationDocument;
-      if (updateDto.businessHours !== undefined) updateData.businessHours = updateDto.businessHours;
-      if (updateDto.contactPhone !== undefined) updateData.contactPhone = updateDto.contactPhone;
-      if (updateDto.website !== undefined) updateData.website = updateDto.website;
+      if (updateDto.businessHours !== undefined) facilityUpdate.businessHours = updateDto.businessHours;
+      if (updateDto.contactPhone !== undefined) facilityUpdate.contactPhone = updateDto.contactPhone;
+      if (updateDto.website !== undefined) facilityUpdate.website = updateDto.website;
+
+      if (Object.keys(facilityUpdate).length > 0) {
+        updateData.facility = {
+          ...(profile.facility || {}),
+          ...facilityUpdate,
+        };
+      }
 
       const updatedProfile = await this.fieldOwnerProfileModel
         .findByIdAndUpdate(profile._id, { $set: updateData }, { new: true })
@@ -1183,40 +1195,53 @@ export class FieldOwnerService {
         throw new BadRequestException('You are already a field owner');
       }
 
-      // Note: documents.idFront and documents.idBack are deprecated - use eKYC instead
-      // Only businessLicense from documents is still used
+      // Business documents: only businessLicense is still used, identity handled via eKYC
+      // Facility info is optional during registration (can be filled later during approval)
+      // Field images can be stored temporarily or used as verification document
       const registrationRequest = new this.registrationRequestModel({
         userId: new Types.ObjectId(userId),
         personalInfo: dto.personalInfo,
         // Only include documents if provided (for backward compatibility and business license)
-        documents: dto.documents ? {
-          // idFront and idBack are deprecated - kept for backward compatibility only
-          idFront: dto.documents.idFront,
-          idBack: dto.documents.idBack,
-          businessLicense: dto.documents.businessLicense,
-        } : undefined,
+        documents: dto.documents
+          ? {
+              businessLicense: dto.documents.businessLicense,
+            }
+          : undefined,
         // eKYC fields
         ekycSessionId: dto.ekycSessionId,
         ekycData: dto.ekycData,
-        ekycStatus: dto.ekycSessionId ? 'pending' : undefined, // Set to pending if eKYC session provided
-        facilityName: dto.facilityName,
-        facilityLocation: dto.facilityLocation,
-        supportedSports: dto.supportedSports,
-        description: dto.description,
-        amenities: dto.amenities,
-        verificationDocument: dto.verificationDocument,
-        businessHours: dto.businessHours,
-        contactPhone: dto.contactPhone,
-        website: dto.website,
+        // If ekycData exists, eKYC is verified; otherwise pending if session exists
+        ekycStatus: dto.ekycData ? 'verified' : (dto.ekycSessionId ? 'pending' : undefined),
+        // Set verifiedAt timestamp when eKYC is verified
+        ekycVerifiedAt: dto.ekycData ? new Date() : undefined,
+        // Facility info (optional during registration, can be filled during approval)
+        facility: {
+          facilityName: dto.facilityName || '',
+          facilityLocation: dto.facilityLocation || '',
+          supportedSports: dto.supportedSports || [],
+          description: dto.description || '',
+          amenities: dto.amenities || [],
+          businessHours: dto.businessHours,
+          contactPhone: dto.contactPhone || '',
+          website: dto.website,
+        },
+        // Store all field images
+        fieldImages: dto.fieldImages || [],
         status: RegistrationStatus.PENDING,
         submittedAt: new Date(),
       });
 
       const savedRequest = await registrationRequest.save();
 
-      const user = await this.userModel.findById(userId).exec();
-      if (user) {
-        await this.emailService.sendFieldOwnerRegistrationSubmitted(user.email, user.fullName);
+      // Send notification email (non-blocking)
+      try {
+        const user = await this.userModel.findById(userId).exec();
+        if (user) {
+          await this.emailService.sendFieldOwnerRegistrationSubmitted(user.email, user.fullName);
+        }
+      } catch (emailError) {
+        this.logger.warn('Failed to send registration email', emailError);
+        // Don't fail the registration if email fails
       }
 
       return this.mapToRegistrationDto(savedRequest);
@@ -1336,28 +1361,21 @@ export class FieldOwnerService {
           `Registration request ${requestId} has verified eKYC: ${request.ekycData.fullName} (${request.ekycData.idNumber})`,
         );
       }
-      // Legacy: nếu không có ekycSessionId, check CCCD documents (backward compatibility)
-      else {
-        if (!request.documents?.idFront || !request.documents?.idBack) {
-          this.logger.warn(
-            `Registration request ${requestId} is using legacy CCCD document flow (no eKYC)`,
-          );
-          // Optional: có thể throw error để force eKYC trong production
-          // throw new BadRequestException('Cannot approve: ID documents missing. Please use eKYC verification.');
-        }
-      }
+      // Legacy branch for non-eKYC requests đã bỏ; production nên yêu cầu eKYC
 
       // Admin can override request data with dto, otherwise use request data
       // Since request now has required fields, we can simplify the logic
-      const facilityName = dto.facilityName ?? request.facilityName;
-      const facilityLocation = dto.facilityLocation ?? request.facilityLocation;
-      const supportedSports = dto.supportedSports ?? request.supportedSports;
-      const description = dto.description ?? request.description;
-      const amenities = dto.amenities ?? request.amenities;
-      const verificationDocument = dto.verificationDocument ?? request.verificationDocument;
-      const businessHours = dto.businessHours ?? request.businessHours;
-      const contactPhone = dto.contactPhone ?? request.contactPhone;
-      const website = dto.website ?? request.website;
+      const baseFacility = request.facility || ({} as any);
+      const facilityName = dto.facilityName ?? baseFacility.facilityName;
+      const facilityLocation = dto.facilityLocation ?? baseFacility.facilityLocation;
+      const supportedSports = dto.supportedSports ?? baseFacility.supportedSports;
+      const description = dto.description ?? baseFacility.description;
+      const amenities = dto.amenities ?? baseFacility.amenities;
+      // Use first field image as verification document for profile
+      const verificationDocument = request.fieldImages && request.fieldImages.length > 0 ? request.fieldImages[0] : undefined;
+      const businessHours = dto.businessHours ?? baseFacility.businessHours;
+      const contactPhone = dto.contactPhone ?? baseFacility.contactPhone;
+      const website = dto.website ?? baseFacility.website;
 
       // Validate required fields (should always be present now, but check for safety)
       if (!facilityName || !facilityLocation || !description || !contactPhone) {
@@ -1371,15 +1389,17 @@ export class FieldOwnerService {
 
       const profile = new this.fieldOwnerProfileModel({
         user: request.userId,
-        facilityName,
-        facilityLocation,
-        supportedSports,
-        description,
-        amenities,
+        facility: {
+          facilityName,
+          facilityLocation,
+          supportedSports,
+          description,
+          amenities,
+          businessHours,
+          contactPhone,
+          website,
+        },
         verificationDocument,
-        businessHours,
-        contactPhone,
-        website,
         rating: 0,
         totalReviews: 0,
         isVerified: true,
@@ -1390,18 +1410,30 @@ export class FieldOwnerService {
       const savedProfile = await profile.save({ session });
 
       request.status = RegistrationStatus.APPROVED;
-      request.facilityName = facilityName;
-      request.facilityLocation = facilityLocation;
-      request.supportedSports = supportedSports;
-      request.description = description;
-      request.amenities = amenities;
-      request.verificationDocument = verificationDocument;
-      request.businessHours = businessHours;
-      request.contactPhone = contactPhone;
-      request.website = website;
+      request.facility = {
+        ...(request.facility || {}),
+        facilityName,
+        facilityLocation,
+        supportedSports,
+        description,
+        amenities,
+        businessHours,
+        contactPhone,
+        website,
+      };
       request.processedAt = new Date();
       request.processedBy = new Types.ObjectId(adminId);
       await request.save({ session });
+
+      // Update user role to field_owner
+      await this.userModel.updateOne(
+        { _id: request.userId },
+        { role: UserRole.FIELD_OWNER },
+      ).session(session).exec();
+
+      this.logger.log(
+        `Updated user ${request.userId.toString()} role to ${UserRole.FIELD_OWNER} upon registration approval`,
+      );
 
       await session.commitTransaction();
 
@@ -1557,6 +1589,177 @@ export class FieldOwnerService {
     }
   }
 
+  async updateBankAccount(
+    accountId: string,
+    profileId: string,
+    dto: UpdateBankAccountDto,
+  ): Promise<BankAccountResponseDto> {
+    try {
+      const bankAccount = await this.bankAccountModel.findById(accountId).exec();
+
+      if (!bankAccount) {
+        throw new NotFoundException('Bank account not found');
+      }
+
+      // Verify account belongs to the field owner
+      const accountOwnerId = (bankAccount.fieldOwner as Types.ObjectId).toString();
+      if (accountOwnerId !== profileId) {
+        throw new ForbiddenException('You do not have permission to update this bank account');
+      }
+
+      // Track if account details changed (to reset status)
+      const detailsChanged =
+        (dto.accountName && dto.accountName !== bankAccount.accountName) ||
+        (dto.accountNumber && dto.accountNumber !== bankAccount.accountNumber) ||
+        (dto.bankCode && dto.bankCode !== bankAccount.bankCode) ||
+        (dto.bankName && dto.bankName !== bankAccount.bankName);
+
+      // Update provided fields
+      if (dto.accountName !== undefined) bankAccount.accountName = dto.accountName;
+      if (dto.accountNumber !== undefined) bankAccount.accountNumber = dto.accountNumber;
+      if (dto.bankCode !== undefined) bankAccount.bankCode = dto.bankCode;
+      if (dto.bankName !== undefined) bankAccount.bankName = dto.bankName;
+      if (dto.branch !== undefined) bankAccount.branch = dto.branch;
+      if (dto.verificationDocument !== undefined) bankAccount.verificationDocument = dto.verificationDocument;
+
+      // Reset status to PENDING if account details changed
+      if (detailsChanged) {
+        bankAccount.status = BankAccountStatus.PENDING;
+        bankAccount.isValidatedByPayOS = false;
+        bankAccount.accountNameFromPayOS = undefined;
+        bankAccount.verifiedAt = undefined;
+        bankAccount.verifiedBy = undefined;
+        bankAccount.rejectionReason = undefined;
+        bankAccount.notes = undefined;
+      }
+
+      // Handle isDefault update
+      if (dto.isDefault !== undefined && dto.isDefault === true) {
+        // Set all other accounts' isDefault to false
+        await this.bankAccountModel.updateMany(
+          {
+            fieldOwner: new Types.ObjectId(profileId),
+            _id: { $ne: new Types.ObjectId(accountId) },
+          },
+          { isDefault: false },
+        );
+        bankAccount.isDefault = true;
+      } else if (dto.isDefault !== undefined) {
+        bankAccount.isDefault = dto.isDefault;
+      }
+
+      const updatedAccount = await bankAccount.save();
+
+      return this.mapToBankAccountDto(updatedAccount);
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
+        throw error;
+      }
+      this.logger.error('Error updating bank account', error);
+      throw new InternalServerErrorException('Failed to update bank account');
+    }
+  }
+
+  async deleteBankAccount(accountId: string, profileId: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const bankAccount = await this.bankAccountModel.findById(accountId).exec();
+
+      if (!bankAccount) {
+        throw new NotFoundException('Bank account not found');
+      }
+
+      // Verify account belongs to the field owner
+      const accountOwnerId = (bankAccount.fieldOwner as Types.ObjectId).toString();
+      if (accountOwnerId !== profileId) {
+        throw new ForbiddenException('You do not have permission to delete this bank account');
+      }
+
+      const wasDefault = bankAccount.isDefault;
+
+      // Remove account from field owner profile's bankAccounts array
+      await this.fieldOwnerProfileModel.findByIdAndUpdate(profileId, {
+        $pull: { bankAccounts: new Types.ObjectId(accountId) },
+      });
+
+      // Delete the bank account document
+      await this.bankAccountModel.findByIdAndDelete(accountId);
+
+      // If deleted account was default, set next verified account as default if available
+      if (wasDefault) {
+        const nextVerifiedAccount = await this.bankAccountModel
+          .findOne({
+            fieldOwner: new Types.ObjectId(profileId),
+            status: BankAccountStatus.VERIFIED,
+          })
+          .sort({ createdAt: -1 })
+          .exec();
+
+        if (nextVerifiedAccount) {
+          nextVerifiedAccount.isDefault = true;
+          await nextVerifiedAccount.save();
+        } else {
+          // If no verified account, set any account as default
+          const anyAccount = await this.bankAccountModel
+            .findOne({
+              fieldOwner: new Types.ObjectId(profileId),
+            })
+            .sort({ createdAt: -1 })
+            .exec();
+
+          if (anyAccount) {
+            anyAccount.isDefault = true;
+            await anyAccount.save();
+          }
+        }
+      }
+
+      return { success: true, message: 'Bank account deleted successfully' };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
+        throw error;
+      }
+      this.logger.error('Error deleting bank account', error);
+      throw new InternalServerErrorException('Failed to delete bank account');
+    }
+  }
+
+  async setDefaultBankAccount(accountId: string, profileId: string): Promise<BankAccountResponseDto> {
+    try {
+      const bankAccount = await this.bankAccountModel.findById(accountId).exec();
+
+      if (!bankAccount) {
+        throw new NotFoundException('Bank account not found');
+      }
+
+      // Verify account belongs to the field owner
+      const accountOwnerId = (bankAccount.fieldOwner as Types.ObjectId).toString();
+      if (accountOwnerId !== profileId) {
+        throw new ForbiddenException('You do not have permission to modify this bank account');
+      }
+
+      // Set all other accounts' isDefault to false
+      await this.bankAccountModel.updateMany(
+        {
+          fieldOwner: new Types.ObjectId(profileId),
+          _id: { $ne: new Types.ObjectId(accountId) },
+        },
+        { isDefault: false },
+      );
+
+      // Set target account's isDefault to true
+      bankAccount.isDefault = true;
+      const updatedAccount = await bankAccount.save();
+
+      return this.mapToBankAccountDto(updatedAccount);
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
+        throw error;
+      }
+      this.logger.error('Error setting default bank account', error);
+      throw new InternalServerErrorException('Failed to set default bank account');
+    }
+  }
+
   private validateCoordinates(latitude: number, longitude: number): { isValid: boolean; error?: string } {
     if (typeof latitude !== 'number' || typeof longitude !== 'number') {
       return { isValid: false, error: 'Latitude and longitude must be numbers' };
@@ -1611,20 +1814,20 @@ export class FieldOwnerService {
       user: profile.user?._id?.toString() || profile.user?.toString() || '',
       userFullName: profile.user?.fullName || undefined,
       userEmail: profile.user?.email || undefined,
-      facilityName: profile.facilityName,
-      facilityLocation: profile.facilityLocation,
-      supportedSports: profile.supportedSports,
-      description: profile.description,
-      amenities: profile.amenities,
+      facilityName: profile.facility?.facilityName ?? profile.facilityName,
+      facilityLocation: profile.facility?.facilityLocation ?? profile.facilityLocation,
+      supportedSports: profile.facility?.supportedSports ?? profile.supportedSports,
+      description: profile.facility?.description ?? profile.description,
+      amenities: profile.facility?.amenities ?? profile.amenities,
       rating: profile.rating,
       totalReviews: profile.totalReviews,
       isVerified: profile.isVerified,
       verifiedAt: profile.verifiedAt,
       verifiedBy: profile.verifiedBy?._id?.toString() || profile.verifiedBy?.toString() || undefined,
       verificationDocument: profile.verificationDocument,
-      businessHours: profile.businessHours,
-      contactPhone: profile.contactPhone,
-      website: profile.website,
+      businessHours: profile.facility?.businessHours ?? profile.businessHours,
+      contactPhone: profile.facility?.contactPhone ?? profile.contactPhone,
+      website: profile.facility?.website ?? profile.website,
       createdAt: profile.createdAt,
       updatedAt: profile.updatedAt,
     };
@@ -1633,6 +1836,7 @@ export class FieldOwnerService {
   private mapToRegistrationDto(
     request: FieldOwnerRegistrationRequest,
   ): FieldOwnerRegistrationResponseDto {
+    const facility = request.facility as any;
     return {
       id: (request._id as Types.ObjectId).toString(),
       userId: request.userId?.toString(),
@@ -1644,15 +1848,15 @@ export class FieldOwnerService {
       ekycVerifiedAt: request.ekycVerifiedAt,
       ekycData: request.ekycData,
       status: request.status,
-      facilityName: request.facilityName,
-      facilityLocation: request.facilityLocation,
-      supportedSports: request.supportedSports,
-      description: request.description,
-      amenities: request.amenities,
-      verificationDocument: request.verificationDocument,
-      businessHours: request.businessHours,
-      contactPhone: request.contactPhone,
-      website: request.website,
+      facilityName: facility?.facilityName,
+      facilityLocation: facility?.facilityLocation,
+      supportedSports: facility?.supportedSports,
+      description: facility?.description,
+      amenities: facility?.amenities,
+      businessHours: facility?.businessHours,
+      contactPhone: facility?.contactPhone,
+      website: facility?.website,
+      fieldImages: request.fieldImages || [],
       submittedAt: request.submittedAt,
       processedAt: request.processedAt,
       processedBy: request.processedBy?.toString(),

@@ -23,12 +23,15 @@ import { SchedulesModule } from './modules/schedules/schedules.module';
 import { CoachesModule } from './modules/coaches/coaches.module';
 import { AmenitiesModule } from './modules/amenities/amenities.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import envConfig from './config/env.config';
+
 @Module({
   imports: [
         LessonTypesModule, 
     ConfigModule.forRoot({
       isGlobal: true, // ← cho phép dùng ở mọi module
       envFilePath: '.env',
+      load: [envConfig], // Load custom config
     }),
     MongooseModule.forRoot(process.env.MONGODB_URI!, {
       connectionFactory: (connection) => {

@@ -10,7 +10,7 @@ export default registerAs('app', () => ({
   didit: {
     apiKey: process.env.DIDIT_API_KEY,
     apiSecret: process.env.DIDIT_API_SECRET,
-    baseUrl: process.env.DIDIT_BASE_URL || 'https://api.didit.com',
-    mockMode: process.env.DIDIT_MOCK_MODE || 'false',
+    baseUrl: process.env.DIDIT_BASE_URL ,
+    mockMode: process.env.DIDIT_MOCK_MODE ,
   },
 }));
