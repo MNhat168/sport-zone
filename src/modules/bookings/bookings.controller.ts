@@ -19,6 +19,8 @@ import { CancelBookingDto } from './dto/cancel-booking.dto';
 import { CreateSessionBookingLazyDto } from './dto/create-session-booking-lazy.dto';
 import { CancelSessionBookingDto } from './dto/cancel-session-booking.dto';
 import { GetUserBookingsDto, UserBookingsResponseDto } from './dto/get-user-bookings.dto';
+import { BookingInvoiceDto } from './dto/booking-invoice.dto';
+import { BookingUpcomingDto } from './dto/booking-upcoming.dto';
 import { Schedule } from '../schedules/entities/schedule.entity';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -289,6 +291,42 @@ export class BookingsController {
     });
   }
 
+  /**
+   * Get simplified booking invoices/status for current user
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Get('bookings/my-invoices')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get booking invoices/summary for current user' })
+  @ApiResponse({ status: 200, description: 'List of booking invoices', type: [BookingInvoiceDto] })
+  async getMyInvoices(
+    @Request() req,
+    @Query() query: GetUserBookingsDto,
+  ): Promise<{ invoices: BookingInvoiceDto[]; pagination: any }> {
+    const userId = this.getUserId(req);
+    return await this.bookingsService.getUserBookingSummaries(userId, {
+      status: query.status,
+      type: query.type,
+      limit: query.limit || 10,
+      page: query.page || 1,
+    });
+  }
+
+  /**
+   * Get upcoming appointment for current user (single card)
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Get('bookings/upcoming')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get next upcoming booking for current user' })
+  @ApiResponse({ status: 200, description: 'Upcoming booking or null', type: BookingUpcomingDto })
+  async getUpcoming(
+    @Request() req,
+  ): Promise<BookingUpcomingDto | null> {
+    const userId = this.getUserId(req);
+    return await this.bookingsService.getUpcomingBooking(userId);
+  }
+
   // ============================================================================
   // LEGACY/BACKWARD COMPATIBILITY ENDPOINTS
   // ============================================================================
@@ -410,3 +448,4 @@ export class BookingsController {
     });
   }
 }
+

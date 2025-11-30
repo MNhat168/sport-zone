@@ -649,7 +649,8 @@ export class BookingsService {
         })
         .populate('selectedAmenities', 'name price')
         .populate('user', 'fullName email phoneNumber')
-        .populate('transaction', 'amount method status notes')
+        // Include timestamp fields so paidOn can be determined from transaction
+        .populate('transaction', 'amount method status notes createdAt paidAt updatedAt')
         .sort({ createdAt: -1 }) // Newest first
         .skip(skip)
         .limit(options.limit)
@@ -676,6 +677,98 @@ export class BookingsService {
     } catch (error) {
       this.logger.error(`Error getting user bookings for ${userId}:`, error);
       throw new InternalServerErrorException('Failed to get user bookings');
+    }
+  }
+
+  /**
+   * Get simplified booking invoice list for a user
+   * Returns fields: bookingId, name, date, time, payment, paidOn, status
+   */
+  async getUserBookingSummaries(userId: string, options: {
+    status?: string;
+    type?: string;
+    limit: number;
+    page: number;
+  }): Promise<{ invoices: any[]; pagination: any }> {
+    const { bookings, pagination } = await this.getUserBookings(userId, options);
+
+    const invoices = bookings.map(b => {
+      const bookingId = b._id || b.id || b.bookingId;
+      const fieldName = (b.field && (b.field.name || b.field.title)) || b.fieldName || 'Unknown Field';
+
+      // date may be string or Date
+      const dateIso = b.date ? new Date(b.date).toISOString().split('T')[0] : null;
+      const timeRange = `${b.startTime || ''}${b.startTime && b.endTime ? ' - ' : ''}${b.endTime || ''}`;
+
+      // Prefer transaction amount if exists, otherwise fall back to totalPrice
+      const payment = (b.transaction && (b.transaction.amount ?? b.transaction.total)) ?? (b.totalPrice ?? 0);
+
+      // Try common transaction timestamp fields
+      const paidOn = (b.transaction && (b.transaction.createdAt || b.transaction.paidAt || b.transaction.updatedAt)) || null;
+
+      return {
+        bookingId,
+        name: fieldName,
+        date: dateIso,
+        time: timeRange,
+        payment,
+        paidOn,
+        status: b.status || 'unknown'
+      };
+    });
+
+    return { invoices, pagination };
+  }
+
+  /**
+   * Get the next upcoming booking for the user (for the Upcoming Appointment card)
+   * Returns the nearest booking with status CONFIRMED and date >= today
+   */
+  async getUpcomingBooking(userId: string): Promise<any | null> {
+    try {
+      // Start of today in server timezone
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const booking = await this.bookingModel
+        .findOne({
+          user: new Types.ObjectId(userId),
+          status: 'confirmed',
+          date: { $gte: today },
+        })
+        .populate({
+          path: 'field',
+          select: 'name owner',
+          populate: {
+            path: 'owner',
+            select: 'fullName',
+          },
+        })
+        .sort({ date: 1, startTime: 1 })
+        .exec();
+
+      if (!booking) return null;
+
+      const b = booking.toJSON ? booking.toJSON() : booking;
+
+      const bookingId = b._id || b.id;
+      const fieldObj = (b.field as any) || {};
+      const ownerObj = (fieldObj.owner as any) || {};
+      const fieldName = fieldObj.name || fieldObj.title || 'Sân';
+      const academyName = ownerObj.fullName || ownerObj.name || 'Unknown Academy';
+      const dateIso = b.date ? new Date(b.date).toISOString().split('T')[0] : null;
+      const timeRange = `${b.startTime || ''}${b.startTime && b.endTime ? ' đến ' : ''}${b.endTime || ''}`;
+
+      return {
+        bookingId,
+        academyName,
+        fieldName,
+        date: dateIso,
+        time: timeRange,
+      };
+    } catch (error) {
+      this.logger.error('Error getting upcoming booking', error);
+      throw new InternalServerErrorException('Failed to get upcoming booking');
     }
   }
 
