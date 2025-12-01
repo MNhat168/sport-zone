@@ -8,7 +8,7 @@ export class EmailService {
 	constructor(
 		private readonly mailerService: MailerService,
 		private readonly configService: ConfigService,
-	) {}
+	) { }
 
 	async sendEmailVerification(email: string, token: string) {
 		const frontendUrl = this.configService.get<string>('FRONTEND_URL');
@@ -23,6 +23,43 @@ export class EmailService {
 				link: backendUrl
 					? `${backendUrl}/auth/verify-email?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`
 					: `${frontendUrl}/verify-email?token=${token}`,
+			},
+		});
+	}
+
+	/**
+	 * Gửi email yêu cầu thanh toán cho booking (sau khi chủ sân accept ghi chú)
+	 */
+	async sendBookingPaymentRequest(payload: {
+		to: string;
+		field: { name: string; address?: string };
+		customer: { fullName: string };
+		booking: { date: string; startTime: string; endTime: string };
+		pricing: { totalFormatted: string };
+		paymentLink: string;
+		paymentMethod?: PaymentMethod | string;
+		expiresAt?: string; // formatted datetime string
+		expiresInMinutes?: number; // minutes until expiration
+	}) {
+		let methodLabel = 'Thanh toán trực tuyến';
+		if (payload.paymentMethod !== undefined) {
+			if (typeof payload.paymentMethod === 'number') {
+				methodLabel = PaymentMethodLabels[payload.paymentMethod as PaymentMethod] || methodLabel;
+			} else if (typeof payload.paymentMethod === 'string') {
+				methodLabel = payload.paymentMethod;
+			}
+		}
+		await this.mailerService.sendMail({
+			to: payload.to,
+			subject: 'Yêu cầu thanh toán đặt sân - SportZone',
+			template: 'booking-payment-request.hbs',
+			context: {
+				title: 'Yêu cầu thanh toán đặt sân',
+				field: payload.field,
+				customer: payload.customer,
+				booking: payload.booking,
+				pricing: payload.pricing,
+				payment: { methodLabel, link: payload.paymentLink, expiresAt: payload.expiresAt, expiresInMinutes: payload.expiresInMinutes },
 			},
 		});
 	}
@@ -106,10 +143,10 @@ export class EmailService {
 		}
 		await this.mailerService.sendMail({
 			to: payload.to,
-			subject: 'Xác nhận đặt sân thành công - SportZone',
+			subject: 'Đặt sân thành công - SportZone',
 			template: 'Response_Email_bookingField_to_Customer.hbs',
 			context: {
-				preheader: payload.preheader ?? 'Xác nhận đặt sân thành công',
+				preheader: payload.preheader ?? 'Đặt sân thành công',
 				viewInBrowserUrl: payload.viewInBrowserUrl ?? this.configService.get<string>('FRONTEND_URL'),
 				date: payload.dateLabel ?? new Date().toISOString().split('T')[0],
 				createdAt: payload.createdAt ?? new Date().toLocaleString('vi-VN'),
@@ -153,7 +190,7 @@ export class EmailService {
 		paymentMethod?: PaymentMethod | string,
 	) {
 		const frontendUrl = this.configService.get<string>('FRONTEND_URL');
-		
+
 		// Convert payment method to display label
 		let paymentMethodLabel = 'Chưa chọn';
 		if (paymentMethod) {

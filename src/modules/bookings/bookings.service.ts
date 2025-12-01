@@ -12,7 +12,9 @@ import { FieldsService } from '../fields/fields.service';
 import { CoachesService } from '../coaches/coaches.service';
 import { EmailService } from '../email/email.service';
 import { PaymentHandlerService } from './services/payment-handler.service';
+import { BookingEmailService } from './services/booking-email.service';
 import { CleanupService } from '../../service/cleanup.service';
+import { PayOSService } from '../transactions/payos.service';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 import { CreateFieldBookingLazyDto, FieldAvailabilityQueryDto } from './dto/create-field-booking-lazy.dto';
 import {
@@ -62,10 +64,175 @@ export class BookingsService {
     private readonly coachesService: CoachesService,
     private readonly emailService: EmailService,
     private readonly paymentHandlerService: PaymentHandlerService,
+    private readonly bookingEmailService: BookingEmailService,
     private readonly cleanupService: CleanupService,
+    private readonly payOSService: PayOSService,
   ) {
     // Setup payment event listeners - CRITICAL for booking confirmation
     this.setupPaymentEventListeners();
+  }
+
+  /**
+   * Owner: list bookings that have user notes for fields owned by current user
+   */
+  async listOwnerNoteBookings(ownerUserId: string, options?: { status?: 'pending' | 'accepted' | 'denied'; limit?: number; page?: number }) {
+    const limit = options?.limit ?? 10;
+    const page = options?.page ?? 1;
+    const skip = (page - 1) * limit;
+
+    // Find fields owned by this user (owner can be stored as profile or user ID)
+    const ownerProfile = await this.fieldOwnerProfileModel.findOne({ user: new Types.ObjectId(ownerUserId) }).lean();
+    const ownerIdCandidates = [new Types.ObjectId(ownerUserId)];
+    if (ownerProfile?._id) ownerIdCandidates.push(ownerProfile._id as any);
+
+    const fieldIds = await this.fieldModel.find({ owner: { $in: ownerIdCandidates } }).select('_id').lean();
+    const fieldIdList = fieldIds.map((f: any) => f._id);
+
+    const filter: any = {
+      field: { $in: fieldIdList },
+      note: { $exists: true, $ne: '' },
+    };
+    if (options?.status) filter.noteStatus = options.status;
+
+    const total = await this.bookingModel.countDocuments(filter);
+    const bookings = await this.bookingModel
+      .find(filter)
+      .populate('user', 'fullName email phone')
+      .populate('field', 'name location')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    return {
+      bookings,
+      pagination: {
+        total,
+        limit,
+        page,
+        totalPages: Math.ceil(total / limit),
+      }
+    };
+  }
+
+  /**
+   * Owner: get detail of a booking with note ensuring ownership
+   */
+  async getOwnerBookingDetail(ownerUserId: string, bookingId: string) {
+    const booking = await this.bookingModel
+      .findById(bookingId)
+      .populate('user', 'fullName email phone')
+      .populate('field', 'name location owner')
+      .lean();
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    const field = booking.field as any;
+    const ownerProfile = await this.fieldOwnerProfileModel.findOne({ user: new Types.ObjectId(ownerUserId) }).lean();
+    const ownerMatches = (field.owner?.toString?.() === ownerUserId) || (!!ownerProfile && field.owner?.toString?.() === ownerProfile._id.toString());
+    if (!ownerMatches) throw new BadRequestException('Not authorized to view this booking');
+    return booking;
+  }
+
+  /**
+   * Owner: accept user's special note and (for online methods) send payment link to user via email
+   */
+  async ownerAcceptNote(ownerUserId: string, bookingId: string, clientIp?: string) {
+    const booking = await this.bookingModel
+      .findById(bookingId)
+      .populate('user', 'fullName email phone')
+      .populate('field', 'name location owner')
+      .exec();
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    const field = booking.field as any;
+    const ownerProfile = await this.fieldOwnerProfileModel.findOne({ user: new Types.ObjectId(ownerUserId) }).lean();
+    const ownerMatches = (field.owner?.toString?.() === ownerUserId) || (!!ownerProfile && field.owner?.toString?.() === ownerProfile._id.toString());
+    if (!ownerMatches) throw new BadRequestException('Not authorized to update this booking');
+
+    // Update noteStatus
+    (booking as any).noteStatus = 'accepted';
+    await booking.save();
+
+    // Send payment link if method is online (PayOS or VNPay)
+    let paymentLink: string | undefined;
+    const transaction = booking.transaction ? await this.transactionsService.getPaymentById((booking.transaction as any).toString()) : await this.transactionsService.getPaymentByBookingId((booking._id as any).toString());
+
+    const amountTotal = (booking as any).bookingAmount !== undefined && (booking as any).platformFee !== undefined
+      ? (booking as any).bookingAmount + (booking as any).platformFee
+      : booking.totalPrice || 0;
+
+    // Define expiry window for payment links
+    const expiresInMinutes = 10;
+    const expiresAtDate = new Date(Date.now() + expiresInMinutes * 60 * 1000);
+
+    if (transaction) {
+      if (transaction.method === PaymentMethod.PAYOS) {
+        const orderCode = transaction.externalTransactionId ? Number(transaction.externalTransactionId) : undefined;
+        const payosRes = await this.payOSService.createPaymentUrl({
+          orderId: (booking._id as any).toString(),
+          amount: amountTotal,
+          description: `Thanh toán đặt sân ${field.name}`,
+          items: [{ name: field.name, quantity: 1, price: amountTotal }],
+          buyerName: (booking.user as any).fullName,
+          buyerEmail: (booking.user as any).email,
+          orderCode,
+          expiredAt: expiresInMinutes, // minutes
+        });
+        paymentLink = payosRes.checkoutUrl;
+      } else if (transaction.method === PaymentMethod.VNPAY) {
+        const ip = clientIp || '127.0.0.1';
+        paymentLink = this.transactionsService.createVNPayUrl(
+          amountTotal,
+          (transaction._id as any).toString(),
+          ip,
+          undefined,
+          expiresInMinutes,
+        );
+      }
+    }
+
+    // Send payment request email if link available
+    if (paymentLink) {
+      const toVnd = (amount: number) => amount.toLocaleString('vi-VN') + '₫';
+      await this.emailService.sendBookingPaymentRequest({
+        to: ((booking.user as any).email),
+        field: { name: field.name, address: field.location?.address },
+        customer: { fullName: (booking.user as any).fullName },
+        booking: {
+          date: booking.date.toLocaleDateString('vi-VN'),
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+        },
+        pricing: { totalFormatted: toVnd(amountTotal) },
+        paymentLink,
+        paymentMethod: transaction?.method as any,
+        expiresAt: expiresAtDate.toLocaleString('vi-VN'),
+        expiresInMinutes,
+      });
+    }
+
+    return booking.toJSON();
+  }
+
+  /**
+   * Owner: deny user's special note
+   */
+  async ownerDenyNote(ownerUserId: string, bookingId: string, reason?: string) {
+    const booking = await this.bookingModel
+      .findById(bookingId)
+      .populate('field', 'owner')
+      .exec();
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    const field = booking.field as any;
+    const ownerProfile = await this.fieldOwnerProfileModel.findOne({ user: new Types.ObjectId(ownerUserId) }).lean();
+    const ownerMatches = (field.owner?.toString?.() === ownerUserId) || (!!ownerProfile && field.owner?.toString?.() === ownerProfile._id.toString());
+    if (!ownerMatches) throw new BadRequestException('Not authorized to update this booking');
+
+    (booking as any).noteStatus = 'denied';
+    if (reason) booking.cancellationReason = reason; // store reason if provided
+    await booking.save();
+    return booking.toJSON();
   }
 
   /**
@@ -75,7 +242,7 @@ export class BookingsService {
   private setupPaymentEventListeners() {
     this.eventEmitter.on('payment.success', this.handlePaymentSuccess.bind(this));
     this.eventEmitter.on('payment.failed', this.handlePaymentFailed.bind(this));
-    
+
     this.logger.log('✅ Payment event listeners registered');
   }
 
@@ -138,9 +305,9 @@ export class BookingsService {
 
         // Generate virtual slots from Field config
         const virtualSlots = this.generateVirtualSlots(field, currentDate);
-        
+
         // Apply schedule constraints if exists
-        const availableSlots = schedule 
+        const availableSlots = schedule
           ? await this.applyScheduleConstraints(virtualSlots, schedule, field, currentDate)
           : await this.getAvailabilityWithBookings(virtualSlots, field, currentDate);
 
@@ -193,7 +360,7 @@ export class BookingsService {
 
         // Validate time slots
         this.validateTimeSlots(bookingData.startTime, bookingData.endTime, field, bookingDate);
-        
+
         // Calculate slots and pricing
         const numSlots = this.calculateNumSlots(bookingData.startTime, bookingData.endTime, field.slotDuration);
         pricingInfo = this.calculatePricing(bookingData.startTime, bookingData.endTime, field, bookingDate);
@@ -257,15 +424,15 @@ export class BookingsService {
         // ✅ CRITICAL: Online payments (PayOS, VNPay, etc.) must be PENDING until payment succeeds
         // Only CASH payments can be CONFIRMED immediately (if no note)
         const paymentMethod = bookingData.paymentMethod ?? PaymentMethod.CASH;
-        const isOnlinePayment = paymentMethod === PaymentMethod.PAYOS || 
-                                paymentMethod === PaymentMethod.VNPAY ||
-                                paymentMethod === PaymentMethod.MOMO ||
-                                paymentMethod === PaymentMethod.ZALOPAY ||
-                                paymentMethod === PaymentMethod.EBANKING ||
-                                paymentMethod === PaymentMethod.CREDIT_CARD ||
-                                paymentMethod === PaymentMethod.DEBIT_CARD ||
-                                paymentMethod === PaymentMethod.QR_CODE;
-        
+        const isOnlinePayment = paymentMethod === PaymentMethod.PAYOS ||
+          paymentMethod === PaymentMethod.VNPAY ||
+          paymentMethod === PaymentMethod.MOMO ||
+          paymentMethod === PaymentMethod.ZALOPAY ||
+          paymentMethod === PaymentMethod.EBANKING ||
+          paymentMethod === PaymentMethod.CREDIT_CARD ||
+          paymentMethod === PaymentMethod.DEBIT_CARD ||
+          paymentMethod === PaymentMethod.QR_CODE;
+
         // Booking status logic:
         // - Online payments: Always PENDING (wait for payment confirmation)
         // - Cash with note: PENDING (needs confirmation)
@@ -303,7 +470,7 @@ export class BookingsService {
         // This ensures payment is rolled back if booking fails
         // Use totalAmount (bookingAmount + platformFee) for payment amount
         const totalAmount = bookingAmount + platformFee;
-        
+
         // ✅ CRITICAL: Generate PayOS orderCode if using PayOS payment method
         // This allows webhook/return URL to find the transaction later
         let externalTransactionId: string | undefined;
@@ -313,7 +480,7 @@ export class BookingsService {
           externalTransactionId = generatePayOSOrderCode().toString();
           this.logger.log(`Generated PayOS orderCode: ${externalTransactionId} for booking ${createdBooking._id}`);
         }
-        
+
         const payment = await this.transactionsService.createPayment({
           bookingId: (createdBooking._id as Types.ObjectId).toString(),
           userId: userId,
@@ -343,7 +510,7 @@ export class BookingsService {
             },
             $inc: { version: 1 }
           },
-          { 
+          {
             session,
             new: true
             // ❌ writeConcern không được phép trong transaction - chỉ dùng ở transaction level
@@ -380,25 +547,27 @@ export class BookingsService {
       // This prevents email delays from causing transaction timeouts
       const shouldSendNow = (bookingData.paymentMethod ?? PaymentMethod.CASH) === PaymentMethod.CASH;
       if (shouldSendNow) {
-        // Fire-and-forget email sending (don't await to avoid blocking)
-        this.sendBookingEmailsAsync(booking, field, userId, bookingData, pricingInfo, amenitiesFee)
-          .catch(err => this.logger.warn('Failed to send booking emails (non-critical)', err));
+        // Unified confirmation emails via single handler
+        const methodLabel = typeof bookingData.paymentMethod === 'number'
+          ? PaymentMethod[bookingData.paymentMethod]
+          : bookingData.paymentMethod;
+        await this.bookingEmailService.sendConfirmationEmails((booking._id as any).toString(), methodLabel);
       }
 
       return booking;
     } catch (error) {
       this.logger.error('Error creating field booking', error);
-      
+
       // Re-throw known exceptions as-is
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
-      
+
       // ✅ SECURITY: Detect optimistic locking failures (version mismatch)
       if (error.message?.includes('Slot was booked')) {
         throw new BadRequestException('Slot was booked by another user. Please refresh availability and try again.');
       }
-      
+
       // Generic error for unexpected issues
       throw new InternalServerErrorException('Failed to create booking. Please try again.');
     } finally {
@@ -613,11 +782,11 @@ export class BookingsService {
 
       // Build filter query
       const filter: any = { user: new Types.ObjectId(userId) };
-      
+
       if (options.status) {
         filter.status = options.status.toLowerCase();
       }
-      
+
       if (options.type) {
         filter.type = options.type.toLowerCase();
       }
@@ -797,10 +966,10 @@ export class BookingsService {
    */
   private generateVirtualSlots(field: Field, date?: Date): Omit<AvailabilitySlot, 'available'>[] {
     const slots: Omit<AvailabilitySlot, 'available'>[] = [];
-    
+
     // Get day of week for the date (default to monday if no date provided)
     const dayOfWeek = date ? this.getDayOfWeek(date) : 'monday';
-    
+
     // Find operating hours for the specific day
     const dayOperatingHours = field.operatingHours.find(oh => oh.day === dayOfWeek);
     if (!dayOperatingHours) {
@@ -821,9 +990,9 @@ export class BookingsService {
 
       const startTime = this.minutesToTimeString(currentMinutes);
       const endTime = this.minutesToTimeString(slotEndMinutes);
-      
+
       const pricing = this.calculateSlotPricing(startTime, endTime, field, date);
-      
+
       slots.push({
         startTime,
         endTime,
@@ -840,8 +1009,8 @@ export class BookingsService {
    * Updated for Pure Lazy Creation: Check both Schedule bookedSlots AND Booking records
    */
   private async applyScheduleConstraints(
-    virtualSlots: Omit<AvailabilitySlot, 'available'>[], 
-    schedule: Schedule, 
+    virtualSlots: Omit<AvailabilitySlot, 'available'>[],
+    schedule: Schedule,
     field: Field,
     date: Date
   ): Promise<AvailabilitySlot[]> {
@@ -851,7 +1020,7 @@ export class BookingsService {
 
     // Get actual bookings for this date
     const actualBookings = await this.getExistingBookingsForDate((field as any)._id.toString(), date);
-    
+
     // Combine schedule bookedSlots with actual booking records
     const allBookedSlots = [
       ...schedule.bookedSlots,
@@ -888,7 +1057,7 @@ export class BookingsService {
         },
         status: { $in: ['confirmed', 'pending'] }
       }).exec();
-      
+
       return bookings;
     } catch (error) {
       this.logger.error('Error getting existing bookings', error);
@@ -900,13 +1069,13 @@ export class BookingsService {
    * Get availability with only booking checks (no schedule)
    */
   private async getAvailabilityWithBookings(
-    virtualSlots: Omit<AvailabilitySlot, 'available'>[], 
+    virtualSlots: Omit<AvailabilitySlot, 'available'>[],
     field: Field,
     date: Date
   ): Promise<AvailabilitySlot[]> {
     // Get actual bookings for this date
     const actualBookings = await this.getExistingBookingsForDate((field as any)._id.toString(), date);
-    
+
     // Convert bookings to slot format
     const bookedSlots = actualBookings.map(booking => ({
       startTime: booking.startTime,
@@ -953,10 +1122,10 @@ export class BookingsService {
   /**
    * Calculate pricing for booking
    */
-  private calculatePricing(startTime: string, endTime: string, field: Field, date?: Date): { 
-    totalPrice: number; 
-    multiplier: number; 
-    breakdown: string 
+  private calculatePricing(startTime: string, endTime: string, field: Field, date?: Date): {
+    totalPrice: number;
+    multiplier: number;
+    breakdown: string
   } {
     const startMinutes = this.timeStringToMinutes(startTime);
     const endMinutes = this.timeStringToMinutes(endTime);
@@ -968,7 +1137,7 @@ export class BookingsService {
       const slotEndMinutes = Math.min(currentMinutes + field.slotDuration, endMinutes);
       const slotStart = this.minutesToTimeString(currentMinutes);
       const slotEnd = this.minutesToTimeString(slotEndMinutes);
-      
+
       const slotPricing = this.calculateSlotPricing(slotStart, slotEnd, field, date);
       totalPrice += slotPricing.price;
 
@@ -990,18 +1159,18 @@ export class BookingsService {
   /**
    * Calculate pricing for a single slot
    */
-  private calculateSlotPricing(startTime: string, endTime: string, field: Field, date?: Date): { 
-    price: number; 
-    multiplier: number; 
-    breakdown: string 
+  private calculateSlotPricing(startTime: string, endTime: string, field: Field, date?: Date): {
+    price: number;
+    multiplier: number;
+    breakdown: string
   } {
     // Get day of week for the date (default to monday if no date provided)
     const dayOfWeek = date ? this.getDayOfWeek(date) : 'monday';
-    
+
     // Find applicable price range for the specific day
     const applicableRange = field.priceRanges.find(range => {
       if (range.day !== dayOfWeek) return false;
-      
+
       const rangeStart = this.timeStringToMinutes(range.start);
       const rangeEnd = this.timeStringToMinutes(range.end);
       const slotStart = this.timeStringToMinutes(startTime);
@@ -1025,10 +1194,10 @@ export class BookingsService {
   private validateTimeSlots(startTime: string, endTime: string, field: Field, date?: Date): void {
     const startMinutes = this.timeStringToMinutes(startTime);
     const endMinutes = this.timeStringToMinutes(endTime);
-    
+
     // Get day of week for the date (default to monday if no date provided)
     const dayOfWeek = date ? this.getDayOfWeek(date) : 'monday';
-    
+
     // Find operating hours for the specific day
     const dayOperatingHours = field.operatingHours.find(oh => oh.day === dayOfWeek);
     if (!dayOperatingHours) {
@@ -1117,7 +1286,7 @@ export class BookingsService {
   }) {
     try {
       this.logger.log(`[Payment Success] Processing for booking ${event.bookingId}`);
-      
+
       // Validate bookingId format
       if (!Types.ObjectId.isValid(event.bookingId)) {
         this.logger.error(`[Payment Success] Invalid booking ID: ${event.bookingId}`);
@@ -1151,12 +1320,12 @@ export class BookingsService {
           this.logger.error(`[Payment Success] Booking ${event.bookingId} not found`);
           return;
         }
-        
+
         if (booking.status === BookingStatus.CONFIRMED) {
           this.logger.warn(`[Payment Success] Booking ${event.bookingId} already confirmed (idempotent)`);
           return;
         }
-        
+
         this.logger.error(`[Payment Success] Failed to update booking ${event.bookingId}`);
         return;
       }
@@ -1183,7 +1352,7 @@ export class BookingsService {
         if (populatedBooking && populatedBooking.field && populatedBooking.user) {
           const field = populatedBooking.field as any;
           const customerUser = populatedBooking.user as any;
-          
+
           const toVnd = (amount: number) => amount.toLocaleString('vi-VN') + '₫';
           const emailPayload = {
             field: { name: field.name, address: field.location?.address || '' },
@@ -1192,15 +1361,15 @@ export class BookingsService {
               date: populatedBooking.date.toLocaleDateString('vi-VN'),
               startTime: populatedBooking.startTime,
               endTime: populatedBooking.endTime,
-            services: [],
-          },
-          pricing: {
-            services: [],
-            fieldPriceFormatted: toVnd(populatedBooking.totalPrice || 0),
-            totalFormatted: toVnd(populatedBooking.totalPrice || 0),
-          },
-          paymentMethod: event.method,
-        };          // Get field owner email (non-blocking)
+              services: [],
+            },
+            pricing: {
+              services: [],
+              fieldPriceFormatted: toVnd(populatedBooking.totalPrice || 0),
+              totalFormatted: toVnd(populatedBooking.totalPrice || 0),
+            },
+            paymentMethod: event.method,
+          };          // Get field owner email (non-blocking)
           const ownerProfileId = field.owner?.toString();
           if (ownerProfileId) {
             let fieldOwnerProfile = await this.fieldOwnerProfileModel
@@ -1268,7 +1437,7 @@ export class BookingsService {
   }) {
     try {
       this.logger.log(`[Payment Failed] Processing for booking ${event.bookingId}`);
-      
+
       // Cancel booking and release slots using centralized cleanup service
       // CleanupService handles all validation and idempotency checks
       await this.cleanupService.cancelBookingAndReleaseSlots(
@@ -1278,7 +1447,7 @@ export class BookingsService {
       );
 
       this.logger.log(`[Payment Failed] ⚠️ Booking ${event.bookingId} cancelled due to payment failure`);
-      
+
     } catch (error) {
       this.logger.error('[Payment Failed] Error handling payment failure', error);
       // Don't throw - we don't want to fail the payment update
@@ -1290,106 +1459,5 @@ export class BookingsService {
    * Send booking emails asynchronously (outside transaction)
    * This prevents email delays from causing transaction timeouts
    */
-  private async sendBookingEmailsAsync(
-    booking: Booking,
-    field: any,
-    userId: string,
-    bookingData: CreateFieldBookingLazyDto,
-    pricingInfo: any,
-    amenitiesFee: number
-  ): Promise<void> {
-    try {
-      // Get field owner profile and user email
-      const ownerProfileId = ((field as any).owner && (field as any).owner.toString) 
-        ? (field as any).owner.toString() 
-        : (field as any).owner;
-      
-      let fieldOwnerProfile = await this.fieldOwnerProfileModel
-        .findById(ownerProfileId)
-        .lean()
-        .exec();
-
-      // Fallback: some data may store field.owner as userId instead of FieldOwnerProfileId
-      if (!fieldOwnerProfile) {
-        fieldOwnerProfile = await this.fieldOwnerProfileModel
-          .findOne({ user: new Types.ObjectId(ownerProfileId) })
-          .lean()
-          .exec();
-      }
-
-      let ownerEmail: string | undefined;
-      let ownerUserId: string | undefined;
-      if (fieldOwnerProfile?.user) {
-        ownerUserId = (fieldOwnerProfile.user as any).toString();
-      } else {
-        ownerUserId = ownerProfileId;
-      }
-
-      if (ownerUserId && Types.ObjectId.isValid(ownerUserId)) {
-        const ownerUser = await this.userModel
-          .findById(ownerUserId)
-          .select('email fullName phone')
-          .lean()
-          .exec();
-        ownerEmail = ownerUser?.email;
-      }
-
-      // Get customer user info
-      const customerUser = await this.userModel
-        .findById(userId)
-        .select('fullName email phone')
-        .lean()
-        .exec();
-
-      if (!customerUser) {
-        this.logger.warn(`Customer user ${userId} not found for email sending`);
-        return;
-      }
-
-      const toVnd = (amount: number) => amount.toLocaleString('vi-VN') + '₫';
-      const emailPayload = {
-        field: { name: field.name, address: (field as any)?.location?.address || '' },
-        customer: { 
-          fullName: customerUser.fullName, 
-          phone: (customerUser as any).phone, 
-          email: customerUser.email 
-        },
-        booking: {
-          date: new Date(bookingData.date).toLocaleDateString('vi-VN'),
-          startTime: bookingData.startTime,
-          endTime: bookingData.endTime,
-          services: [],
-        },
-        pricing: {
-          services: [],
-          fieldPriceFormatted: toVnd(pricingInfo.totalPrice),
-          totalFormatted: toVnd(pricingInfo.totalPrice + amenitiesFee),
-        },
-        paymentMethod: bookingData.paymentMethod,
-      };
-
-      // Send email to field owner
-      if (ownerEmail) {
-        await this.emailService.sendFieldOwnerBookingNotification({
-          ...emailPayload,
-          to: ownerEmail,
-          preheader: 'Thông báo đặt sân mới',
-        });
-        this.logger.log(`Email sent to field owner: ${ownerEmail} for booking: ${booking._id}`);
-      }
-
-      // Send email to customer
-      if (customerUser.email) {
-        await this.emailService.sendCustomerBookingConfirmation({
-          ...emailPayload,
-          to: customerUser.email,
-          preheader: 'Xác nhận đặt sân thành công',
-        });
-        this.logger.log(`Email sent to customer: ${customerUser.email} for booking: ${booking._id}`);
-      }
-    } catch (error) {
-      // Log but don't throw - email failures shouldn't affect booking
-      this.logger.error('Failed to send booking emails asynchronously', error);
-    }
-  }
+  // Removed old sendBookingEmailsAsync in favor of unified BookingEmailService
 }

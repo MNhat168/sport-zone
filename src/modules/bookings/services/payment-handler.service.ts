@@ -7,6 +7,7 @@ import { Schedule } from '../../schedules/entities/schedule.entity';
 import { User } from '../../users/entities/user.entity';
 import { FieldOwnerProfile } from '../../fields/entities/field-owner-profile.entity';
 import { EmailService } from '../../email/email.service';
+import { BookingEmailService } from './booking-email.service';
 import { TransactionsService } from '../../transactions/transactions.service';
 import { TransactionStatus } from '../../transactions/entities/transaction.entity';
 import { CleanupService } from '../../../service/cleanup.service';
@@ -27,15 +28,16 @@ export class PaymentHandlerService implements OnModuleInit {
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
     @InjectModel(Schedule.name) private readonly scheduleModel: Model<Schedule>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
-    @InjectModel(FieldOwnerProfile.name) 
+    @InjectModel(FieldOwnerProfile.name)
     private readonly fieldOwnerProfileModel: Model<FieldOwnerProfile>,
     @InjectConnection() private readonly connection: any,
     private readonly eventEmitter: EventEmitter2,
     private readonly emailService: EmailService,
+    private readonly bookingEmailService: BookingEmailService,
     private readonly transactionsService: TransactionsService,
     private readonly walletService: WalletService,
     @Inject(forwardRef(() => CleanupService)) private readonly cleanupService: CleanupService,
-  ) {}
+  ) { }
 
   /**
    * Setup event listeners when module initializes
@@ -43,10 +45,10 @@ export class PaymentHandlerService implements OnModuleInit {
   onModuleInit() {
     // Listen for payment expired events (from payment cleanup service)
     this.eventEmitter.on('payment.expired', this.handlePaymentExpired.bind(this));
-    
+
     // [V2] Listen for check-in success events
     this.eventEmitter.on('booking.checkedIn', this.handleCheckInEvent.bind(this));
-    
+
     this.logger.log('✅ Payment event listeners registered (payment.expired, booking.checkedIn)');
   }
 
@@ -75,7 +77,7 @@ export class PaymentHandlerService implements OnModuleInit {
   }): Promise<void> {
     try {
       this.logger.log(`[Payment Expired] Processing for booking ${event.bookingId}`);
-      
+
       // Call handlePaymentFailed with expired reason
       await this.handlePaymentFailed({
         paymentId: event.paymentId,
@@ -109,7 +111,7 @@ export class PaymentHandlerService implements OnModuleInit {
 
     try {
       this.logger.log(`[Payment Success] Processing for booking ${event.bookingId}`);
-      
+
       // Validate bookingId format
       if (!Types.ObjectId.isValid(event.bookingId)) {
         this.logger.error(`[Payment Success] Invalid booking ID: ${event.bookingId}`);
@@ -120,7 +122,7 @@ export class PaymentHandlerService implements OnModuleInit {
       // ✅ CRITICAL: Verify transaction status is SUCCEEDED before updating booking
       // This ensures transaction is actually succeeded before confirming booking
       const transaction = await this.transactionsService.getPaymentById(event.paymentId);
-      
+
       if (!transaction) {
         this.logger.error(
           `[Payment Success] Transaction ${event.paymentId} not found - cannot confirm booking`
@@ -128,7 +130,7 @@ export class PaymentHandlerService implements OnModuleInit {
         await session.abortTransaction();
         return;
       }
-      
+
       if (transaction.status !== TransactionStatus.SUCCEEDED) {
         this.logger.warn(
           `[Payment Success] Transaction ${event.paymentId} status is ${transaction.status}, ` +
@@ -137,7 +139,7 @@ export class PaymentHandlerService implements OnModuleInit {
         await session.abortTransaction();
         return;
       }
-      
+
       this.logger.log(
         `[Payment Success] ✅ Transaction ${event.paymentId} verified as ${transaction.status}, ` +
         `proceeding to confirm booking ${event.bookingId}`
@@ -172,13 +174,13 @@ export class PaymentHandlerService implements OnModuleInit {
           await session.abortTransaction();
           return;
         }
-        
+
         if (booking.status === BookingStatus.CONFIRMED) {
           this.logger.warn(`[Payment Success] Booking ${event.bookingId} already confirmed (idempotent)`);
           await session.abortTransaction();
           return;
         }
-        
+
         this.logger.error(`[Payment Success] Failed to update booking ${event.bookingId}`);
         await session.abortTransaction();
         return;
@@ -187,7 +189,7 @@ export class PaymentHandlerService implements OnModuleInit {
       // ====================================================================
       // [V2 LOGIC] Add money to admin systemBalance và field-owner pendingBalance
       // ====================================================================
-      
+
       // Step 1: Get booking with field info to find owner
       const bookingWithField = await this.bookingModel
         .findById(event.bookingId)
@@ -278,8 +280,8 @@ export class PaymentHandlerService implements OnModuleInit {
         date: updateResult.date,
       });
 
-      // Send confirmation emails (non-blocking)
-      await this.sendConfirmationEmails(event.bookingId, event.method);
+      // Send confirmation emails via unified handler
+      await this.bookingEmailService.sendConfirmationEmails(event.bookingId, event.method);
 
     } catch (error) {
       // Rollback on error
@@ -306,7 +308,7 @@ export class PaymentHandlerService implements OnModuleInit {
   }): Promise<void> {
     try {
       this.logger.log(`[Payment Failed] Processing for booking ${event.bookingId}`);
-      
+
       // Cancel booking and release slots using centralized cleanup service
       // CleanupService handles all validation and idempotency checks
       await this.cleanupService.cancelBookingAndReleaseSlots(
@@ -316,7 +318,7 @@ export class PaymentHandlerService implements OnModuleInit {
       );
 
       this.logger.log(`[Payment Failed] ⚠️ Booking ${event.bookingId} cancelled due to payment failure`);
-      
+
     } catch (error) {
       this.logger.error('[Payment Failed] Error handling payment failure', error);
       // Don't throw - we don't want to fail the payment update
@@ -342,12 +344,12 @@ export class PaymentHandlerService implements OnModuleInit {
 
       // Remove the booking's slots from bookedSlots array
       const originalLength = schedule.bookedSlots.length;
-      schedule.bookedSlots = schedule.bookedSlots.filter(slot => 
+      schedule.bookedSlots = schedule.bookedSlots.filter(slot =>
         !(slot.startTime === booking.startTime && slot.endTime === booking.endTime)
       );
 
       const removedCount = originalLength - schedule.bookedSlots.length;
-      
+
       if (removedCount > 0) {
         await schedule.save();
         this.logger.log(`[Release Slots] ✅ Released ${removedCount} slot(s) for booking ${booking._id}`);
@@ -434,10 +436,10 @@ export class PaymentHandlerService implements OnModuleInit {
         // Call PayOS API to refund to bank
         // TODO: Integrate with PayOS refund API
         this.logger.log(`[Refund V2] Initiating bank refund via PayOS for ${amount}₫`);
-        
+
         // Placeholder for PayOS API call
         // await this.payosService.refund(booking.transaction.toString(), amount);
-        
+
         this.logger.log(`[Refund V2] ✅ Bank refund initiated for booking ${bookingId}`);
 
       } else if (refundTo === 'credit') {
@@ -543,7 +545,7 @@ export class PaymentHandlerService implements OnModuleInit {
       // Call PayOS API to transfer to bank
       // TODO: Integrate with PayOS transfer API
       this.logger.log(`[Withdraw V2] Initiating bank transfer via PayOS for ${amount}₫`);
-      
+
       // Placeholder for PayOS API call
       // await this.payosService.transfer(userId, amount);
 
@@ -685,106 +687,6 @@ export class PaymentHandlerService implements OnModuleInit {
     }
   }
 
-  /**
-   * Send confirmation emails to field owner and customer
-   * Non-blocking operation - errors are logged but don't fail the transaction
-   */
-  private async sendConfirmationEmails(bookingId: string, paymentMethod?: string): Promise<void> {
-    try {
-      // Populate booking with field and user details
-      const booking = await this.bookingModel
-        .findById(bookingId)
-        .populate('field')
-        .populate('user', 'fullName email phone')
-        .exec();
-
-      if (!booking || !booking.field || !booking.user) {
-        this.logger.warn(`[Confirmation Email] Booking ${bookingId} not fully populated`);
-        return;
-      }
-
-      const field = booking.field as any;
-      const customerUser = booking.user as any;
-      
-      const toVnd = (amount: number) => amount.toLocaleString('vi-VN') + '₫';
-      const emailPayload = {
-        field: { 
-          name: field.name, 
-          address: field.location?.address || '' 
-        },
-        customer: { 
-          fullName: customerUser.fullName, 
-          phone: customerUser.phone, 
-          email: customerUser.email 
-        },
-        booking: {
-          date: booking.date.toLocaleDateString('vi-VN'),
-          startTime: booking.startTime,
-          endTime: booking.endTime,
-          services: [],
-        },
-        pricing: {
-          services: [],
-          fieldPriceFormatted: toVnd(booking.bookingAmount || booking.totalPrice || 0),
-          totalFormatted: toVnd(
-            (booking.bookingAmount !== undefined && booking.platformFee !== undefined)
-              ? booking.bookingAmount + booking.platformFee
-              : (booking.totalPrice || 0)
-          ),
-        },
-        paymentMethod,
-      };
-
-      // Get field owner email
-      const ownerProfileId = field.owner?.toString();
-      if (ownerProfileId) {
-        let fieldOwnerProfile = await this.fieldOwnerProfileModel
-          .findById(ownerProfileId)
-          .lean()
-          .exec();
-
-        if (!fieldOwnerProfile) {
-          fieldOwnerProfile = await this.fieldOwnerProfileModel
-            .findOne({ user: new Types.ObjectId(ownerProfileId) })
-            .lean()
-            .exec();
-        }
-
-        let ownerEmail: string | undefined;
-        if (fieldOwnerProfile?.user) {
-          const ownerUser = await this.userModel
-            .findById(fieldOwnerProfile.user)
-            .select('email')
-            .lean()
-            .exec();
-          ownerEmail = ownerUser?.email;
-        }
-
-        // Send emails (non-blocking, errors logged but don't fail)
-        if (ownerEmail) {
-          await this.emailService
-            .sendFieldOwnerBookingNotification({
-              ...emailPayload,
-              to: ownerEmail,
-            })
-            .catch(err => this.logger.warn('[Confirmation Email] Failed to send owner email', err));
-        }
-
-        if (customerUser.email) {
-          await this.emailService
-            .sendCustomerBookingConfirmation({
-              ...emailPayload,
-              to: customerUser.email,
-              preheader: 'Thanh toán thành công - Xác nhận đặt sân',
-            })
-            .catch(err => this.logger.warn('[Confirmation Email] Failed to send customer email', err));
-        }
-      }
-    } catch (mailErr) {
-      // ✅ SECURITY: Email failures don't affect booking confirmation
-      this.logger.warn('[Confirmation Email] Failed to send confirmation emails (non-critical)', mailErr);
-    }
-  }
 }
 
 

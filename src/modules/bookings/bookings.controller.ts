@@ -290,6 +290,78 @@ export class BookingsController {
   }
 
   // ============================================================================
+  // FIELD OWNER NOTE APPROVAL (NEW)
+  // ============================================================================
+
+  /**
+   * Owner: list bookings that contain user note (pending by default)
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Get('owners/bookings/notes')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Owner - danh sách booking có ghi chú' })
+  @ApiQuery({ name: 'status', required: false, enum: ['pending', 'accepted', 'denied'] })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async listOwnerNoteBookings(
+    @Request() req: any,
+    @Query('status') status?: 'pending' | 'accepted' | 'denied',
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    const ownerUserId = this.getUserId(req);
+    return this.bookingsService.listOwnerNoteBookings(ownerUserId, { status, page, limit });
+  }
+
+  /**
+   * Owner: get booking detail (with note) ensuring ownership
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Get('owners/bookings/:bookingId')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Owner - chi tiết booking có ghi chú' })
+  async getOwnerBookingDetail(
+    @Request() req: any,
+    @Param('bookingId') bookingId: string,
+  ) {
+    const ownerUserId = this.getUserId(req);
+    return this.bookingsService.getOwnerBookingDetail(ownerUserId, bookingId);
+  }
+
+  /**
+   * Owner: accept user note and send payment link email (for online methods)
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Patch('owners/bookings/:bookingId/note/accept')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Owner - đồng ý ghi chú & gửi link thanh toán' })
+  async acceptOwnerNote(
+    @Request() req: any,
+    @Param('bookingId') bookingId: string,
+  ) {
+    const ownerUserId = this.getUserId(req);
+    // Best-effort IP from request headers/env
+    const ip = (req.headers['x-forwarded-for']?.split(',')[0] || req.ip || req.connection?.remoteAddress || '127.0.0.1');
+    return this.bookingsService.ownerAcceptNote(ownerUserId, bookingId, ip);
+  }
+
+  /**
+   * Owner: deny user note
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Patch('owners/bookings/:bookingId/note/deny')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Owner - từ chối ghi chú' })
+  async denyOwnerNote(
+    @Request() req: any,
+    @Param('bookingId') bookingId: string,
+    @Body('reason') reason?: string,
+  ) {
+    const ownerUserId = this.getUserId(req);
+    return this.bookingsService.ownerDenyNote(ownerUserId, bookingId, reason);
+  }
+
+  // ============================================================================
   // LEGACY/BACKWARD COMPATIBILITY ENDPOINTS
   // ============================================================================
 
