@@ -1,9 +1,8 @@
 import { Controller, Get, Param, Patch, Body, Query } from '@nestjs/common';
 import { User } from 'src/modules/users/entities/user.entity';
 import { AdminService } from './admin.service';
-import { UserRoleStatDto } from './dto/user-role-stats.dto';
-import { UserMonthlyStatsDto } from './dto/user-monthly-stats.dto';
-import { BookingMonthlyStatsDto } from './dto/booking-monthly-stats.dto';
+import { UserRoleStatDto, UserMonthlyStatsDto } from './dto/user.dto';
+import { BookingMonthlyStatsDto } from './dto/booking.dto';
 @Controller('admin')
 export class AdminController {
     constructor(private readonly adminService: AdminService) { }
@@ -60,12 +59,26 @@ export class AdminController {
         return this.adminService.getMonthlyCoachBookingsByYear(parsedYear);
     }
 
-    @Get('statistic/payments')
-    getPayments(
-        @Query('year') year?: string,
-        @Query('range') range: '1y' | '6m' | '3m' | '1m' = '1m',
+    @Get('monthly-revenue')
+    getMonthlyRevenue() {
+        return this.adminService.getMonthlyRevenue();
+    }
+
+    //monthly sales
+    @Get('monthly-requests-count')
+    getMonthlySales() {
+        return this.adminService.getMonthlySales();
+    }
+
+    @Get("revenue-graph")
+    getRevenueByMonth(
+        @Query("year") year?: number
     ) {
-        const selectedYear = year ? parseInt(year, 10) : new Date().getFullYear();
-        return this.adminService.getSuccessfulPayments(range, selectedYear);
+        return this.adminService.getRevenueGraph(year ? Number(year) : undefined);
+    }
+
+    @Get("transactions/most-recent")
+    getRecentTransactions() {
+        return this.adminService.getRecentTransactions();
     }
 }
