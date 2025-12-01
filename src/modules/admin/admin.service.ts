@@ -2,11 +2,10 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { User, UserDocument, UserRole } from 'src/modules/users/entities/user.entity';
-import { Transaction, TransactionDocument } from 'src/modules/transactions/entities/transaction.entity';
+import { Transaction, TransactionDocument, TransactionStatus } from 'src/modules/transactions/entities/transaction.entity';
 import { Booking, BookingDocument } from '../bookings/entities/booking.entity';
-import { UserRoleStatDto } from './dto/user-role-stats.dto';
-import { UserMonthlyStatsDto } from './dto/user-monthly-stats.dto';
-import { BookingMonthlyStatsDto } from './dto/booking-monthly-stats.dto';
+import { UserRoleStatDto, UserMonthlyStatsDto } from './dto/user.dto';
+import { BookingMonthlyStatsDto } from './dto/booking.dto';
 @Injectable()
 export class AdminService {
     constructor(
@@ -186,40 +185,191 @@ export class AdminService {
         ]);
     }
 
-    async getSuccessfulPayments(range: '1y' | '6m' | '3m' | '1m', year: number) {
+    //#region overview
+    async getMonthlyRevenue(): Promise<{
+        currentMonth: number;
+        lastMonth: number;
+        percentageChange: number;
+    }> {
         const now = new Date();
-        const currentYear = now.getFullYear();
 
-        const endDate = year === currentYear
-            ? now
-            : new Date(year, 11, 31, 23, 59, 59);
+        const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
 
-        const startOfYear = new Date(year, 0, 1);
+        const current = await this.transactionModel.aggregate([
+            {
+                $match: {
+                    direction: 'in',
+                    status: TransactionStatus.SUCCEEDED,
+                    createdAt: { $gte: startOfCurrentMonth },
+                },
+            },
+            { $group: { _id: null, total: { $sum: '$amount' } } },
+        ]);
 
-        let startDate = new Date(endDate);
-        switch (range) {
-            case '1y':
-                startDate.setFullYear(endDate.getFullYear() - 1);
-                break;
-            case '6m':
-                startDate.setMonth(endDate.getMonth() - 6);
-                break;
-            case '3m':
-                startDate.setMonth(endDate.getMonth() - 3);
-                break;
-            case '1m':
-                startDate.setMonth(endDate.getMonth() - 1);
-                break;
+        const currentMonth = current[0]?.total || 0;
+
+        const last = await this.transactionModel.aggregate([
+            {
+                $match: {
+                    direction: 'in',
+                    status: TransactionStatus.SUCCEEDED,
+                    createdAt: { $gte: startOfLastMonth, $lte: endOfLastMonth },
+                },
+            },
+            { $group: { _id: null, total: { $sum: '$amount' } } },
+        ]);
+
+        const lastMonth = last[0]?.total || 0;
+
+        const percentageChange =
+            lastMonth === 0
+                ? currentMonth === 0
+                    ? 0
+                    : 100
+                : ((currentMonth - lastMonth) / lastMonth) * 100;
+
+        return {
+            currentMonth,
+            lastMonth,
+            percentageChange: Number(percentageChange.toFixed(2)),
+        };
+    }
+
+    async getMonthlySales(): Promise<{
+        currentMonth: number;
+        lastMonth: number;
+        percentageChange: number;
+    }> {
+        const now = new Date();
+
+        const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+
+        const current = await this.transactionModel.aggregate([
+            {
+                $match: {
+                    direction: 'in',
+                    status: TransactionStatus.SUCCEEDED,
+                    createdAt: { $gte: startOfCurrentMonth },
+                },
+            },
+            { $group: { _id: null, count: { $sum: 1 } } },
+        ]);
+
+        const currentMonth = current[0]?.count || 0;
+
+        const last = await this.transactionModel.aggregate([
+            {
+                $match: {
+                    direction: 'in',
+                    status: TransactionStatus.SUCCEEDED,
+                    createdAt: { $gte: startOfLastMonth, $lte: endOfLastMonth },
+                },
+            },
+            { $group: { _id: null, count: { $sum: 1 } } },
+        ]);
+
+        const lastMonth = last[0]?.count || 0;
+
+        const percentageChange =
+            lastMonth === 0
+                ? currentMonth === 0
+                    ? 0
+                    : 100
+                : ((currentMonth - lastMonth) / lastMonth) * 100;
+
+        return {
+            currentMonth,
+            lastMonth,
+            percentageChange: Number(percentageChange.toFixed(2)),
+        };
+    }
+
+    async getRevenueGraph(year?: number) {
+        const selectedYear = year ?? new Date().getFullYear();
+
+        const startOfYear = new Date(selectedYear, 0, 1);
+        const endOfYear = new Date(selectedYear, 11, 31, 23, 59, 59, 999);
+
+        const raw = await this.transactionModel.aggregate([
+            {
+                $match: {
+                    status: 'succeeded',
+                    direction: 'in',
+                    createdAt: { $gte: startOfYear, $lte: endOfYear }
+                },
+            },
+            {
+                $group: {
+                    _id: { month: { $month: "$createdAt" } },
+                    revenue: { $sum: "$amount" }
+                }
+            },
+            {
+                $sort: { "_id.month": 1 }
+            }
+        ]);
+
+        const revenueMap = new Map(
+            raw.map(r => [r._id.month, r.revenue])
+        );
+
+        const monthlyRevenue: { month: number; revenue: number }[] = [];
+
+        for (let m = 1; m <= 12; m++) {
+            monthlyRevenue.push({
+                month: m,
+                revenue: revenueMap.get(m) || 0,
+            });
         }
 
-        if (startDate < startOfYear) startDate = startOfYear;
-
-        return this.transactionModel
-            .find({
-                type: 'payment',
-                status: 'succeeded',
-                createdAt: { $gte: startDate, $lte: endDate },
-            })
-            .exec();
+        return {
+            year: selectedYear,
+            months: monthlyRevenue
+        };
     }
+
+    async getRecentTransactions() {
+        const transactions = await this.transactionModel.aggregate([
+            {
+                $match: {
+                    status: "succeeded",
+                    direction: "in"
+                }
+            },
+            {
+                $sort: { createdAt: -1 }
+            },
+            { $limit: 5 },
+
+            // Join user info
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "user",
+                    foreignField: "_id",
+                    as: "user"
+                }
+            },
+            { $unwind: "$user" },
+
+            // Only keep needed fields
+            {
+                $project: {
+                    _id: 1,
+                    amount: 1,
+                    createdAt: 1,
+                    "user.avatar": 1,
+                    "user.fullName": 1,
+                    "user.email": 1
+                }
+            }
+        ]);
+
+        return transactions;
+    }
+    //#endregion
 }
