@@ -38,7 +38,7 @@ export class TournamentService {
         // Validate team size if provided
         const defaultTeamSize = TeamSizeMap[createTournamentDto.sportType]?.[createTournamentDto.category] || 1;
         const teamSize = createTournamentDto.teamSize || defaultTeamSize;
-        
+
         // Validate team size is reasonable
         if (teamSize < 1 || teamSize > 20) {
             throw new BadRequestException('Team size must be between 1 and 20');
@@ -53,7 +53,7 @@ export class TournamentService {
         );
 
         // Validate calculated participants match provided participants
-        if (createTournamentDto.minParticipants !== calculatedParticipants || 
+        if (createTournamentDto.minParticipants !== calculatedParticipants ||
             createTournamentDto.maxParticipants !== calculatedParticipants) {
             throw new BadRequestException(
                 `Participants count (${calculatedParticipants}) doesn't match teams configuration`
@@ -132,7 +132,8 @@ export class TournamentService {
 
             fieldReservations.push(reservation);
         }
-
+        const maxParticipants = createTournamentDto.numberOfTeams * teamSize;
+        const minParticipants = Math.ceil(maxParticipants * 0.5);
         // Calculate confirmation deadline (48 hours before tournament)
         const confirmationDeadline = new Date(tournamentDate.getTime() - 48 * 60 * 60 * 1000);
 
@@ -148,10 +149,12 @@ export class TournamentService {
             fields: [],
             numberOfTeams: createTournamentDto.numberOfTeams,
             teamSize: teamSize,
+            maxParticipants: maxParticipants, // Make sure this is set
+            minParticipants: minParticipants, // Make sure this is set
         });
 
         await tournament.save();
-        
+
         // Save reservations and link to tournament
         for (const reservation of fieldReservations) {
             reservation.tournament = tournament._id as Types.ObjectId;
@@ -196,7 +199,7 @@ export class TournamentService {
 
         // For team sports, check if teams are filled
         const currentTeamCount = Math.ceil(tournament.participants.length / tournament.teamSize);
-        
+
         // Check if we've reached maximum teams
         if (currentTeamCount >= tournament.numberOfTeams) {
             throw new BadRequestException('All tournament teams are already filled');
@@ -300,7 +303,7 @@ export class TournamentService {
         for (const tournament of tournaments) {
             // For team-based tournaments, check if we have enough participants to form minimum teams
             const minParticipantsNeeded = tournament.minParticipants;
-            
+
             if (tournament.participants.length < minParticipantsNeeded) {
                 // Refund all participants
                 for (const participant of tournament.participants) {
@@ -330,7 +333,7 @@ export class TournamentService {
 
     async findAvailableFields(sportType: string, location: string, date: string) {
         const tournamentDate = new Date(date);
-        
+
         // Find fields that are:
         // 1. Active and match sport type
         // 2. Match location (case-insensitive)
@@ -344,7 +347,7 @@ export class TournamentService {
 
     async findTournamentFields(sportType: string, location: string, date: string) {
         const tournamentDate = new Date(date);
-        
+
         // Find fields that might be available for tournaments
         const fields = await this.fieldModel.find({
             sportType,
@@ -362,9 +365,9 @@ export class TournamentService {
         }).populate('field');
 
         const reservedFieldIds = existingReservations.map(r => r.field._id.toString());
-        
+
         // Filter out reserved fields
-        const availableFields = fields.filter(field => 
+        const availableFields = fields.filter(field =>
             !reservedFieldIds.includes(field._id.toString())
         );
 
@@ -374,43 +377,43 @@ export class TournamentService {
     private calculateFieldCost(field: any, date: Date, startTime: string, endTime: string): number {
         // Calculate hours from start to end time
         const hours = this.calculateHours(startTime, endTime);
-        
+
         // Get base price or use default
         const basePrice = field.basePrice || 100000; // Default 100,000 VND/hour
-        
+
         // Apply any date-based pricing (weekend/holiday multipliers)
         const dayOfWeek = date.getDay();
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
         const multiplier = isWeekend ? 1.2 : 1.0; // 20% weekend surcharge
-        
+
         return Math.round(basePrice * hours * multiplier);
     }
 
     private calculateHours(startTime: string, endTime: string): number {
         if (!startTime || !endTime) return 0;
-        
+
         const [startHour, startMin] = startTime.split(':').map(Number);
         const [endHour, endMin] = endTime.split(':').map(Number);
-        
+
         const startTotalMinutes = startHour * 60 + startMin;
         const endTotalMinutes = endHour * 60 + endMin;
-        
+
         if (endTotalMinutes <= startTotalMinutes) {
             throw new BadRequestException('End time must be after start time');
         }
-        
+
         return (endTotalMinutes - startTotalMinutes) / 60;
     }
 
     async findAll(filters: any) {
         const query = this.tournamentModel.find(filters);
-        
+
         // Always populate organizer
         query.populate('organizer', 'fullName email avatarUrl');
-        
+
         // Sort by tournament date (upcoming first)
         query.sort({ tournamentDate: 1, createdAt: -1 });
-        
+
         return query.exec();
     }
 
@@ -506,7 +509,7 @@ export class TournamentService {
 
     async updateTournamentStatus(id: string, status: TournamentStatus, reason?: string) {
         const tournament = await this.tournamentModel.findById(id);
-        
+
         if (!tournament) {
             throw new NotFoundException('Tournament not found');
         }
@@ -521,7 +524,7 @@ export class TournamentService {
         };
 
         const allowedNextStatuses = allowedTransitions[tournament.status] || [];
-        
+
         if (!allowedNextStatuses.includes(status)) {
             throw new BadRequestException(
                 `Cannot transition from ${tournament.status} to ${status}`
@@ -529,10 +532,10 @@ export class TournamentService {
         }
 
         tournament.status = status;
-        
+
         if (status === TournamentStatus.CANCELLED && reason) {
             tournament.cancellationReason = reason;
-            
+
             // Refund participants if tournament is cancelled after confirmation
             if (tournament.status !== TournamentStatus.PENDING) {
                 for (const participant of tournament.participants) {
@@ -555,13 +558,13 @@ export class TournamentService {
 
     async getTournamentTeamInfo(id: string) {
         const tournament = await this.findOne(id);
-        
+
         const teamSize = tournament.teamSize || 1;
         const participants = tournament.participants.length;
         const teams = Math.ceil(participants / teamSize);
         const fullTeams = Math.floor(participants / teamSize);
         const partialTeamSize = participants % teamSize;
-        
+
         return {
             tournamentId: tournament._id,
             tournamentName: tournament.name,
@@ -581,20 +584,20 @@ export class TournamentService {
         // In a real app, you'd have more sophisticated team assignment
         const teamSize = tournament.teamSize || 1;
         const participants = tournament.participants;
-        
+
         const teams: any[] = [];
         for (let i = 0; i < Math.ceil(participants.length / teamSize); i++) {
             const startIdx = i * teamSize;
             const endIdx = startIdx + teamSize;
             const teamParticipants = participants.slice(startIdx, endIdx);
-            
+
             teams.push({
                 teamNumber: i + 1,
                 participants: teamParticipants.map((p: any) => p.user),
                 isFull: teamParticipants.length === teamSize
             });
         }
-        
+
         return teams;
     }
 }

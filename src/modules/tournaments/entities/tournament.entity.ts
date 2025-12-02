@@ -279,8 +279,18 @@ TournamentSchema.virtual('remainingSpots').get(function() {
 
 // Virtual for checking if tournament is full
 TournamentSchema.virtual('isFull').get(function() {
+  if (!this.numberOfTeams || !this.teamSize) return false;
   const totalSpots = this.numberOfTeams * this.teamSize;
   return this.participants.length >= totalSpots;
+});
+
+// Add a virtual for calculating currentTeams properly:
+TournamentSchema.virtual('currentTeams').get(function() {
+  if (!this.teamSize || this.teamSize === 0) return 0;
+  if (!this.participants || this.participants.length === 0) return 0;
+  
+  const calculatedTeams = Math.ceil(this.participants.length / this.teamSize);
+  return Math.min(calculatedTeams, this.numberOfTeams || 0);
 });
 
 // Virtual for getting formatted team info
@@ -376,21 +386,19 @@ TournamentSchema.methods.getParticipantTeam = function(userId: Types.ObjectId) {
   return this.teams.find(t => t.teamNumber === participant.teamNumber);
 };
 
-// Pre-save hook to update derived fields
 TournamentSchema.pre('save', function(next) {
   // Update maxParticipants and minParticipants based on teams
   if (this.numberOfTeams && this.teamSize) {
     const totalParticipants = this.numberOfTeams * this.teamSize;
     this.maxParticipants = totalParticipants;
-    this.minParticipants = totalParticipants; // For now, they're the same
-    
-    // Update teams full status
-    this.teams.forEach(team => {
-      team.isFull = team.members.length >= this.teamSize;
-    });
+    this.minParticipants = Math.ceil(totalParticipants * 0.5); // 50% for minimum
   }
+  
+  // Update teams full status
+  this.teams.forEach(team => {
+    team.isFull = team.members.length >= this.teamSize;
+  });
   
   next();
 });
-
 export type TournamentDocument = Tournament & Document;
