@@ -24,7 +24,7 @@ export class TransactionsService {
   constructor(
     @InjectModel(Transaction.name) private readonly transactionModel: Model<Transaction>,
     private readonly configService: ConfigService,
-  ) {}
+  ) { }
 
   /**
    * Tạo transaction record mới
@@ -47,15 +47,15 @@ export class TransactionsService {
       });
 
       // ✅ CRITICAL: Save with session if provided (for transaction atomicity)
-      const savedTransaction = session 
+      const savedTransaction = session
         ? await transaction.save({ session })
         : await transaction.save();
-      
+
       this.logger.log(`Created transaction ${savedTransaction._id} for booking ${data.bookingId}`);
       if (data.externalTransactionId) {
         this.logger.log(`  - External Transaction ID: ${data.externalTransactionId}`);
       }
-      
+
       return savedTransaction;
     } catch (error) {
       this.logger.error('Error creating transaction', error);
@@ -67,7 +67,7 @@ export class TransactionsService {
    * Cập nhật trạng thái transaction với VNPay hoặc PayOS data
    */
   async updatePaymentStatus(
-    transactionId: string, 
+    transactionId: string,
     status: TransactionStatus,
     receiptUrl?: string,
     gatewayData?: {
@@ -170,9 +170,9 @@ export class TransactionsService {
    */
   async getPaymentByBookingId(bookingId: string): Promise<Transaction | null> {
     return this.transactionModel
-      .findOne({ 
+      .findOne({
         booking: new Types.ObjectId(bookingId),
-        type: TransactionType.PAYMENT 
+        type: TransactionType.PAYMENT
       })
       .populate('user', 'fullName email')
       .exec();
@@ -212,7 +212,7 @@ export class TransactionsService {
   ): Promise<void> {
     try {
       const transaction = await this.transactionModel.findById(transactionId);
-      
+
       if (!transaction) {
         this.logger.warn(`Cannot log error for non-existent transaction ${transactionId}`);
         return;
@@ -225,7 +225,7 @@ export class TransactionsService {
         errorCode,
         errorMessage,
         // Store error details in a structured way if needed
-        ...(additionalData && { 
+        ...(additionalData && {
           metadata: {
             ...((transaction as any).metadata || {}),
             lastError: {
@@ -281,11 +281,11 @@ export class TransactionsService {
   }
 
 
-  createVNPayUrl(amount: number, orderId: string, ipAddr: string, returnUrlOverride?: string): string {
+  createVNPayUrl(amount: number, orderId: string, ipAddr: string, returnUrlOverride?: string, expireInMinutes: number = 10): string {
     const vnp_TmnCode = this.configService.get<string>('vnp_TmnCode');
     const vnp_HashSecret = this.configService.get<string>('vnp_HashSecret');
     const vnp_Url = this.configService.get<string>('vnp_Url');
-    
+
     // Read returnUrl from .env or use override from query param
     const configReturnUrl = this.configService.get<string>('vnp_ReturnUrl') || 'http://localhost:5173/transactions/vnpay/return';
     const vnp_ReturnUrl = returnUrlOverride || configReturnUrl;
@@ -294,16 +294,16 @@ export class TransactionsService {
       this.logger.error('VNPay configuration is missing. Please check environment variables.');
       throw new BadRequestException('Payment configuration error');
     }
-    
+
     // Trim whitespace from config values to prevent signature errors
     const tmnCode = vnp_TmnCode.trim();
     const hashSecret = vnp_HashSecret.trim();
     const vnpayUrl = vnp_Url.trim();
-    
+
     this.logger.debug(`[VNPay Config] TMN Code: ${tmnCode}`);
     this.logger.debug(`[VNPay Config] Hash Secret Length: ${hashSecret.length}`);
     this.logger.debug(`[VNPay Config] URL: ${vnpayUrl}`);
-    
+
     const date = new Date();
     const createDate = `${date.getFullYear()}${(date.getMonth() + 1)
       .toString()
@@ -311,6 +311,18 @@ export class TransactionsService {
         .getHours()
         .toString()
         .padStart(2, '0')}${date.getMinutes().toString().padStart(2, '0')}${date
+          .getSeconds()
+          .toString()
+          .padStart(2, '0')}`;
+
+    // Calculate expire date (VNPay supports vnp_ExpireDate)
+    const expireDateObj = new Date(date.getTime() + expireInMinutes * 60 * 1000);
+    const expireDate = `${expireDateObj.getFullYear()}${(expireDateObj.getMonth() + 1)
+      .toString()
+      .padStart(2, '0')}${expireDateObj.getDate().toString().padStart(2, '0')}${expireDateObj
+        .getHours()
+        .toString()
+        .padStart(2, '0')}${expireDateObj.getMinutes().toString().padStart(2, '0')}${expireDateObj
           .getSeconds()
           .toString()
           .padStart(2, '0')}`;
@@ -328,6 +340,7 @@ export class TransactionsService {
       vnp_ReturnUrl: vnp_ReturnUrl,
       vnp_IpAddr: ipAddr,
       vnp_CreateDate: createDate,
+      vnp_ExpireDate: expireDate,
     };
 
     // Sort parameters alphabetically
@@ -340,7 +353,7 @@ export class TransactionsService {
 
     // Create sign data - DO NOT encode
     const signData = qs.stringify(sorted, { encode: false });
-    
+
     // Create HMAC SHA512 signature
     const hmac = crypto.createHmac('sha512', hashSecret);
     const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
@@ -349,13 +362,13 @@ export class TransactionsService {
 
     // Build final URL - DO NOT encode
     const finalUrl = `${vnpayUrl}?${qs.stringify(sorted, { encode: false })}`;
-    
+
     // Debug logging
     this.logger.log(`[VNPay URL] Created payment URL for order ${orderId}`);
     this.logger.debug(`[VNPay URL] Sign data: ${signData}`);
     this.logger.debug(`[VNPay URL] Signature: ${signed}`);
     this.logger.debug(`[VNPay URL] Final URL (first 150 chars): ${finalUrl.substring(0, 150)}...`);
-    
+
     return finalUrl;
   }
 
@@ -397,8 +410,8 @@ export class TransactionsService {
     }
 
     // Determine refund amount (full or partial)
-    const finalRefundAmount = refundAmount && refundAmount > 0 
-      ? Math.min(refundAmount, originalTransaction.amount) 
+    const finalRefundAmount = refundAmount && refundAmount > 0
+      ? Math.min(refundAmount, originalTransaction.amount)
       : originalTransaction.amount;
 
     if (finalRefundAmount > originalTransaction.amount) {
@@ -407,8 +420,8 @@ export class TransactionsService {
       );
     }
 
-    const refundType = finalRefundAmount >= originalTransaction.amount 
-      ? TransactionType.REFUND_FULL 
+    const refundType = finalRefundAmount >= originalTransaction.amount
+      ? TransactionType.REFUND_FULL
       : TransactionType.REFUND_PARTIAL;
 
     // Create refund transaction record
@@ -465,11 +478,11 @@ export class TransactionsService {
     limit: number;
     offset: number;
   }> {
-    const query: any = { 
+    const query: any = {
       user: new Types.ObjectId(userId),
-      type: TransactionType.PAYMENT 
+      type: TransactionType.PAYMENT
     };
-    
+
     if (status) {
       query.status = status;
     }
@@ -574,15 +587,15 @@ export class TransactionsService {
     offset: number;
   }> {
     const query: any = { user: new Types.ObjectId(userId) };
-    
+
     if (options?.type) {
       query.type = options.type;
     }
-    
+
     if (options?.status) {
       query.status = options.status;
     }
-    
+
     if (options?.startDate || options?.endDate) {
       query.createdAt = {};
       if (options.startDate) {
@@ -597,7 +610,7 @@ export class TransactionsService {
     const offset = options?.offset || 0;
 
     const total = await this.transactionModel.countDocuments(query);
-    
+
     const transactions = await this.transactionModel
       .find(query)
       .populate('booking')
@@ -704,7 +717,7 @@ export class TransactionsService {
 
       const savedPayout = await payout.save();
       this.logger.log(`Created payout ${savedPayout._id} for booking ${bookingId}, amount: ${amount} VND`);
-      
+
       return savedPayout;
     } catch (error) {
       this.logger.error('Error creating payout', error);
@@ -720,7 +733,7 @@ export class TransactionsService {
       // Use system user ID if provided, otherwise use a default system user ID
       // You may want to create a SYSTEM_USER constant
       const userId = systemUserId || new Types.ObjectId('000000000000000000000000');
-      
+
       const fee = new this.transactionModel({
         booking: new Types.ObjectId(bookingId),
         amount: amount,
@@ -735,7 +748,7 @@ export class TransactionsService {
 
       const savedFee = await fee.save();
       this.logger.log(`Created fee ${savedFee._id} for booking ${bookingId}, amount: ${amount} VND`);
-      
+
       return savedFee;
     } catch (error) {
       this.logger.error('Error creating fee', error);
