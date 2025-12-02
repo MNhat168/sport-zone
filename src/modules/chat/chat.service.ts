@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ChatRoom, Message, ChatStatus, MessageType } from './entities/chat.entity';
 import { User } from '../users/entities/user.entity';
-import { FieldOwnerProfile } from '../fields/entities/field-owner-profile.entity';
+import { FieldOwnerProfile } from '../field-owner/entities/field-owner-profile.entity';
 import { Field } from '../fields/entities/field.entity';
 
 @Injectable()

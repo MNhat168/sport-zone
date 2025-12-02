@@ -9,7 +9,7 @@ import { UsersModule } from '../users/users.module';
 import { FieldsModule } from '../fields/fields.module';
 import { User, UserSchema } from '../users/entities/user.entity';
 import { Field, FieldSchema } from '../fields/entities/field.entity';
-import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../fields/entities/field-owner-profile.entity';
+import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entities/field-owner-profile.entity';
 
 @Module({
   imports: [
