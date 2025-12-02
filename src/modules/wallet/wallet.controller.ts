@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Post, ParseEnumPipe, Inject, forwardRef } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, ParseEnumPipe, Inject, forwardRef, UseGuards, Request, BadRequestException } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { WalletService } from './wallet.service';
 import { CreateWalletDto } from './dto/create-wallet.dto';
 import { AdjustWalletBalanceDto } from './dto/adjust-wallet-balance.dto';
@@ -14,6 +16,37 @@ export class WalletController {
     @Inject(forwardRef(() => PaymentHandlerService))
     private readonly paymentHandlerService: PaymentHandlerService,
   ) {}
+
+  /**
+   * Get wallet info for current authenticated user
+   * - Field owners: returns pendingBalance via `getFieldOwnerWallet`
+   * - Users: returns refundBalance via `getUserWallet` (may be null)
+   * - Admins: returns systemBalance via `getAdminWallet`
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Get('me')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get wallet for current authenticated user' })
+  @ApiResponse({ status: 200, description: 'Wallet info varies by role' })
+  async getMyWallet(@Request() req) {
+    const userId = req.user?.userId || req.user?._id || req.user?.id;
+    const role = req.user?.role || req.user?.roles || 'user';
+
+    if (!userId) {
+      throw new BadRequestException('User ID not found in request');
+    }
+
+    if (role === 'admin') {
+      return this.walletService.getAdminWallet();
+    }
+
+    if (role === 'field_owner') {
+      return this.walletService.getFieldOwnerWallet(userId);
+    }
+
+    // default: regular user
+    return this.walletService.getUserWallet(userId);
+  }
 
   /**
    * Lấy thông tin ví theo userId

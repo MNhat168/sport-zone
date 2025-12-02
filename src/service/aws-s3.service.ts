@@ -330,4 +330,47 @@ export class AwsS3Service implements OnModuleInit {
 
         return this.getS3Url(key);
     }
+
+    /**
+     * Upload registration document (images or PDF) from buffer
+     * Used for field owner registration documents (CCCD, business license, etc.)
+     * @param buffer File buffer
+     * @param mimetype MIME type of the file
+     * @returns Full S3 URL of the uploaded file
+     */
+    async uploadRegistrationDocumentFromBuffer(
+        buffer: Buffer,
+        mimetype: string,
+    ): Promise<string> {
+        if (!buffer || !mimetype) {
+            throw new Error('Buffer and mimetype are required');
+        }
+
+        const extension = mime.extension(mimetype);
+        const allowedExtensions = ['png', 'jpg', 'jpeg', 'webp', 'pdf'];
+        
+        if (!extension || !allowedExtensions.includes(extension)) {
+            throw new Error(`Unsupported file type: ${mimetype}. Allowed types: ${allowedExtensions.join(', ')}`);
+        }
+
+        const fileName = this.generatorService.fileName(extension);
+        const key = `registration-documents/${fileName}`;
+
+        try {
+            await this.s3Client.send(
+                new PutObjectCommand({
+                    Bucket: this.bucketName,
+                    Key: key,
+                    Body: buffer,
+                    ContentType: mimetype,
+                    ACL: 'public-read',
+                }),
+            );
+        } catch (error) {
+            console.error('Failed to upload registration document:', error);
+            throw new Error(`Failed to upload registration document: ${error.message}`);
+        }
+
+        return this.getS3Url(key);
+    }
 }

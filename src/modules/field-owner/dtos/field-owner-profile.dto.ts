@@ -9,6 +9,12 @@ export class FieldOwnerProfileDto {
     @ApiProperty({ example: '507f1f77bcf86cd799439012', description: 'ID của user' })
     user: string;
 
+    @ApiPropertyOptional({ example: 'John Doe', description: 'Tên đầy đủ của chủ sân' })
+    userFullName?: string;
+
+    @ApiPropertyOptional({ example: 'owner@example.com', description: 'Email của chủ sân' })
+    userEmail?: string;
+
     // Intentionally do not expose private user information
 
     @ApiProperty({ example: 'Sân bóng Phú Nhuận', description: 'Tên cơ sở vật chất' })
@@ -43,6 +49,18 @@ export class FieldOwnerProfileDto {
 
     @ApiProperty({ example: false, description: 'Trạng thái xác minh' })
     isVerified: boolean;
+
+    @ApiPropertyOptional({
+        example: '2025-10-02T23:32:00.000+07:00',
+        description: 'Thời gian được xác minh'
+    })
+    verifiedAt?: Date;
+
+    @ApiPropertyOptional({
+        example: '507f1f77bcf86cd799439013',
+        description: 'ID của admin đã xác minh'
+    })
+    verifiedBy?: string;
 
     @ApiPropertyOptional({
         example: 'https://example.com/business-license.jpg',

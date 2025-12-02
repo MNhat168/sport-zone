@@ -2,7 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
-
+import { HydratedDocument } from 'mongoose';
 /**
  * Transaction Status
  */
@@ -107,7 +107,7 @@ export class Transaction extends BaseEntity {
 
 export const TransactionSchema = SchemaFactory.createForClass(Transaction);
 configureBaseEntitySchema(TransactionSchema);
-
+export type TransactionDocument = HydratedDocument<Transaction>;
 // Indexes
 TransactionSchema.index({ booking: 1 });
 TransactionSchema.index({ user: 1 });

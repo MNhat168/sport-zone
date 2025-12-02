@@ -9,7 +9,7 @@ import * as qs from 'qs';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { TransactionStatus } from './entities/transaction.entity';
+import { TransactionStatus, TransactionType } from './entities/transaction.entity';
 import { 
     CreateVNPayUrlDto, 
     QueryTransactionDto, 
@@ -26,6 +26,8 @@ import {
     PayOSCancelResponseDto,
     CancelPayOSTransactionDto,
 } from './dto/payos.dto';
+import { Inject, forwardRef } from '@nestjs/common';
+import { FieldOwnerService } from '../field-owner/field-owner.service';
 
 @ApiTags('Transactions')
 @Controller('transactions')
@@ -38,6 +40,8 @@ export class TransactionsController {
         private readonly payosService: PayOSService,
         private readonly configService: ConfigService,
         private readonly eventEmitter: EventEmitter2,
+        @Inject(forwardRef(() => FieldOwnerService))
+        private readonly fieldOwnerService: FieldOwnerService,
     ) { }
 
     /**
@@ -1448,18 +1452,9 @@ export class TransactionsController {
             console.log('[PayOS Webhook] Data:', JSON.stringify(webhookData, null, 2));
             console.log('[PayOS Webhook] Signature (first 8):', receivedSignature.substring(0, 8) + '...');
 
-            // Prepare payload WITHOUT signature
-            const payload = {
-                orderCode: webhookData.orderCode,
-                amount: webhookData.amount,
-                description: webhookData.description,
-                accountNumber: webhookData.accountNumber,
-                reference: webhookData.reference,
-                transactionDateTime: webhookData.transactionDateTime,
-            };
-
             // Verify signature
-            const verificationResult = this.payosService.verifyCallback(payload, receivedSignature);
+            // Use webhookData directly as PayOS signs all fields in data object
+            const verificationResult = this.payosService.verifyCallback(webhookData, receivedSignature);
 
             if (!verificationResult.isValid) {
                 console.warn(`[PayOS Webhook] ❌ Invalid signature for order ${webhookData.orderCode}`);
@@ -1470,6 +1465,56 @@ export class TransactionsController {
             }
 
             console.log(`[PayOS Webhook] ✅ Signature verified for order ${webhookData.orderCode}`);
+            console.log(`[PayOS Webhook] Description received: "${webhookData.description}"`);
+
+            // Check if this is a bank account verification payment
+            // Payment creation uses prefix 'BANKACCVERIFY' (no underscore - PayOS strips special chars)
+            const isVerificationPayment = webhookData.description?.startsWith('BANKACCVERIFY');
+            
+            if (isVerificationPayment) {
+                console.log(`[PayOS Webhook] 🔍 Detected bank account verification payment for orderCode: ${webhookData.orderCode}`);
+                console.log(`[PayOS Webhook] Webhook status: ${webhookData.status}`);
+                console.log(`[PayOS Webhook] Counter account number: ${webhookData.counterAccountNumber || webhookData.accountNumber || 'NOT PROVIDED'}`);
+                console.log(`[PayOS Webhook] Counter account name: ${webhookData.counterAccountName || 'NOT PROVIDED'}`);
+                
+                // Extract bankAccountId from description if available (future extension)
+                // Example format: "BANK_ACC_VERIFY - {accountNumber} - {bankAccountId}"
+                let bankAccountId: string | null = null;
+                if (webhookData.description) {
+                    const parts = webhookData.description.split(' - ');
+                    if (parts.length >= 3) {
+                        bankAccountId = parts[2];
+                    }
+                }
+
+                // Process verification webhook (update BankAccount AND Transaction)
+                try {
+                    await this.fieldOwnerService.processVerificationWebhook(
+                        webhookData.orderCode,
+                        {
+                            counterAccountNumber: webhookData.counterAccountNumber || webhookData.accountNumber,
+                            counterAccountName: webhookData.counterAccountName,
+                            amount: webhookData.amount,
+                            status: webhookData.status || 'PAID',
+                            reference: webhookData.reference,
+                            transactionDateTime: webhookData.transactionDateTime,
+                        },
+                    );
+                    console.log(`[PayOS Webhook] ✅ Bank account verification processed for orderCode: ${webhookData.orderCode}`);
+                } catch (verificationError) {
+                    console.error(`[PayOS Webhook] ❌ Error processing bank account verification:`, verificationError);
+                    // Even if it fails, we return success to PayOS to avoid retries if it's a logic error
+                    // But ideally we should check if it's a retry-able error
+                }
+
+                // Verification payments are handled entirely by FieldOwnerService
+                return {
+                    code: '00',
+                    desc: 'Verification payment processed',
+                };
+            } else {
+                console.log(`[PayOS Webhook] ℹ️ Not a verification payment (description: "${webhookData.description}")`);
+            }
 
             // Find transaction by externalTransactionId (PayOS order code)
             const transaction = await this.transactionsService.getPaymentByExternalId(
@@ -1477,6 +1522,15 @@ export class TransactionsController {
             );
 
             if (!transaction) {
+                // For verification payments, it's OK if transaction doesn't exist
+                if (isVerificationPayment) {
+                    console.log(`[PayOS Webhook] ℹ️ Verification payment processed (no transaction record needed)`);
+                    return {
+                        code: '00',
+                        desc: 'Verification payment processed',
+                    };
+                }
+                
                 console.warn(`[PayOS Webhook] Transaction not found for orderCode: ${webhookData.orderCode}`);
                 return {
                     code: '01',

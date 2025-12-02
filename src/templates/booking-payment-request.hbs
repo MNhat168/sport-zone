@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Yêu cầu thanh toán</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            color: #111827;
+        }
+
+        .container {
+            max-width: 640px;
+            margin: 0 auto;
+            padding: 24px;
+            background: #ffffff;
+            border-radius: 12px;
+        }
+
+        .title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .muted {
+            color: #6b7280;
+        }
+
+        .section {
+            margin: 16px 0;
+            padding: 12px;
+            background: #f9fafb;
+            border-radius: 8px;
+        }
+
+        .row {
+            margin: 6px 0;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 12px 16px;
+            background: #10b981;
+            color: #fff;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+        }
+    </style>
+    <!-- Preheader -->
+    <span style="display:none!important;visibility:hidden;opacity:0;color:transparent;height:0;width:0;">Vui lòng hoàn
+        tất thanh toán để xác nhận đặt sân{{#if payment.expiresInMinutes}}. Liên kết hết hạn sau
+        {{payment.expiresInMinutes}} phút{{/if}}</span>
+</head>
+
+<body>
+    <div class="container">
+        <div class="title">{{title}}</div>
+        <div class="muted">Đơn đặt sân của bạn đã được chấp nhận. Vui lòng thanh toán để hoàn tất.</div>
+
+        {{#if payment.expiresInMinutes}}
+        <div class="section" style="background:#fff7ed;border:1px solid #fed7aa;">
+            <div class="row"><strong>Lưu ý:</strong> Liên kết thanh toán sẽ hết hạn sau {{payment.expiresInMinutes}}
+                phút.</div>
+            {{#if payment.expiresAt}}
+            <div class="row muted">Hết hạn vào: {{payment.expiresAt}}</div>
+            {{/if}}
+        </div>
+        {{/if}}
+
+        <div class="section">
+            <div class="row"><strong>Sân:</strong> {{field.name}}</div>
+            {{#if field.address}}
+            <div class="row"><strong>Địa chỉ:</strong> {{field.address}}</div>
+            {{/if}}
+            <div class="row"><strong>Thời gian:</strong> {{booking.date}} {{booking.startTime}} - {{booking.endTime}}
+            </div>
+            <div class="row"><strong>Tổng tiền:</strong> {{pricing.totalFormatted}}</div>
+            <div class="row"><strong>Phương thức thanh toán:</strong> {{payment.methodLabel}}</div>
+        </div>
+
+        <p>
+            <a class="button" href="{{payment.link}}" target="_blank">Thanh toán ngay</a>
+        </p>
+
+        <p class="muted">Nếu bạn không thực hiện đặt sân này, vui lòng bỏ qua email.</p>
+    </div>
+</body>
+
+</html>

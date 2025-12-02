@@ -20,4 +20,12 @@ export interface UserRepositoryInterface {
 
     findOneByCondition(condition: FilterQuery<User>): Promise<User | null>;
 
+    getAllUsers(
+        filter: FilterQuery<User>,
+        sortBy: string,
+        sortOrder: 'asc' | 'desc',
+        page: number,
+        limit: number,
+    ): Promise<{ data: User[]; total: number }>;
+
 }

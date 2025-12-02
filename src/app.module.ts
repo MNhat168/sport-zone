@@ -9,6 +9,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
 import { FieldsModule } from './modules/fields/fields.module';
+import { FieldOwnerModule } from './modules/field-owner/field-owner.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
 import { TournamentModule } from './modules/tournaments/tournaments.module';
@@ -22,6 +23,8 @@ import { SchedulesModule } from './modules/schedules/schedules.module';
 import { CoachesModule } from './modules/coaches/coaches.module';
 import { AmenitiesModule } from './modules/amenities/amenities.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import envConfig from './config/env.config';
+
 import { ChatModule } from '@modules/chat/chat.module';
 @Module({
   imports: [
@@ -29,6 +32,7 @@ import { ChatModule } from '@modules/chat/chat.module';
     ConfigModule.forRoot({
       isGlobal: true, // ← cho phép dùng ở mọi module
       envFilePath: '.env',
+      load: [envConfig], // Load custom config
     }),
     MongooseModule.forRoot(process.env.MONGODB_URI!, {
       connectionFactory: (connection) => {
@@ -51,6 +55,7 @@ import { ChatModule } from '@modules/chat/chat.module';
     UsersModule,
     ProfilesModule,
     FieldsModule,
+    FieldOwnerModule,
     BookingsModule,
     TransactionsModule,
     TournamentModule,

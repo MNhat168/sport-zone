@@ -6,7 +6,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { Booking, BookingSchema } from './entities/booking.entity';
 import { Schedule, ScheduleSchema } from '../schedules/entities/schedule.entity';
 import { Field, FieldSchema } from '../fields/entities/field.entity';
-import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../fields/entities/field-owner-profile.entity';
+import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entities/field-owner-profile.entity';
 import { User, UserSchema } from '../users/entities/user.entity';
 
 // Services and Controllers
@@ -24,6 +24,7 @@ import { AvailabilityService } from './services/availability.service';
 import { FieldBookingService } from './services/field-booking.service';
 import { SessionBookingService } from './services/session-booking.service';
 import { PaymentHandlerService } from './services/payment-handler.service';
+import { BookingEmailService } from './services/booking-email.service';
 
 /**
  * Bookings Module with Pure Lazy Creation pattern
@@ -60,10 +61,12 @@ import { PaymentHandlerService } from './services/payment-handler.service';
     FieldBookingService,
     SessionBookingService,
     PaymentHandlerService,
+    BookingEmailService,
   ],
   exports: [
     BookingsService,
     PaymentHandlerService, // Export để các module khác có thể dùng releaseBookingSlots
+    BookingEmailService,
   ],
 })
 export class BookingsModule { }

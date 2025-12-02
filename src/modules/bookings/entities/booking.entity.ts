@@ -2,7 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { SportType } from 'src/common/enums/sport-type.enum';
 import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
-
+import { HydratedDocument } from 'mongoose';
 export enum BookingType {
   FIELD = 'field',
   COACH = 'coach',
@@ -95,6 +95,10 @@ export class Booking extends BaseEntity {
   @Prop({ type: String, maxlength: 200 })
   note?: string;
 
+  // Note approval status from field owner when a note is provided by user
+  @Prop({ type: String, enum: ['pending', 'accepted', 'denied'], default: 'pending' })
+  noteStatus?: 'pending' | 'accepted' | 'denied';
+
   // Snapshot pricing data from Field at booking time (Pure Lazy Creation principle)
   @Prop({
     type: {
@@ -110,13 +114,14 @@ export class Booking extends BaseEntity {
   };
 }
 
+export type BookingDocument = HydratedDocument<Booking>;
 export const BookingSchema = SchemaFactory.createForClass(Booking);
 
 // Cấu hình timestamps từ BaseEntity
 configureBaseEntitySchema(BookingSchema);
 
 // Virtual getter for totalAmount (bookingAmount + platformFee)
-BookingSchema.virtual('totalAmount').get(function() {
+BookingSchema.virtual('totalAmount').get(function () {
   return (this.bookingAmount || 0) + (this.platformFee || 0);
 });
 
@@ -125,7 +130,7 @@ BookingSchema.set('toJSON', { virtuals: true });
 BookingSchema.set('toObject', { virtuals: true });
 
 // Pre-save hook: Calculate totalPrice from bookingAmount + platformFee for backward compatibility
-BookingSchema.pre('save', function(next) {
+BookingSchema.pre('save', function (next) {
   if (this.bookingAmount !== undefined && this.platformFee !== undefined) {
     // Auto-calculate totalPrice if not set (for backward compatibility)
     if (this.totalPrice === undefined || this.totalPrice === null) {

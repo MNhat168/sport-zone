@@ -25,31 +25,57 @@ export class AuthController {
    * @param accessToken - JWT access token
    * @param refreshToken - JWT refresh token  
    * @param rememberMe - Nếu true: persistent cookies (có expiration), nếu false: session cookies
+   * @param clientType - Phân biệt client (ví dụ: 'admin' | 'web')
+   *
+   * Lưu ý:
+   * - Mặc định (không truyền clientType hoặc clientType !== 'admin') sẽ dùng cookie:
+   *   + access_token
+   *   + refresh_token
+   * - Với clientType = 'admin' sẽ dùng cookie:
+   *   + access_token_admin
+   *   + refresh_token_admin
+   *
+   * Điều này cho phép FE admin và FE user có session tách biệt,
+   * dù cùng gọi tới 1 API domain.
    */
   private setAuthCookies(
     res: Response, 
     accessToken: string, 
     refreshToken: string, 
-    rememberMe: boolean
+    rememberMe: boolean,
+    clientType: 'admin' | 'web' = 'web',
   ): void {
     const isProduction = process.env.NODE_ENV === 'production';
-    
+
     // Đọc thời gian hết hạn từ ENV (cùng giá trị với JwtService)
     const accessExpCfg = this.configService.get<string>('JWT_ACCESS_TOKEN_EXPIRATION_TIME') ?? '1d';
     const refreshExpCfg = this.configService.get<string>('JWT_REFRESH_TOKEN_EXPIRATION_TIME') ?? '7d';
     const accessMs = this.parseExpirationToMs(accessExpCfg);
     const refreshMs = this.parseExpirationToMs(refreshExpCfg);
-    
-    // Cấu hình cookie chung
+
+    /**
+     * Cấu hình cookie chung
+     *
+     * Lưu ý về SameSite:
+     * - DEV (localhost): dùng 'lax' để đơn giản, không bắt buộc HTTPS
+     * - PROD (Vercel FE gọi Railway BE khác domain): bắt buộc dùng 'none' + secure: true
+     *   nếu không browser sẽ KHÔNG lưu/gửi cookie cross-site → JwtAccessTokenGuard luôn nhận user = null
+     */
+    const sameSiteOption = isProduction ? 'none' : 'lax';
+
     const cookieOptions = {
-      httpOnly: true,      // Không thể truy cập từ JavaScript (bảo mật)
-      secure: isProduction, // Chỉ gửi qua HTTPS ở production
-      sameSite: 'strict' as const, // Chống CSRF attack
+      httpOnly: true,          // Không thể truy cập từ JavaScript (bảo mật)
+      secure: isProduction,    // Chỉ gửi qua HTTPS ở production (Railway dùng HTTPS)
+      sameSite: sameSiteOption as 'lax' | 'none',
       path: '/',
     };
 
+    const isAdminClient = clientType === 'admin';
+    const accessCookieName = isAdminClient ? 'access_token_admin' : 'access_token';
+    const refreshCookieName = isAdminClient ? 'refresh_token_admin' : 'refresh_token';
+
     // Access token
-    res.cookie('access_token', accessToken, {
+    res.cookie(accessCookieName, accessToken, {
       ...cookieOptions,
       // Nếu rememberMe = true: cookie tồn tại 15 phút
       // Nếu rememberMe = false: session cookie (xóa khi đóng browser)
@@ -59,7 +85,7 @@ export class AuthController {
     });
 
     // Refresh token
-    res.cookie('refresh_token', refreshToken, {
+    res.cookie(refreshCookieName, refreshToken, {
       ...cookieOptions,
       // Nếu rememberMe = true: cookie tồn tại 7 ngày
       // Nếu rememberMe = false: session cookie (xóa khi đóng browser)
@@ -188,7 +214,7 @@ export class AuthController {
     status: 400,
     description: 'Email hoặc mật khẩu không đúng',
   })
-  async login(@Body() loginDto: LoginWithRememberDto, @Res() res: Response) {
+  async login(@Body() loginDto: LoginWithRememberDto, @Req() req: any, @Res() res: Response) {
     console.log('🔐 Login attempt for:', loginDto.email);
     
     const result = await this.authService.login({ 
@@ -198,12 +224,17 @@ export class AuthController {
     
     console.log('✅ Login successful, setting cookies');
     
-    // Set authentication cookies
+    // Xác định loại client từ header
+    const clientHeader = (req.headers['x-client-type'] as string) || '';
+    const clientType: 'admin' | 'web' = clientHeader === 'admin' ? 'admin' : 'web';
+
+    // Set authentication cookies (theo từng loại client)
     this.setAuthCookies(
       res, 
       result.accessToken, 
       result.refreshToken, 
-      !!loginDto.rememberMe
+      !!loginDto.rememberMe,
+      clientType,
     );
     
     return res.status(HttpStatus.OK).json({ user: result.user });
@@ -252,16 +283,22 @@ export class AuthController {
   @ApiOperation({ summary: 'Đăng nhập bằng Google OAuth' })
   async authWithGoogle(
     @Body() sign_in_token: SignInTokenDto & { rememberMe: boolean }, 
+    @Req() req: any,
     @Res() res: Response
   ) {
     const result = await this.authService.authenticateWithGoogle(sign_in_token);
     
+    // Xác định loại client từ header
+    const clientHeader = (req.headers['x-client-type'] as string) || '';
+    const clientType: 'admin' | 'web' = clientHeader === 'admin' ? 'admin' : 'web';
+
     // Set authentication cookies
     this.setAuthCookies(
       res, 
       result.accessToken, 
       result.refreshToken, 
-      !!sign_in_token.rememberMe
+      !!sign_in_token.rememberMe,
+      clientType,
     );
     
     return res.status(HttpStatus.OK).json({ 
@@ -283,10 +320,24 @@ export class AuthController {
 
     // Nếu refresh_token tồn tại, nghĩa là user đã đăng nhập (rememberMe hoặc session)
     // → Giữ nguyên pattern của cookie (persistent hoặc session)
-    const hasRefreshToken = !!req.cookies['refresh_token'];
+    const hasRefreshToken =
+      !!req.cookies['refresh_token'] || !!req.cookies['refresh_token_admin'];
+
+    // Xác định loại client:
+    // - Ưu tiên header X-Client-Type
+    // - Nếu không có, fallback theo cookie đang tồn tại
+    const headerClient = (req.headers['x-client-type'] as string) || '';
+    let clientType: 'admin' | 'web';
+    if (headerClient === 'admin') {
+      clientType = 'admin';
+    } else if (req.cookies['refresh_token_admin']) {
+      clientType = 'admin';
+    } else {
+      clientType = 'web';
+    }
     
-    // Set lại cookies với cùng pattern
-    this.setAuthCookies(res, newAccessToken, newRefreshToken, hasRefreshToken);
+    // Set lại cookies với cùng pattern & đúng loại client
+    this.setAuthCookies(res, newAccessToken, newRefreshToken, hasRefreshToken, clientType);
 
     return res.status(HttpStatus.OK).json({ 
       message: 'Token refreshed successfully' 
@@ -330,10 +381,18 @@ export class AuthController {
   // Đăng xuất - xóa cookies
   @Post('logout')
   @ApiOperation({ summary: 'Đăng xuất' })
-  async logout(@Res() res: Response) {
-    // Xóa cả 2 cookies
-    res.clearCookie('access_token', { path: '/' });
-    res.clearCookie('refresh_token', { path: '/' });
+  async logout(@Req() req: any, @Res() res: Response) {
+    // Xác định loại client từ header hoặc cookie
+    const headerClient = (req.headers['x-client-type'] as string) || '';
+    const isAdminClient =
+      headerClient === 'admin' || (!!req.cookies['access_token_admin'] && !req.cookies['access_token']);
+
+    const accessCookieName = isAdminClient ? 'access_token_admin' : 'access_token';
+    const refreshCookieName = isAdminClient ? 'refresh_token_admin' : 'refresh_token';
+
+    // Xóa cookies tương ứng với client hiện tại
+    res.clearCookie(accessCookieName, { path: '/' });
+    res.clearCookie(refreshCookieName, { path: '/' });
     
     return res.status(HttpStatus.OK).json({ 
       message: 'Logged out successfully' 

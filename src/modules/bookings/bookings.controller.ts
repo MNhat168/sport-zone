@@ -19,6 +19,8 @@ import { CancelBookingDto } from './dto/cancel-booking.dto';
 import { CreateSessionBookingLazyDto } from './dto/create-session-booking-lazy.dto';
 import { CancelSessionBookingDto } from './dto/cancel-session-booking.dto';
 import { GetUserBookingsDto, UserBookingsResponseDto } from './dto/get-user-bookings.dto';
+import { BookingInvoiceDto } from './dto/booking-invoice.dto';
+import { BookingUpcomingDto } from './dto/booking-upcoming.dto';
 import { Schedule } from '../schedules/entities/schedule.entity';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -289,6 +291,114 @@ export class BookingsController {
     });
   }
 
+  /**
+   * Get simplified booking invoices/status for current user
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Get('bookings/my-invoices')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get booking invoices/summary for current user' })
+  @ApiResponse({ status: 200, description: 'List of booking invoices', type: [BookingInvoiceDto] })
+  async getMyInvoices(
+    @Request() req,
+    @Query() query: GetUserBookingsDto,
+  ): Promise<{ invoices: BookingInvoiceDto[]; pagination: any }> {
+    const userId = this.getUserId(req);
+    return await this.bookingsService.getUserBookingSummaries(userId, {
+      status: query.status,
+      type: query.type,
+      limit: query.limit || 10,
+      page: query.page || 1,
+    });
+  }
+
+  /**
+   * Get upcoming appointment for current user (single card)
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Get('bookings/upcoming')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get next upcoming booking for current user' })
+  @ApiResponse({ status: 200, description: 'Upcoming booking or null', type: BookingUpcomingDto })
+  async getUpcoming(
+    @Request() req,
+  ): Promise<BookingUpcomingDto | null> {
+    const userId = this.getUserId(req);
+    return await this.bookingsService.getUpcomingBooking(userId);
+  }
+
+  // ============================================================================
+  // FIELD OWNER NOTE APPROVAL (NEW)
+  // ============================================================================
+
+  /**
+   * Owner: list bookings that contain user note (pending by default)
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Get('owners/bookings/notes')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Owner - danh sách booking có ghi chú' })
+  @ApiQuery({ name: 'status', required: false, enum: ['pending', 'accepted', 'denied'] })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async listOwnerNoteBookings(
+    @Request() req: any,
+    @Query('status') status?: 'pending' | 'accepted' | 'denied',
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    const ownerUserId = this.getUserId(req);
+    return this.bookingsService.listOwnerNoteBookings(ownerUserId, { status, page, limit });
+  }
+
+  /**
+   * Owner: get booking detail (with note) ensuring ownership
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Get('owners/bookings/:bookingId')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Owner - chi tiết booking có ghi chú' })
+  async getOwnerBookingDetail(
+    @Request() req: any,
+    @Param('bookingId') bookingId: string,
+  ) {
+    const ownerUserId = this.getUserId(req);
+    return this.bookingsService.getOwnerBookingDetail(ownerUserId, bookingId);
+  }
+
+  /**
+   * Owner: accept user note and send payment link email (for online methods)
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Patch('owners/bookings/:bookingId/note/accept')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Owner - đồng ý ghi chú & gửi link thanh toán' })
+  async acceptOwnerNote(
+    @Request() req: any,
+    @Param('bookingId') bookingId: string,
+  ) {
+    const ownerUserId = this.getUserId(req);
+    // Best-effort IP from request headers/env
+    const ip = (req.headers['x-forwarded-for']?.split(',')[0] || req.ip || req.connection?.remoteAddress || '127.0.0.1');
+    return this.bookingsService.ownerAcceptNote(ownerUserId, bookingId, ip);
+  }
+
+  /**
+   * Owner: deny user note
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Patch('owners/bookings/:bookingId/note/deny')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Owner - từ chối ghi chú' })
+  async denyOwnerNote(
+    @Request() req: any,
+    @Param('bookingId') bookingId: string,
+    @Body('reason') reason?: string,
+  ) {
+    const ownerUserId = this.getUserId(req);
+    return this.bookingsService.ownerDenyNote(ownerUserId, bookingId, reason);
+  }
+
   // ============================================================================
   // LEGACY/BACKWARD COMPATIBILITY ENDPOINTS
   // ============================================================================
@@ -410,3 +520,4 @@ export class BookingsController {
     });
   }
 }
+
