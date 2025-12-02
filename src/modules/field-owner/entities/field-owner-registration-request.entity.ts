@@ -64,16 +64,24 @@ export class FieldOwnerRegistrationRequest extends BaseEntity {
   @Prop({
     type: {
       fullName: { type: String },
-      idNumber: { type: String },
-      address: { type: String },
+      idNumber: { type: String }, // Deprecated, use identityCardNumber
+      identityCardNumber: { type: String },
+      address: { type: String }, // Deprecated, use permanentAddress
+      permanentAddress: { type: String },
+      dateOfBirth: { type: String }, // Store as string or Date? User requirements said "dateOfBirth", often string from OCR. I'll use String for OCR data.
+      expirationDate: { type: String },
     },
     required: false,
     _id: false,
   })
   ekycData?: {
-    fullName: string; // Extracted from eKYC
-    idNumber: string; // Extracted from eKYC
-    address: string; // Extracted from eKYC
+    fullName: string;
+    idNumber?: string;
+    identityCardNumber?: string;
+    address?: string;
+    permanentAddress?: string;
+    dateOfBirth?: string;
+    expirationDate?: string;
   };
 
   // Facility Information

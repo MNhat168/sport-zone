@@ -1,8 +1,13 @@
-import { Controller, Get, Param, Patch, Body, Query } from '@nestjs/common';
+import { Controller, Get, Param, Patch, Body, Query, UseGuards } from '@nestjs/common';
 import { User } from 'src/modules/users/entities/user.entity';
 import { AdminService } from './admin.service';
 import { UserRoleStatDto, UserMonthlyStatsDto } from './dto/user.dto';
 import { BookingMonthlyStatsDto } from './dto/booking.dto';
+import { ListTransactionsDto } from './dto/list-transactions.dto';
+import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
+import { RolesGuard } from 'src/common/guards/roles.guard';
+import { Roles } from 'src/decorators/roles.decorator';
+import { UserRole } from 'src/common/enums/user-role.enum';
 @Controller('admin')
 export class AdminController {
     constructor(private readonly adminService: AdminService) { }
@@ -80,5 +85,13 @@ export class AdminController {
     @Get("transactions/most-recent")
     getRecentTransactions() {
         return this.adminService.getRecentTransactions();
+    }
+
+    // Admin: Danh sách giao dịch có filter/sort/pagination
+    @Get('transactions')
+    @UseGuards(JwtAccessTokenGuard, RolesGuard)
+    @Roles(UserRole.ADMIN)
+    listTransactions(@Query() query: ListTransactionsDto) {
+        return this.adminService.listTransactions(query);
     }
 }

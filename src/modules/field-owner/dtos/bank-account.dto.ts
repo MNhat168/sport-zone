@@ -39,17 +39,13 @@ export class CreateBankAccountDto {
   @IsOptional()
   @IsBoolean()
   isDefault?: boolean;
+
+  @ApiPropertyOptional({ example: false, description: 'Skip automatic verification payment creation (for admin/testing)' })
+  @IsOptional()
+  @IsBoolean()
+  skipVerification?: boolean;
 }
 
-export class VerifyBankAccountDto {
-  @ApiProperty({ example: 'VCB', description: 'Mã ngân hàng' })
-  @IsString()
-  bankCode: string;
-
-  @ApiProperty({ example: '1234567890', description: 'Số tài khoản' })
-  @IsString()
-  accountNumber: string;
-}
 
 export class UpdateBankAccountStatusDto {
   @ApiProperty({ enum: BankAccountStatus, description: 'Trạng thái mới' })
@@ -164,13 +160,22 @@ export class BankAccountResponseDto {
 
   @ApiProperty()
   updatedAt: Date;
+
+  // Verification payment fields
+  @ApiPropertyOptional({ example: 'https://pay.payos.vn/web/...', description: 'PayOS payment URL for verification' })
+  verificationUrl?: string;
+
+  @ApiPropertyOptional({ example: 'https://img.vietqr.io/...', description: 'QR code URL for verification payment' })
+  verificationQrCode?: string;
+
+  @ApiPropertyOptional({ enum: ['pending', 'paid', 'failed'], description: 'Current verification payment status' })
+  verificationPaymentStatus?: 'pending' | 'paid' | 'failed';
+
+  @ApiPropertyOptional({ example: true, description: 'Whether verification payment is required' })
+  needsVerification?: boolean;
+
+  @ApiPropertyOptional({ example: '123456789', description: 'PayOS order code for verification payment' })
+  verificationOrderCode?: string;
 }
 
-export class PayOSBankAccountValidationResponseDto {
-  @ApiProperty({ example: true, description: 'Tài khoản có hợp lệ không' })
-  isValid: boolean;
-
-  @ApiProperty({ example: 'NGUYEN VAN A', description: 'Tên chủ tài khoản từ PayOS' })
-  accountName: string;
-}
 

@@ -1,4 +1,4 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Prop, Schema, SchemaFactory, raw } from '@nestjs/mongoose';
 import { SportType } from 'src/common/enums/sport-type.enum';
 
 @Schema({ _id: false })
@@ -8,6 +8,26 @@ export class FacilityInfo {
 
   @Prop({ required: true })
   facilityLocation: string;
+
+  @Prop(
+    raw({
+      _id: false,
+      type: {
+        type: String,
+        enum: ['Point'],
+        default: 'Point',
+        required: true,
+      },
+      coordinates: {
+        type: [Number],
+        required: true,
+      },
+    }),
+  )
+  facilityLocationCoordinates?: {
+    type: 'Point';
+    coordinates: [number, number]; // [longitude, latitude] in GeoJSON format
+  };
 
   @Prop({ type: [String], enum: SportType })
   supportedSports?: SportType[];

@@ -45,6 +45,12 @@ export class User extends BaseEntity {
 
   @Prop({ type: Boolean, default: true })
   isActive: boolean;
+
+  @Prop({ type: String })
+  idNumber?: string; // Số CMND/CCCD từ EKYC
+
+  @Prop({ type: String })
+  address?: string; // Địa chỉ từ EKYC
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

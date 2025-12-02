@@ -41,30 +41,15 @@ export function createPayOSSignature(
 }
 
 /**
- * Verify PayOS webhook/callback signature
+ * Verify PayOS webhook/callback signature.
+ *
+ * Lưu ý quan trọng:
+ * - Theo spec mới của PayOS, signature được tính trên TOÀN BỘ các field của object `data`
+ *   (trừ field `signature` nếu có, và các field null/undefined/rỗng).
+ * - Vì vậy ta phải duyệt dynamic tất cả key trong `data`, sort theo alphabet rồi join
+ *   thành chuỗi query `key1=value1&key2=value2&...` trước khi hash.
  * 
- * IMPORTANT: PayOS sends data in 2 formats:
- * 
- * 1. Return URL (GET): signature in query params
- *    ?orderCode=123&amount=1000&signature=abc123...
- * 
- * 2. Webhook (POST): signature at root level
- *    { 
- *      "data": { orderCode, amount, ... },
- *      "signature": "abc123..."
- *    }
- * 
- * CRITICAL FIX: PayOS webhook sends EXTRA fields (virtualAccountNumber, currency, 
- * paymentLinkId, code, desc, counterAccountBankId, etc.) but signature is ONLY 
- * calculated from these 6 STANDARD fields:
- * - accountNumber
- * - amount
- * - description
- * - orderCode
- * - reference
- * - transactionDateTime
- * 
- * @param data - Data WITHOUT signature field (will be removed if present)
+ * @param data - Object `data` PayOS gửi (KHÔNG bao gồm signature, hoặc nếu có sẽ bị bỏ qua)
  * @param receivedSignature - Signature to verify
  * @param checksumKey - PayOS checksum key
  * @returns true if valid
@@ -75,54 +60,60 @@ export function verifyPayOSSignature(
   checksumKey: string
 ): boolean {
   try {
-    // ✅ FIX: Extract ONLY the 6 standard fields used for signature calculation
-    // PayOS webhook may include extra fields, but signature is only based on these 6
-    const standardFields = {
-      accountNumber: data.accountNumber,
-      amount: data.amount,
-      description: data.description,
-      orderCode: data.orderCode,
-      reference: data.reference,
-      transactionDateTime: data.transactionDateTime,
-    };
-    
-    // Log all received fields for debugging
-    console.log('[PayOS Signature] All received fields:', Object.keys(data).sort().join(', '));
-    console.log('[PayOS Signature] Using standard 6 fields for verification');
-    
-    // Sort keys alphabetically (CRITICAL for PayOS)
-    const sortedKeys = Object.keys(standardFields).sort();
-    
-    // Build query string: key1=value1&key2=value2
-    const dataString = sortedKeys
-      .map(key => `${key}=${standardFields[key]}`)
-      .join('&');
-    
-    console.log('[PayOS Signature] Data to sign (query):', dataString);
-    console.log('[PayOS Signature] Data length:', dataString.length);
-    console.log('[PayOS Signature] Keys:', sortedKeys.join(', '));
-    
-    // Generate expected signature
-    const expectedSignature = crypto
-      .createHmac('sha256', checksumKey)
-      .update(dataString)
-      .digest('hex');
-    
-    console.log('[PayOS Signature] Generated (first 8):', expectedSignature.substring(0, 8) + '...');
-    console.log('[PayOS Signature] Received (first 8):', receivedSignature.substring(0, 8) + '...');
-    
-    // Compare signatures
-    const isValid = expectedSignature === receivedSignature;
-    
-    if (!isValid) {
-      console.warn('[PayOS Signature] ❌ Signature verification failed');
-      console.log('[PayOS Signature] Expected:', expectedSignature);
-      console.log('[PayOS Signature] Received:', receivedSignature);
-    } else {
-      console.log('[PayOS Signature] ✅ Signature verified');
+    // 1) Log all received fields (insertion order preserved by V8)
+    const allKeys = Object.keys(data || {});
+    console.log('[PayOS Signature] All received fields:', allKeys.sort().join(', '));
+
+    // Helpers
+    const buildQuery = (obj: Record<string, any>, keys: string[], includeEmpty: boolean) =>
+      keys
+        .filter((k) => includeEmpty ? true : (obj[k] !== null && obj[k] !== undefined && obj[k] !== ''))
+        .map((k) => `${k}=${obj[k]}`)
+        .join('&');
+
+    // Prepare variants of keys
+    const keysOrig = Object.keys(data || {});                 // original/insertion order
+    const keysAlpha = [...keysOrig].sort();                   // alphabetical
+
+    // Sanity: payloads to try (broadest to narrowest)
+    const candidates: { label: string; payload: string }[] = [];
+
+    // A1. All fields (alphabetical), include empty values
+    candidates.push({ label: 'all-alpha-include-empty', payload: buildQuery(data, keysAlpha, true) });
+    // A2. All fields (original order), include empty values
+    candidates.push({ label: 'all-orig-include-empty', payload: buildQuery(data, keysOrig, true) });
+
+    // B1. All fields (alphabetical), skip empty values
+    candidates.push({ label: 'all-alpha-nonempty', payload: buildQuery(data, keysAlpha, false) });
+    // B2. All fields (original order), skip empty values
+    candidates.push({ label: 'all-orig-nonempty', payload: buildQuery(data, keysOrig, false) });
+
+    // C. Six canonical fields (alphabetical)
+    const six = ['accountNumber','amount','description','orderCode','reference','transactionDateTime'];
+    if (six.every((k) => k in (data || {}))) {
+      const sixAlpha = [...six].sort();
+      candidates.push({ label: 'six-fields-alpha', payload: buildQuery(data, sixAlpha, true) });
+      // Also try given order (as documented order)
+      candidates.push({ label: 'six-fields-given', payload: buildQuery(data, six, true) });
     }
-    
-    return isValid;
+
+    // D. JSON stringify of the ORIGINAL object
+    candidates.push({ label: 'json-stringify', payload: JSON.stringify(data || {}) });
+
+    // 2) Try candidates sequentially
+    for (const c of candidates) {
+      const expected = crypto.createHmac('sha256', checksumKey).update(c.payload).digest('hex');
+      const ok = expected === receivedSignature;
+      console.log(`[PayOS Signature] Try ${c.label}: ${ok ? '✅ match' : '❌ no match'}`);
+      if (ok) return true;
+      if (c.label.startsWith('six-fields')) {
+        console.log('[PayOS Signature] six payload:', c.payload);
+        console.log('[PayOS Signature] six expected:', expected);
+        console.log('[PayOS Signature] received:', receivedSignature);
+      }
+    }
+
+    return false;
   } catch (error) {
     console.error('[PayOS Signature] Error:', error.message);
     return false;

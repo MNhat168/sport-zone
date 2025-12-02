@@ -3,6 +3,7 @@ import {
   Logger,
   InternalServerErrorException,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -22,6 +23,7 @@ export class EkycService {
   private readonly diditApiKey: string;
   private readonly diditApiSecret: string;
   private readonly diditBaseUrl: string;
+  private readonly diditWorkflowId: string;
   private readonly isMockMode: boolean;
 
   constructor(
@@ -38,6 +40,8 @@ export class EkycService {
     this.diditBaseUrl =
       this.configService.get<string>('app.didit.baseUrl') ||
       'https://verification.didit.me';
+    this.diditWorkflowId =
+      this.configService.get<string>('app.didit.workflowId') || '';
     this.isMockMode =
       this.configService.get<string>('app.didit.mockMode') === 'true';
 
@@ -45,6 +49,8 @@ export class EkycService {
       this.logger.warn('⚠️  didit eKYC running in MOCK MODE');
     } else if (!this.diditApiKey) {
       this.logger.warn('⚠️  DIDIT_API_KEY is not set. Consider enabling MOCK MODE for local development.');
+    } else if (!this.diditWorkflowId) {
+      this.logger.warn('⚠️  DIDIT_WORKFLOW_ID is not set. This is required for creating eKYC sessions.');
     }
   }
 
@@ -56,11 +62,28 @@ export class EkycService {
   async createEkycSession(
     userId: string,
   ): Promise<{ sessionId: string; redirectUrl: string }> {
+    // Validate userId
+    if (!userId || userId.trim() === '') {
+      this.logger.error('Invalid userId provided to createEkycSession', {
+        userId,
+      });
+      throw new BadRequestException('User ID không hợp lệ.');
+    }
+
     try {
-      // Mock mode for development/testing
-      if (this.isMockMode) {
+      // Fallback to mock mode if API key is missing (for development)
+      const shouldUseMockMode = this.isMockMode || (!this.diditApiKey && !this.diditApiSecret);
+      
+      if (shouldUseMockMode) {
+        if (!this.isMockMode && !this.diditApiKey) {
+          this.logger.warn(
+            `[MOCK FALLBACK] DIDIT_API_KEY not set, using mock mode for user ${userId}`,
+          );
+        }
+        
         const sessionId = `mock_${Date.now()}_${userId}`;
-        const redirectUrl = `${this.configService.get('app.frontendUrl')}/mock-ekyc?session=${sessionId}`;
+        const frontendUrl = this.configService.get('app.frontendUrl') || 'http://localhost:3001';
+        const redirectUrl = `${frontendUrl}/mock-ekyc?session=${sessionId}`;
 
         this.logger.log(
           `[MOCK] Created eKYC session ${sessionId} for user ${userId}`,
@@ -69,41 +92,79 @@ export class EkycService {
         return { sessionId, redirectUrl };
       }
 
-      // Call didit API để tạo session
+      // Validate workflow ID is set
+      if (!this.diditWorkflowId) {
+        this.logger.error('DIDIT_WORKFLOW_ID is not configured', { userId });
+        throw new BadRequestException(
+          'Cấu hình eKYC chưa hoàn tất. Vui lòng liên hệ quản trị viên.',
+        );
+      }
+
+      // Call didit API v2 để tạo session
+      // Default to port 5173 (Vite dev server) if FRONTEND_URL is not set
+      const frontendUrl = this.configService.get('app.frontendUrl') || 'http://localhost:5173';
+      const callbackUrl = `${frontendUrl}/field-owner/ekyc/callback`;
+
       const response = await firstValueFrom(
         this.httpService.post(
-          `${this.diditBaseUrl}/v1/ekyc/sessions`,
+          `${this.diditBaseUrl}/v2/session/`,
           {
-            userId,
-            // Các params khác theo didit docs
-            // locale: 'vi',
-            // documentTypes: ['NATIONAL_ID'],
+            workflow_id: this.diditWorkflowId,
+            callback: callbackUrl,
+            vendor_data: userId,
+            metadata: {
+              user_id: userId,
+            },
           },
           {
             headers: {
-              Authorization: `Bearer ${this.diditApiKey}`,
+              'x-api-key': this.diditApiKey,
               'Content-Type': 'application/json',
             },
           },
         ),
       );
 
-      const { sessionId, redirectUrl } = response.data;
+      // Didit v2 API returns session_id and url
+      const { session_id, url } = response.data;
 
-      this.logger.log(`Created eKYC session ${sessionId} for user ${userId}`);
+      if (!session_id || !url) {
+        this.logger.error('Invalid response from didit API', {
+          response: response.data,
+          userId,
+        });
+        throw new InternalServerErrorException(
+          'Phản hồi không hợp lệ từ hệ thống xác thực.',
+        );
+      }
 
-      return { sessionId, redirectUrl };
+      this.logger.log(`Created eKYC session ${session_id} for user ${userId}`);
+
+      // Map to expected format
+      return { 
+        sessionId: session_id, 
+        redirectUrl: url 
+      };
     } catch (error: any) {
       const errorMessage = error?.response?.data?.message || error?.message || 'Unknown error';
       const errorStatus = error?.response?.status || error?.code;
       
       this.logger.error('Failed to create eKYC session:', {
+        userId,
         message: errorMessage,
         status: errorStatus,
-        url: `${this.diditBaseUrl}/v1/ekyc/sessions`,
+        url: `${this.diditBaseUrl}/v2/session/`,
         hasApiKey: !!this.diditApiKey,
+        hasWorkflowId: !!this.diditWorkflowId,
         isMockMode: this.isMockMode,
+        errorStack: error?.stack,
+        responseData: error?.response?.data,
       });
+      
+      // If it's a BadRequestException, re-throw it
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       
       throw new InternalServerErrorException(
         'Không thể tạo phiên xác thực eKYC. Vui lòng thử lại sau.',
@@ -131,13 +192,13 @@ export class EkycService {
         return this.getMockEkycStatus(sessionId);
       }
 
-      // Call didit API để lấy session status
+      // Call didit API v2 để lấy session decision/status
       const response = await firstValueFrom(
         this.httpService.get(
-          `${this.diditBaseUrl}/v1/ekyc/sessions/${sessionId}`,
+          `${this.diditBaseUrl}/v2/session/${sessionId}/decision/`,
           {
             headers: {
-              Authorization: `Bearer ${this.diditApiKey}`,
+              'x-api-key': this.diditApiKey,
             },
           },
         ),
@@ -145,7 +206,7 @@ export class EkycService {
 
       const diditData = response.data;
 
-      // Map didit response sang format của mình
+      // Map didit v2 response sang format của mình
       let status: 'pending' | 'verified' | 'failed' = 'pending';
       let ekycData: {
         fullName: string;
@@ -154,24 +215,66 @@ export class EkycService {
       } | undefined = undefined;
       let verifiedAt: Date | undefined = undefined;
 
-      if (
-        diditData.status === 'completed' ||
-        diditData.status === 'verified'
-      ) {
+      // Didit v2 decision response structure
+      // Check decision status: 'approved', 'rejected', 'pending', etc.
+      const decisionStatus = diditData.decision?.status || diditData.status;
+      
+      this.logger.log(`[EkycService] Checking status for ${sessionId}: Raw status = ${decisionStatus}`);
+      
+      const normalizedStatus = String(decisionStatus || '').toLowerCase();
+      
+      if (['approved', 'completed', 'verified'].includes(normalizedStatus)) {
         status = 'verified';
+        
+        this.logger.log(`[EkycService] ✅ Didit response for ${sessionId}: ${JSON.stringify(diditData)}`);
+
         verifiedAt = new Date(
-          diditData.completedAt || diditData.verifiedAt || Date.now(),
+          diditData.decision?.completed_at || 
+          diditData.completed_at || 
+          diditData.verified_at || 
+          Date.now(),
         );
-        ekycData = {
-          fullName: diditData.data?.fullName || diditData.data?.full_name,
-          idNumber: diditData.data?.idNumber || diditData.data?.id_number,
-          address: diditData.data?.address,
-        };
+        
+        // Extract data from didit response
+        // Priority: id_verification (new structure) > decision.data > data > extracted_data (old structures)
+        const idVerification = diditData.id_verification;
+        const decisionData = diditData.decision?.data || diditData.data || {};
+        const extractedData = decisionData.extracted_data || decisionData;
+
+        // Use id_verification if available (new Didit API structure)
+        if (idVerification) {
+          // Construct full name from first_name + last_name if full_name is not available
+          const fullName = idVerification.full_name || 
+            (idVerification.first_name && idVerification.last_name 
+              ? `${idVerification.first_name} ${idVerification.last_name}`.trim()
+              : '');
+
+          ekycData = {
+            fullName: fullName || '',
+            // Prefer personal_number (12 digits) over document_number (9 digits)
+            idNumber: idVerification.personal_number || idVerification.document_number || '',
+            // Use formatted_address if available, fallback to address, or empty string if null
+            address: idVerification.formatted_address || idVerification.address || '',
+          };
+        } else {
+          // Fallback to old structure for backward compatibility
+          ekycData = {
+            fullName: extractedData.fullName || extractedData.full_name || extractedData.name || extractedData.ocr_name || '',
+            idNumber: extractedData.idNumber || extractedData.id_number || extractedData.document_number || extractedData.ocr_id_number || '',
+            address: extractedData.address || extractedData.residential_address || extractedData.ocr_address || '',
+          };
+        }
+        
+        this.logger.log(`[EkycService] Extracted eKYC data: ${JSON.stringify(ekycData)}`);
       } else if (
-        diditData.status === 'failed' ||
-        diditData.status === 'rejected'
+        decisionStatus === 'rejected' ||
+        decisionStatus === 'failed' ||
+        decisionStatus === 'declined'
       ) {
         status = 'failed';
+      } else {
+        // Still pending or in progress
+        status = 'pending';
       }
 
       // Update local DB
@@ -316,7 +419,6 @@ export class EkycService {
   /**
    * Verify eKYC session belongs to user (security check)
    * @param sessionId - eKYC session ID
-   * @param userId - User ID để kiểm tra ownership
    * @throws NotFoundException nếu session không tồn tại hoặc không thuộc về user
    */
   async verifyEkycSessionOwnership(

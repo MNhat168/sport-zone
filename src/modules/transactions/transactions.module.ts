@@ -10,6 +10,7 @@ import { Transaction, TransactionSchema } from './entities/transaction.entity';
 import { Booking, BookingSchema } from '../bookings/entities/booking.entity';
 import { Schedule, ScheduleSchema } from '../schedules/entities/schedule.entity';
 import { ServiceModule } from '../../service/service.module';
+import { FieldOwnerModule } from '../field-owner/field-owner.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { ServiceModule } from '../../service/service.module';
       { name: Schedule.name, schema: ScheduleSchema },
     ]),
     forwardRef(() => ServiceModule), // Import để dùng CleanupService
+    forwardRef(() => FieldOwnerModule), // Import để dùng FieldOwnerService for bank account verification
   ],
   controllers: [TransactionsController],
   providers: [
