@@ -8,7 +8,8 @@ import {
   IsArray, 
   IsOptional,
   ValidateNested,
-  Matches
+  Matches,
+  IsInt
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CompetitionFormat, SportType } from 'src/common/enums/sport-type.enum';
@@ -21,7 +22,7 @@ export class CreateTournamentDto {
   sportType: SportType;
 
   @IsString()
-  category: string; // e.g., 'singles', 'doubles', '5_a_side'
+  category: string;
 
   @IsEnum(CompetitionFormat)
   competitionFormat: CompetitionFormat;
@@ -52,6 +53,19 @@ export class CreateTournamentDto {
   })
   endTime: string;
 
+  // Teams-based configuration
+  @IsNumber()
+  @IsInt()
+  @Min(1)
+  numberOfTeams: number;
+
+  @IsOptional()
+  @IsNumber()
+  @IsInt()
+  @Min(1)
+  teamSize?: number; // For sports that allow team size override
+
+  // Derived participants count (calculated on frontend, validated on backend)
   @IsNumber()
   @Min(1)
   maxParticipants: number;
