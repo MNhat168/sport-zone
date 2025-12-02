@@ -11,7 +11,7 @@ import {
   Matches
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { SportType } from 'src/common/enums/sport-type.enum';
+import { CompetitionFormat, SportType } from 'src/common/enums/sport-type.enum';
 
 export class CreateTournamentDto {
   @IsString()
@@ -21,9 +21,14 @@ export class CreateTournamentDto {
   sportType: SportType;
 
   @IsString()
+  category: string; // e.g., 'singles', 'doubles', '5_a_side'
+
+  @IsEnum(CompetitionFormat)
+  competitionFormat: CompetitionFormat;
+
+  @IsString()
   location: string;
 
-  // Tournament date (when it actually happens)
   @IsDateString()
   tournamentDate: string;
 

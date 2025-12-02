@@ -22,6 +22,7 @@ import { SchedulesModule } from './modules/schedules/schedules.module';
 import { CoachesModule } from './modules/coaches/coaches.module';
 import { AmenitiesModule } from './modules/amenities/amenities.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ChatModule } from '@modules/chat/chat.module';
 @Module({
   imports: [
         LessonTypesModule, 
@@ -61,6 +62,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     CoachesModule,
     AmenitiesModule,
     NotificationsModule,
+    ChatModule
   ],
   controllers: [AppController],
   providers: [

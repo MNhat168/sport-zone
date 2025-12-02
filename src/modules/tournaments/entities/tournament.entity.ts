@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { SportType } from 'src/common/enums/sport-type.enum';
+import { SportType, CompetitionFormat } from 'src/common/enums/sport-type.enum';
 import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
 
 export enum TournamentStatus {
@@ -17,8 +17,14 @@ export class Tournament extends BaseEntity {
   @Prop({ required: true })
   name: string;
 
-  @Prop({ required: true, enum: SportType })
+   @Prop({ required: true, enum: SportType })
   sportType: SportType;
+
+  @Prop({ required: true })
+  category: string;
+
+  @Prop({ required: true, enum: CompetitionFormat })
+  competitionFormat: CompetitionFormat;
 
   @Prop({ required: true })
   location: string;
