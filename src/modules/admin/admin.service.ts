@@ -1,11 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { FilterQuery, Model } from 'mongoose';
 import { User, UserDocument, UserRole } from 'src/modules/users/entities/user.entity';
 import { Transaction, TransactionDocument, TransactionStatus } from 'src/modules/transactions/entities/transaction.entity';
 import { Booking, BookingDocument } from '../bookings/entities/booking.entity';
 import { UserRoleStatDto, UserMonthlyStatsDto } from './dto/user.dto';
 import { BookingMonthlyStatsDto } from './dto/booking.dto';
+import { ListTransactionsDto } from './dto/list-transactions.dto';
+import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 @Injectable()
 export class AdminService {
     constructor(
@@ -372,4 +374,104 @@ export class AdminService {
         return transactions;
     }
     //#endregion
+
+    // ==============================
+    // Transactions listing (Admin)
+    // ==============================
+    async listTransactions(query: ListTransactionsDto) {
+        const {
+            search,
+            status,
+            type,
+            method,
+            startDate,
+            endDate,
+            page = 1,
+            limit = 10,
+            sortBy = 'createdAt',
+            sortOrder = 'desc',
+        } = query;
+
+        const filter: FilterQuery<TransactionDocument> = {};
+
+        if (status && status.length > 0) {
+            filter.status = { $in: status } as any;
+        }
+        if (type && type.length > 0) {
+            filter.type = { $in: type } as any;
+        }
+        if (method && method.length > 0) {
+            // map method names (e.g. 'vnpay') -> enum numbers
+            const nameToNumber: Record<string, PaymentMethod> = {
+                cash: PaymentMethod.CASH,
+                ebanking: PaymentMethod.EBANKING,
+                credit_card: PaymentMethod.CREDIT_CARD,
+                debit_card: PaymentMethod.DEBIT_CARD,
+                momo: PaymentMethod.MOMO,
+                zalopay: PaymentMethod.ZALOPAY,
+                vnpay: PaymentMethod.VNPAY,
+                bank_transfer: PaymentMethod.BANK_TRANSFER,
+                qr_code: PaymentMethod.QR_CODE,
+                internal: PaymentMethod.INTERNAL,
+                payos: PaymentMethod.PAYOS,
+            };
+            const methodNums = method
+                .map((m) => nameToNumber[m])
+                .filter((v): v is PaymentMethod => typeof v === 'number');
+            if (methodNums.length > 0) {
+                filter.method = { $in: methodNums } as any;
+            }
+        }
+        if (startDate || endDate) {
+            filter.createdAt = { ...filter.createdAt } as any;
+            if (startDate) (filter.createdAt as any).$gte = new Date(startDate);
+            if (endDate) (filter.createdAt as any).$lte = new Date(endDate);
+        }
+        if (search && search.trim().length > 0) {
+            const regex = new RegExp(search.trim(), 'i');
+            filter.$or = [
+                { externalTransactionId: regex },
+                { vnpayTransactionNo: regex },
+                { notes: regex },
+            ] as any;
+        }
+
+        const sort: Record<string, 1 | -1> = { [sortBy]: sortOrder === 'asc' ? 1 : -1 };
+
+        const skip = (page - 1) * limit;
+
+        const [data, total] = await Promise.all([
+            this.transactionModel
+                .find(filter)
+                .sort(sort)
+                .skip(skip)
+                .limit(limit)
+                .populate('user', 'fullName email')
+                // Populate booking để FE admin có thể hiển thị tên/mô tả booking
+                // Bao gồm:
+                // - field.name: tên sân
+                // - date, startTime, endTime: thông tin khung giờ
+                .populate({
+                    path: 'booking',
+                    select: '_id date startTime endTime field',
+                    populate: {
+                        path: 'field',
+                        select: 'name',
+                    },
+                })
+                .lean(),
+            this.transactionModel.countDocuments(filter),
+        ]);
+
+        const totalPages = Math.ceil(total / limit) || 1;
+        return {
+            data,
+            total,
+            page,
+            limit,
+            totalPages,
+            hasNextPage: page < totalPages,
+            hasPrevPage: page > 1,
+        };
+    }
 }

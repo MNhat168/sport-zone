@@ -7,7 +7,16 @@ export class JwtRefreshTokenGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-    const refreshToken = request.cookies['refresh_token'];
+    const headerClient = (request.headers['x-client-type'] as string) || '';
+    const isAdminClient = headerClient === 'admin';
+
+    const cookieName = isAdminClient ? 'refresh_token_admin' : 'refresh_token';
+    const refreshToken =
+      request.cookies[cookieName] ||
+      // Fallback: nếu header không chuẩn, thử cả hai cookie
+      request.cookies['refresh_token_admin'] ||
+      request.cookies['refresh_token'];
+
     if (!refreshToken) throw new UnauthorizedException('No refresh token');
 
     try {

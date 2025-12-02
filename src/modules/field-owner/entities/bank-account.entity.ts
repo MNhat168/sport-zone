@@ -33,7 +33,7 @@ export class BankAccount extends BaseEntity {
   @Prop({ type: String })
   verificationDocument?: string; // URL to Internet Banking screenshot
 
-  @Prop({ type: String, enum: BankAccountStatus, default: BankAccountStatus.PENDING, index: true })
+  @Prop({ type: String, enum: BankAccountStatus, default: BankAccountStatus.PENDING })
   status: BankAccountStatus;
 
   // PayOS validation result
@@ -57,6 +57,28 @@ export class BankAccount extends BaseEntity {
 
   @Prop({ type: Boolean, default: true })
   isDefault: boolean; // Chủ sân có thể có nhiều tài khoản, cần biết cái nào rút mặc định
+
+  // Verification payment tracking (PayOS payment transfer verification)
+  @Prop({ type: String })
+  verificationOrderCode?: string; // PayOS order code for verification payment
+
+  @Prop({ type: Number, default: 10000 })
+  verificationAmount?: number; // Verification amount (default: 10,000 VND)
+
+  @Prop({ type: String })
+  counterAccountNumber?: string; // Account number from payment (from PayOS webhook)
+
+  @Prop({ type: String })
+  counterAccountName?: string; // Account name from payment (from PayOS webhook)
+
+  @Prop({ type: String, enum: ['pending', 'paid', 'failed'], default: 'pending' })
+  verificationPaymentStatus?: 'pending' | 'paid' | 'failed'; // Payment status
+
+  @Prop({ type: String })
+  verificationUrl?: string; // Payment checkout URL
+
+  @Prop({ type: String })
+  verificationQrCode?: string; // Payment QR Code URL
 }
 
 export const BankAccountSchema = SchemaFactory.createForClass(BankAccount);
@@ -65,4 +87,5 @@ export const BankAccountSchema = SchemaFactory.createForClass(BankAccount);
 BankAccountSchema.index({ fieldOwner: 1, status: 1 });
 BankAccountSchema.index({ status: 1 });
 BankAccountSchema.index({ fieldOwner: 1, isDefault: 1 });
+BankAccountSchema.index({ verificationOrderCode: 1 }); // For webhook lookup
 

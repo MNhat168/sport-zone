@@ -8,7 +8,7 @@ import { FieldOwnerProfile } from '../field-owner/entities/field-owner-profile.e
 import { FieldOwnerRegistrationRequest, RegistrationStatus, OwnerType } from '../field-owner/entities/field-owner-registration-request.entity';
 import { BankAccount, BankAccountStatus } from '../field-owner/entities/bank-account.entity';
 import { CreateFieldOwnerRegistrationDto, FieldOwnerRegistrationResponseDto, ApproveFieldOwnerRegistrationDto, RejectFieldOwnerRegistrationDto } from '../field-owner/dtos/field-owner-registration.dto';
-import { CreateBankAccountDto, BankAccountResponseDto, UpdateBankAccountStatusDto, PayOSBankAccountValidationResponseDto } from '../field-owner/dtos/bank-account.dto';
+import { CreateBankAccountDto, BankAccountResponseDto, UpdateBankAccountStatusDto } from '../field-owner/dtos/bank-account.dto';
 import { AwsS3Service } from '../../service/aws-s3.service';
 import type { IFile } from '../../interfaces/file.interface';
 // Import Schedule and Booking models for availability checking
@@ -20,7 +20,6 @@ import { timeToMinutes } from '../../utils/utils';
 import { Amenity } from '../amenities/entities/amenities.entity';
 import { PriceFormatService } from '../../service/price-format.service';
 import { Transaction } from '../transactions/entities/transaction.entity';
-import { PayOSService } from '../transactions/payos.service';
 import { EmailService } from '../email/email.service';
 
 
@@ -44,7 +43,6 @@ export class FieldsService {
         @InjectModel(Transaction.name) private transactionModel: Model<Transaction>,
         private priceFormatService: PriceFormatService,
         private awsS3Service: AwsS3Service,
-        private payosService: PayOSService,
         private emailService: EmailService,
     ) {}
 
@@ -2879,103 +2877,7 @@ export class FieldsService {
     // BANK ACCOUNT OPERATIONS
     // ============================================================================
 
-    /**
-     * Add bank account for field owner with PayOS validation
-     */
-    async addBankAccount(fieldOwnerId: string, dto: CreateBankAccountDto): Promise<BankAccountResponseDto> {
-        try {
-            // Verify field owner exists
-            const fieldOwnerProfile = await this.fieldOwnerProfileModel.findById(fieldOwnerId).exec();
-            if (!fieldOwnerProfile) {
-                throw new NotFoundException('Field owner profile not found');
-            }
 
-            // Validate bank account via PayOS
-            const validationResult = await this.payosService.validateBankAccount(
-                dto.bankCode,
-                dto.accountNumber
-            );
-
-            if (!validationResult.isValid) {
-                throw new BadRequestException('Bank account validation failed. Please check your account number and bank code.');
-            }
-
-            // Normalize account names for comparison (uppercase, remove diacritics)
-            const normalizeName = (name: string) => {
-                return name
-                    .toUpperCase()
-                    .normalize('NFD')
-                    .replace(/[\u0300-\u036f]/g, '') // Remove diacritics
-                    .trim();
-            };
-
-            const providedName = normalizeName(dto.accountName);
-            const payosName = normalizeName(validationResult.accountName);
-
-            if (providedName !== payosName) {
-                this.logger.warn(
-                    `Account name mismatch: provided="${dto.accountName}", payos="${validationResult.accountName}"`
-                );
-                // Still allow, but mark for admin review
-            }
-
-            // Create bank account
-            const bankAccount = new this.bankAccountModel({
-                fieldOwner: new Types.ObjectId(fieldOwnerId),
-                accountName: dto.accountName,
-                accountNumber: dto.accountNumber,
-                bankCode: dto.bankCode,
-                bankName: dto.bankName,
-                branch: dto.branch,
-                verificationDocument: dto.verificationDocument,
-                status: BankAccountStatus.PENDING,
-                accountNameFromPayOS: validationResult.accountName,
-                isValidatedByPayOS: validationResult.isValid,
-            });
-
-            const savedAccount = await bankAccount.save();
-
-            // Send notification email
-            try {
-                const profile = await this.fieldOwnerProfileModel
-                    .findById(fieldOwnerId)
-                    .populate('user', 'email fullName')
-                    .exec();
-                if (profile?.user) {
-                    await this.emailService.sendBankAccountSubmitted(
-                        (profile.user as any).email,
-                        (profile.user as any).fullName
-                    );
-                }
-            } catch (emailError) {
-                this.logger.warn('Failed to send bank account email', emailError);
-            }
-
-            return this.mapToBankAccountResponseDto(savedAccount);
-        } catch (error) {
-            if (error instanceof NotFoundException || error instanceof BadRequestException) {
-                throw error;
-            }
-            this.logger.error('Error adding bank account', error);
-            throw new InternalServerErrorException('Failed to add bank account');
-        }
-    }
-
-    /**
-     * Validate bank account via PayOS (standalone validation)
-     */
-    async verifyBankAccountViaPayOS(bankCode: string, accountNumber: string): Promise<PayOSBankAccountValidationResponseDto> {
-        try {
-            const result = await this.payosService.validateBankAccount(bankCode, accountNumber);
-            return {
-                isValid: result.isValid,
-                accountName: result.accountName,
-            };
-        } catch (error) {
-            this.logger.error('Error validating bank account via PayOS', error);
-            throw new InternalServerErrorException('Failed to validate bank account');
-        }
-    }
 
     /**
      * Update bank account status (Admin only)

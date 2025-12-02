@@ -9,6 +9,7 @@ import {
   Inject,
   forwardRef,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Field } from '../fields/entities/field.entity';
@@ -41,17 +42,19 @@ import {
   CreateBankAccountDto,
   UpdateBankAccountDto,
   BankAccountResponseDto,
-  PayOSBankAccountValidationResponseDto,
 } from './dtos/bank-account.dto';
 import { AwsS3Service } from '../../service/aws-s3.service';
 import type { IFile } from '../../interfaces/file.interface';
 import { Booking } from '../bookings/entities/booking.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { PriceFormatService } from '../../service/price-format.service';
-import { Transaction } from '../transactions/entities/transaction.entity';
+import { Transaction, TransactionStatus, TransactionType } from '../transactions/entities/transaction.entity';
 import { PayOSService } from '../transactions/payos.service';
 import { EmailService } from '../email/email.service';
 import { FieldsService } from '../fields/fields.service';
+import { CreatePayOSUrlDto } from '../transactions/dto/payos.dto';
+import { generatePayOSOrderCode } from '../transactions/utils/payos.utils';
+import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 
 @Injectable()
 export class FieldOwnerService {
@@ -70,6 +73,7 @@ export class FieldOwnerService {
     private readonly awsS3Service: AwsS3Service,
     private readonly payosService: PayOSService,
     private readonly emailService: EmailService,
+    private readonly configService: ConfigService,
     @Inject(forwardRef(() => FieldsService))
     private readonly fieldsService: FieldsService,
   ) {}
@@ -1218,6 +1222,16 @@ export class FieldOwnerService {
         facility: {
           facilityName: dto.facilityName || '',
           facilityLocation: dto.facilityLocation || '',
+          // Convert frontend format {lat, lng} to GeoJSON format [lng, lat]
+          facilityLocationCoordinates: dto.facilityLocationCoordinates
+            ? {
+                type: 'Point' as const,
+                coordinates: [
+                  dto.facilityLocationCoordinates.lng,
+                  dto.facilityLocationCoordinates.lat,
+                ],
+              }
+            : undefined,
           supportedSports: dto.supportedSports || [],
           description: dto.description || '',
           amenities: dto.amenities || [],
@@ -1353,12 +1367,13 @@ export class FieldOwnerService {
           );
         }
 
-        if (!request.ekycData || !request.ekycData.fullName || !request.ekycData.idNumber) {
+        const idNumber = request.ekycData?.identityCardNumber || request.ekycData?.idNumber;
+        if (!request.ekycData || !request.ekycData.fullName || !idNumber) {
           throw new BadRequestException('Cannot approve: eKYC data missing or incomplete');
         }
 
         this.logger.log(
-          `Registration request ${requestId} has verified eKYC: ${request.ekycData.fullName} (${request.ekycData.idNumber})`,
+          `Registration request ${requestId} has verified eKYC: ${request.ekycData.fullName} (${idNumber})`,
         );
       }
       // Legacy branch for non-eKYC requests đã bỏ; production nên yêu cầu eKYC
@@ -1425,14 +1440,38 @@ export class FieldOwnerService {
       request.processedBy = new Types.ObjectId(adminId);
       await request.save({ session });
 
-      // Update user role to field_owner
+      // Update user role to field_owner and sync EKYC data
+      const userUpdateData: any = {
+        role: UserRole.FIELD_OWNER,
+      };
+
+      // Sync EKYC data to User if available
+      if (request.ekycData) {
+        // Sync idNumber (prefer identityCardNumber, fallback to idNumber)
+        const idNumber = request.ekycData.identityCardNumber || request.ekycData.idNumber;
+        if (idNumber) {
+          userUpdateData.idNumber = idNumber;
+        }
+
+        // Sync address (prefer permanentAddress, fallback to address)
+        const address = request.ekycData.permanentAddress || request.ekycData.address;
+        if (address) {
+          userUpdateData.address = address;
+        }
+
+        // Sync fullName if available and different from current
+        if (request.ekycData.fullName) {
+          userUpdateData.fullName = request.ekycData.fullName;
+        }
+      }
+
       await this.userModel.updateOne(
         { _id: request.userId },
-        { role: UserRole.FIELD_OWNER },
+        { $set: userUpdateData },
       ).session(session).exec();
 
       this.logger.log(
-        `Updated user ${request.userId.toString()} role to ${UserRole.FIELD_OWNER} upon registration approval`,
+        `Updated user ${request.userId.toString()} role to ${UserRole.FIELD_OWNER} and synced EKYC data upon registration approval`,
       );
 
       await session.commitTransaction();
@@ -1506,6 +1545,19 @@ export class FieldOwnerService {
     dto: CreateBankAccountDto,
   ): Promise<BankAccountResponseDto> {
     try {
+      // Check for duplicate bank account
+      const existingAccount = await this.bankAccountModel.findOne({
+        fieldOwner: new Types.ObjectId(profileId),
+        accountNumber: dto.accountNumber,
+        bankCode: dto.bankCode,
+      }).exec();
+
+      if (existingAccount) {
+        throw new BadRequestException(
+          `Tài khoản ngân hàng ${dto.accountNumber} (${dto.bankCode}) đã được khai báo. Vui lòng kiểm tra lại.`
+        );
+      }
+
       const bankAccount = new this.bankAccountModel({
         fieldOwner: new Types.ObjectId(profileId),
         bankCode: dto.bankCode,
@@ -1516,6 +1568,8 @@ export class FieldOwnerService {
         verificationDocument: dto.verificationDocument,
         status: BankAccountStatus.PENDING,
         isDefault: dto.isDefault ?? false,
+        verificationAmount: 10000, // Default verification amount
+        verificationPaymentStatus: 'pending',
       });
 
       const savedAccount = await bankAccount.save();
@@ -1524,7 +1578,34 @@ export class FieldOwnerService {
         $push: { bankAccounts: savedAccount._id },
       });
 
-      return this.mapToBankAccountDto(savedAccount);
+      // Automatically create verification payment unless skipped
+      let verificationUrl: string | undefined;
+      let verificationQrCode: string | undefined;
+
+      if (!dto.skipVerification) {
+        try {
+          const verification = await this.createVerificationPayment(
+            (savedAccount._id as Types.ObjectId).toString(),
+          );
+          verificationUrl = verification.verificationUrl;
+          verificationQrCode = verification.verificationQrCode;
+        } catch (verificationError) {
+          this.logger.warn(
+            `Failed to create verification payment for bank account ${savedAccount._id}:`,
+            verificationError,
+          );
+          // Continue without verification payment - admin can create it later
+        }
+      }
+
+      const response = this.mapToBankAccountDto(savedAccount);
+      response.verificationUrl = verificationUrl;
+      response.verificationQrCode = verificationQrCode;
+      response.needsVerification = !dto.skipVerification;
+      response.verificationPaymentStatus = savedAccount.verificationPaymentStatus || 'pending';
+      response.verificationOrderCode = savedAccount.verificationOrderCode;
+
+      return response;
     } catch (error) {
       this.logger.error('Error adding bank account', error);
       throw new InternalServerErrorException('Failed to add bank account');
@@ -1545,15 +1626,377 @@ export class FieldOwnerService {
     }
   }
 
-  async verifyBankAccountViaPayOS(
-    bankCode: string,
-    accountNumber: string,
-  ): Promise<PayOSBankAccountValidationResponseDto> {
+
+  /**
+   * Create verification payment for bank account
+   * Creates a PayOS payment link (10,000 VND) to verify bank account ownership
+   */
+  async createVerificationPayment(bankAccountId: string): Promise<{
+    verificationUrl: string;
+    verificationQrCode: string;
+    orderCode: number;
+  }> {
     try {
-      return await this.payosService.validateBankAccount(bankCode, accountNumber);
+      const bankAccount = await this.bankAccountModel.findById(bankAccountId).exec();
+      if (!bankAccount) {
+        throw new NotFoundException('Bank account not found');
+      }
+
+      // Generate unique order code
+      const orderCode = generatePayOSOrderCode();
+      const verificationAmount = bankAccount.verificationAmount || 10000;
+
+      const frontendUrl = this.configService.get<string>('app.frontendUrl');
+      if (!frontendUrl) {
+        this.logger.error(
+          'app.frontendUrl is not configured. Cannot build PayOS return/cancel URL for bank account verification.',
+        );
+        throw new InternalServerErrorException('Frontend URL is not configured');
+      }
+
+      // Create fee transaction record FIRST to ensure it exists
+      // This ensures we don't have "gap" where payment exists but transaction record doesn't
+      try {
+        const ownerProfile = await this.fieldOwnerProfileModel
+          .findById(bankAccount.fieldOwner)
+          .select('user')
+          .exec();
+
+        if (!ownerProfile || !ownerProfile.user) {
+          throw new BadRequestException(
+            `Cannot create verification fee transaction: field owner profile not found for bank account ${bankAccountId}`,
+          );
+        }
+
+        const verificationTransaction = new this.transactionModel({
+          booking: undefined,
+          user: ownerProfile.user as Types.ObjectId,
+          amount: verificationAmount,
+          direction: 'in',
+          method: PaymentMethod.PAYOS,
+          type: TransactionType.FEE,
+          status: TransactionStatus.PENDING,
+          externalTransactionId: String(orderCode),
+          notes: 'Bank account verification fee',
+          metadata: {
+            bankAccountId: (bankAccount._id as Types.ObjectId).toString(),
+            verificationType: 'BANK_ACCOUNT_VERIFICATION',
+            verificationAmount,
+          },
+        });
+
+        const savedTx = await verificationTransaction.save();
+        this.logger.log(
+          `Created bank account verification fee transaction ${savedTx._id} for bank account ${bankAccountId} (orderCode=${orderCode})`,
+        );
+      } catch (txError) {
+        this.logger.error(
+          `Failed to create verification fee transaction for bank account ${bankAccountId}:`,
+          txError,
+        );
+        throw new InternalServerErrorException('Failed to initialize verification transaction');
+      }
+
+      // Create PayOS payment link
+      // Note: PayOS requires description to be max 25 characters
+      const paymentLink = await this.payosService.createPaymentUrl({
+        orderCode,
+        orderId: `bank-verify-${bankAccountId}`,
+        amount: verificationAmount,
+        // Prefix-based description to easily detect verification payments in webhook
+        // Format: "BANKACCVERIFY" (no underscore - PayOS may strip special chars)
+        description: 'BANKACCVERIFY',
+        items: [
+          {
+            name: 'Bank account verification fee',
+            quantity: 1,
+            price: verificationAmount,
+          },
+        ],
+        // Sau khi thanh toán phí xác thực, đưa user về trang Ví (wallet) field owner
+        returnUrl: `${frontendUrl}/field-owner/wallet`,
+        cancelUrl: `${frontendUrl}/field-owner/wallet`,
+      });
+
+      // Update bank account with verification order code
+      bankAccount.verificationOrderCode = String(orderCode);
+      bankAccount.verificationPaymentStatus = 'pending';
+      bankAccount.verificationAmount = verificationAmount;
+      bankAccount.verificationUrl = paymentLink.checkoutUrl;
+      bankAccount.verificationQrCode = paymentLink.qrCodeUrl || '';
+      await bankAccount.save();
+
+      this.logger.log(
+        `Created verification payment for bank account ${bankAccountId}: orderCode=${orderCode}`,
+      );
+
+      return {
+        verificationUrl: paymentLink.checkoutUrl,
+        verificationQrCode: paymentLink.qrCodeUrl || '',
+        orderCode,
+      };
     } catch (error) {
-      this.logger.error('Error verifying bank account via PayOS', error);
-      throw new InternalServerErrorException('Failed to verify bank account');
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error('Error creating verification payment', error);
+      throw new InternalServerErrorException('Failed to create verification payment');
+    }
+  }
+
+  /**
+   * Process verification webhook from PayOS
+   * Compares counterAccountNumber with registered accountNumber to verify ownership
+   */
+  async processVerificationWebhook(
+    orderCode: number,
+    webhookData: {
+      counterAccountNumber?: string;
+      counterAccountName?: string;
+      amount: number;
+      status: string;
+      reference?: string;
+      transactionDateTime?: string;
+    },
+  ): Promise<void> {
+    try {
+      this.logger.log(`[Verification Webhook] Processing orderCode: ${orderCode}, status: ${webhookData.status}`);
+      
+      // Find bank account by verification order code
+      const bankAccount = await this.bankAccountModel
+        .findOne({
+          verificationOrderCode: String(orderCode),
+        })
+        .exec();
+
+      if (!bankAccount) {
+        this.logger.warn(`[Verification Webhook] Bank account not found for verification orderCode: ${orderCode}`);
+        return;
+      }
+
+      this.logger.log(
+        `[Verification Webhook] Found bank account ${bankAccount._id} for field owner ${bankAccount.fieldOwner}. ` +
+        `Registered account: ${bankAccount.accountNumber}, Current status: ${bankAccount.status}`,
+      );
+
+      // Update payment status
+      if (webhookData.status === 'PAID') {
+        bankAccount.verificationPaymentStatus = 'paid';
+        this.logger.log(
+          `[Verification Webhook] Payment status updated to 'paid' for bank account ${bankAccount._id}`,
+        );
+      } else if (webhookData.status === 'CANCELLED' || webhookData.status === 'EXPIRED') {
+        bankAccount.verificationPaymentStatus = 'failed';
+        this.logger.warn(
+          `[Verification Webhook] Payment ${webhookData.status.toLowerCase()} for bank account ${bankAccount._id}. Marking as failed.`,
+        );
+        await bankAccount.save();
+      }
+
+      // Update Transaction status
+      try {
+        const transaction = await this.transactionModel.findOne({ externalTransactionId: String(orderCode) }).exec();
+        if (transaction) {
+            if (webhookData.status === 'PAID') {
+                transaction.status = TransactionStatus.SUCCEEDED;
+                transaction.notes = 'Bank account verification fee paid successfully';
+            } else if (webhookData.status === 'CANCELLED' || webhookData.status === 'EXPIRED') {
+                transaction.status = TransactionStatus.FAILED;
+                transaction.notes = `Bank account verification fee ${webhookData.status.toLowerCase()}`;
+            }
+            // Update PayOS metadata
+            transaction.metadata = {
+                ...transaction.metadata,
+                payosOrderCode: orderCode,
+                payosAccountNumber: webhookData.counterAccountNumber,
+                payosReference: webhookData.reference || 'PayOS Webhook',
+                payosTransactionDateTime: webhookData.transactionDateTime,
+            };
+            await transaction.save();
+            this.logger.log(`[Verification Webhook] Updated transaction ${transaction._id} status to ${transaction.status}`);
+        } else {
+            this.logger.warn(`[Verification Webhook] Transaction not found for orderCode ${orderCode}`);
+        }
+      } catch (txError) {
+        this.logger.error(`[Verification Webhook] Error updating transaction for orderCode ${orderCode}`, txError);
+        // Don't throw here, continue to update BankAccount
+      }
+      
+      if (webhookData.status === 'CANCELLED' || webhookData.status === 'EXPIRED') {
+          return;
+      }
+
+      // Verify account number match (if counter account information is available)
+      const registeredAccountNumber = bankAccount.accountNumber.trim();
+      const counterAccountNumber = webhookData.counterAccountNumber?.trim() || '';
+
+      this.logger.log(
+        `[Verification Webhook] Account comparison - Registered: "${registeredAccountNumber}", ` +
+        `Counter: "${counterAccountNumber || 'NOT PROVIDED'}"`,
+      );
+
+      if (webhookData.status === 'PAID' && counterAccountNumber) {
+        if (counterAccountNumber === registeredAccountNumber) {
+          // ✅ Verified - Account numbers match
+          bankAccount.status = BankAccountStatus.VERIFIED;
+          bankAccount.counterAccountNumber = counterAccountNumber;
+          bankAccount.counterAccountName = webhookData.counterAccountName || bankAccount.accountName;
+          bankAccount.accountNameFromPayOS = webhookData.counterAccountName;
+          bankAccount.verifiedAt = new Date();
+          bankAccount.isValidatedByPayOS = true;
+          bankAccount.verificationPaymentStatus = 'paid';
+
+          this.logger.log(
+            `[Verification Webhook] ✅ Bank account ${bankAccount._id} verified successfully. ` +
+              `Account: ${counterAccountNumber}, Name: ${webhookData.counterAccountName || 'N/A'}`,
+          );
+        } else {
+          // ❌ Mismatch - Reject
+          bankAccount.status = BankAccountStatus.REJECTED;
+          bankAccount.verificationPaymentStatus = 'failed';
+          bankAccount.rejectionReason = `Số tài khoản không khớp. Đã đăng ký: ${registeredAccountNumber}, Chuyển từ: ${counterAccountNumber}`;
+          bankAccount.counterAccountNumber = counterAccountNumber;
+          bankAccount.counterAccountName = webhookData.counterAccountName;
+
+          this.logger.warn(
+            `[Verification Webhook] ❌ Bank account ${bankAccount._id} verification failed. ` +
+              `Registered: ${registeredAccountNumber}, Payer: ${counterAccountNumber}`,
+          );
+        }
+      } else if (webhookData.status === 'PAID' && !counterAccountNumber) {
+        // Payment successful but no counter account number provided.
+        // For better UX we still mark the bank account as verified based on successful 10,000 VND payment.
+        bankAccount.status = BankAccountStatus.VERIFIED;
+        bankAccount.verificationPaymentStatus = 'paid';
+        bankAccount.isValidatedByPayOS = true;
+        bankAccount.verifiedAt = new Date();
+        // Fallback: store registered account info as counter account if none is provided
+        bankAccount.counterAccountNumber = registeredAccountNumber;
+        bankAccount.counterAccountName = webhookData.counterAccountName || bankAccount.accountName;
+        bankAccount.accountNameFromPayOS = webhookData.counterAccountName;
+
+        this.logger.warn(
+          `[Verification Webhook] ⚠️ Payment PAID for orderCode ${orderCode} but counterAccountNumber is missing. ` +
+            `Marking bank account ${bankAccount._id} as VERIFIED based on successful verification payment.`,
+        );
+      }
+
+      await bankAccount.save();
+      this.logger.log(`[Verification Webhook] Bank account ${bankAccount._id} saved with status: ${bankAccount.status}`);
+    } catch (error) {
+      this.logger.error(`[Verification Webhook] Error processing verification webhook for orderCode ${orderCode}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get verification status for a bank account
+   */
+  async getVerificationStatus(bankAccountId: string): Promise<{
+    needsVerification: boolean;
+    verificationPaymentStatus?: 'pending' | 'paid' | 'failed';
+    verificationUrl?: string;
+    verificationQrCode?: string;
+    verificationOrderCode?: string;
+    status?: string; // Frontend expects 'status'
+    qrCodeUrl?: string; // Frontend expects 'qrCodeUrl'
+  }> {
+    try {
+      const bankAccount = await this.bankAccountModel.findById(bankAccountId).exec();
+      if (!bankAccount) {
+        throw new NotFoundException('Bank account not found');
+      }
+
+      // Auto-heal: if payment is marked as paid but status is still pending, promote to VERIFIED
+      if (
+        bankAccount.verificationPaymentStatus === 'paid' &&
+        bankAccount.status === BankAccountStatus.PENDING
+      ) {
+        this.logger.warn(
+          `Bank account ${bankAccountId} has paid verification but status is still pending. Promoting to VERIFIED...`,
+        );
+        bankAccount.status = BankAccountStatus.VERIFIED;
+        bankAccount.isValidatedByPayOS = true;
+        if (!bankAccount.verifiedAt) {
+          bankAccount.verifiedAt = new Date();
+        }
+        await bankAccount.save();
+      }
+
+      const needsVerification =
+        bankAccount.status === BankAccountStatus.PENDING &&
+        bankAccount.verificationPaymentStatus !== 'paid';
+
+      if (!needsVerification) {
+        // Already verified or no verification required
+        return {
+          needsVerification: false,
+          verificationPaymentStatus: bankAccount.verificationPaymentStatus,
+          status: bankAccount.status,
+          verificationOrderCode: bankAccount.verificationOrderCode,
+          verificationUrl: bankAccount.verificationUrl,
+          verificationQrCode: bankAccount.verificationQrCode,
+          qrCodeUrl: bankAccount.verificationQrCode,
+        };
+      }
+
+      // If verification payment exists, return status
+      if (bankAccount.verificationOrderCode) {
+        // Auto-recover: If pending but missing URL/QR (legacy data issue), regenerate payment link
+        if (
+          bankAccount.verificationPaymentStatus !== 'paid' &&
+          (!bankAccount.verificationUrl || !bankAccount.verificationQrCode)
+        ) {
+          this.logger.warn(
+            `Bank account ${bankAccountId} has order code but missing URL/QR. Regenerating payment link...`,
+          );
+          const verification = await this.createVerificationPayment(bankAccountId);
+          const paymentStatus = 'pending';
+          return {
+            needsVerification: true,
+            verificationPaymentStatus: paymentStatus,
+            status: paymentStatus, // Frontend expects 'status'
+            verificationOrderCode: String(verification.orderCode),
+            verificationUrl: verification.verificationUrl,
+            verificationQrCode: verification.verificationQrCode,
+            qrCodeUrl: verification.verificationQrCode, // Frontend expects 'qrCodeUrl'
+          };
+        }
+
+        const paymentStatus = bankAccount.verificationPaymentStatus || 'pending';
+        const status = paymentStatus === 'paid' ? 'verified' : paymentStatus;
+
+        return {
+          needsVerification: true,
+          verificationPaymentStatus: paymentStatus,
+          status, // Frontend expects 'status'
+          verificationOrderCode: bankAccount.verificationOrderCode,
+          verificationUrl: bankAccount.verificationUrl,
+          verificationQrCode: bankAccount.verificationQrCode,
+          qrCodeUrl: bankAccount.verificationQrCode, // Frontend expects 'qrCodeUrl'
+        };
+      }
+
+      // No verification payment created yet - create one now
+      this.logger.log(`Bank account ${bankAccountId} needs verification but has no payment. Creating one...`);
+      const verification = await this.createVerificationPayment(bankAccountId);
+      const paymentStatus = 'pending';
+      
+      return {
+        needsVerification: true,
+        verificationPaymentStatus: paymentStatus,
+        status: paymentStatus, // Frontend expects 'status'
+        verificationOrderCode: String(verification.orderCode),
+        verificationUrl: verification.verificationUrl,
+        verificationQrCode: verification.verificationQrCode,
+        qrCodeUrl: verification.verificationQrCode, // Frontend expects 'qrCodeUrl'
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error('Error getting verification status', error);
+      throw new InternalServerErrorException('Failed to get verification status');
     }
   }
 
@@ -1814,19 +2257,19 @@ export class FieldOwnerService {
       user: profile.user?._id?.toString() || profile.user?.toString() || '',
       userFullName: profile.user?.fullName || undefined,
       userEmail: profile.user?.email || undefined,
-      facilityName: profile.facility?.facilityName ?? profile.facilityName,
-      facilityLocation: profile.facility?.facilityLocation ?? profile.facilityLocation,
-      supportedSports: profile.facility?.supportedSports ?? profile.supportedSports,
-      description: profile.facility?.description ?? profile.description,
-      amenities: profile.facility?.amenities ?? profile.amenities,
-      rating: profile.rating,
-      totalReviews: profile.totalReviews,
-      isVerified: profile.isVerified,
+      facilityName: profile.facility?.facilityName ?? profile.facilityName ?? '',
+      facilityLocation: profile.facility?.facilityLocation ?? profile.facilityLocation ?? '',
+      supportedSports: profile.facility?.supportedSports ?? profile.supportedSports ?? [],
+      description: profile.facility?.description ?? profile.description ?? '',
+      amenities: profile.facility?.amenities ?? profile.amenities ?? [],
+      rating: profile.rating ?? 0,
+      totalReviews: profile.totalReviews ?? 0,
+      isVerified: profile.isVerified ?? false,
       verifiedAt: profile.verifiedAt,
       verifiedBy: profile.verifiedBy?._id?.toString() || profile.verifiedBy?.toString() || undefined,
       verificationDocument: profile.verificationDocument,
       businessHours: profile.facility?.businessHours ?? profile.businessHours,
-      contactPhone: profile.facility?.contactPhone ?? profile.contactPhone,
+      contactPhone: profile.facility?.contactPhone ?? profile.contactPhone ?? '',
       website: profile.facility?.website ?? profile.website,
       createdAt: profile.createdAt,
       updatedAt: profile.updatedAt,
@@ -1850,6 +2293,13 @@ export class FieldOwnerService {
       status: request.status,
       facilityName: facility?.facilityName,
       facilityLocation: facility?.facilityLocation,
+      // Convert GeoJSON format [lng, lat] back to frontend format {lat, lng}
+      facilityLocationCoordinates: facility?.facilityLocationCoordinates?.coordinates
+        ? {
+            lat: facility.facilityLocationCoordinates.coordinates[1],
+            lng: facility.facilityLocationCoordinates.coordinates[0],
+          }
+        : undefined,
       supportedSports: facility?.supportedSports,
       description: facility?.description,
       amenities: facility?.amenities,
@@ -1867,6 +2317,10 @@ export class FieldOwnerService {
   }
 
   private mapToBankAccountDto(account: BankAccount): BankAccountResponseDto {
+    const needsVerification =
+      account.status === BankAccountStatus.PENDING &&
+      account.verificationPaymentStatus !== 'paid';
+    
     return {
       id: (account._id as Types.ObjectId).toString(),
       fieldOwner: (account.fieldOwner as Types.ObjectId)?.toString() || '',
@@ -1886,6 +2340,12 @@ export class FieldOwnerService {
       verifiedAt: account.verifiedAt,
       createdAt: account.createdAt,
       updatedAt: account.updatedAt,
+      // Verification payment fields
+      needsVerification,
+      verificationPaymentStatus: account.verificationPaymentStatus,
+      verificationOrderCode: account.verificationOrderCode,
+      verificationUrl: account.verificationUrl,
+      verificationQrCode: account.verificationQrCode,
     };
   }
 }

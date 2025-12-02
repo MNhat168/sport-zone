@@ -5,7 +5,9 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  InternalServerErrorException,
   Logger,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -51,10 +53,8 @@ import {
 import {
   BankAccountResponseDto,
   CreateBankAccountDto,
-  PayOSBankAccountValidationResponseDto,
   UpdateBankAccountDto,
   UpdateBankAccountStatusDto,
-  VerifyBankAccountDto,
 } from './dtos/bank-account.dto';
 import type { IFile } from '../../interfaces/file.interface';
 import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
@@ -386,12 +386,36 @@ export class FieldOwnerController {
     @Request() req: any,
     @Body() _dto: CreateEkycSessionDto,
   ): Promise<EkycSessionResponseDto> {
-    const userId = req.user._id || req.user.id;
-    const { sessionId, redirectUrl } = await this.ekycService.createEkycSession(
-      userId,
-    );
+    try {
+      const userId = req.user?._id || req.user?.id;
+      
+      if (!userId) {
+        this.logger.error('User ID not found in request', {
+          user: req.user,
+        });
+        throw new BadRequestException('Không tìm thấy thông tin người dùng. Vui lòng đăng nhập lại.');
+      }
 
-    return { sessionId, redirectUrl };
+      this.logger.log(`Creating eKYC session for user ${userId}`);
+      const { sessionId, redirectUrl } = await this.ekycService.createEkycSession(
+        userId.toString(),
+      );
+
+      return { sessionId, redirectUrl };
+    } catch (error: any) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      
+      this.logger.error('Failed to create eKYC session in controller:', {
+        error: error?.message,
+        stack: error?.stack,
+      });
+      
+      throw new InternalServerErrorException(
+        error?.message || 'Không thể tạo phiên xác thực eKYC. Vui lòng thử lại sau.',
+      );
+    }
   }
 
   /**
@@ -470,15 +494,6 @@ export class FieldOwnerController {
     return this.fieldOwnerService.getBankAccountsByFieldOwner(profile.id);
   }
 
-  @Post('bank-account/validate')
-  @UseGuards(AuthGuard('jwt'))
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Validate bank account via PayOS' })
-  async validateBankAccount(
-    @Body() dto: VerifyBankAccountDto,
-  ): Promise<PayOSBankAccountValidationResponseDto> {
-    return this.fieldOwnerService.verifyBankAccountViaPayOS(dto.bankCode, dto.accountNumber);
-  }
 
   @Patch('profile/bank-account/:id')
   @UseGuards(AuthGuard('jwt'))
@@ -499,6 +514,23 @@ export class FieldOwnerController {
       throw new BadRequestException('Field owner profile not found');
     }
     return this.fieldOwnerService.updateBankAccount(accountId, profile.id, dto);
+  }
+
+  @Get('profile/bank-account/:id/verification-status')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get bank account verification status' })
+  @ApiParam({ name: 'id', description: 'Bank account ID' })
+  async getBankAccountVerificationStatus(
+    @Request() req: any,
+    @Param('id') accountId: string,
+  ) {
+    const profile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(req.user.id);
+    if (!profile) {
+      throw new NotFoundException('Field owner profile not found');
+    }
+
+    return this.fieldOwnerService.getVerificationStatus(accountId);
   }
 
   @Delete('profile/bank-account/:id')

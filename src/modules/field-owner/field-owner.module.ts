@@ -34,7 +34,7 @@ import { EkycModule } from '../ekyc/ekyc.module';
     ]),
     forwardRef(() => FieldsModule),
     forwardRef(() => TransactionsModule),
-    ServiceModule,
+    forwardRef(() => ServiceModule),
     EmailModule,
     EkycModule,
   ],

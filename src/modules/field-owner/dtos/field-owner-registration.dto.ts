@@ -7,6 +7,9 @@ import {
   IsOptional,
   ValidateNested,
   IsUrl,
+  IsNumber,
+  Min,
+  Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { OwnerType, RegistrationStatus } from '../entities/field-owner-registration-request.entity';
@@ -26,11 +29,61 @@ class PersonalInfoDto {
   address: string;
 }
 
+class EkycDataDto {
+  @ApiProperty({ example: 'Nguyễn Văn A', description: 'Họ tên đầy đủ' })
+  @IsString()
+  fullName: string;
+
+  @ApiPropertyOptional({ example: '001234567890', description: 'Số CMND/CCCD (deprecated, use identityCardNumber)' })
+  @IsOptional()
+  @IsString()
+  idNumber?: string;
+
+  @ApiPropertyOptional({ example: '001234567890', description: 'Số CMND/CCCD' })
+  @IsOptional()
+  @IsString()
+  identityCardNumber?: string;
+
+  @ApiPropertyOptional({ example: '123 Đường ABC, Quận 1, TP.HCM', description: 'Địa chỉ (deprecated, use permanentAddress)' })
+  @IsOptional()
+  @IsString()
+  address?: string;
+
+  @ApiPropertyOptional({ example: '123 Đường ABC, Quận 1, TP.HCM', description: 'Địa chỉ thường trú' })
+  @IsOptional()
+  @IsString()
+  permanentAddress?: string;
+
+  @ApiPropertyOptional({ example: '1990-01-01', description: 'Ngày sinh' })
+  @IsOptional()
+  @IsString()
+  dateOfBirth?: string;
+
+  @ApiPropertyOptional({ example: '2030-01-01', description: 'Ngày hết hạn' })
+  @IsOptional()
+  @IsString()
+  expirationDate?: string;
+}
+
 class DocumentsDto {
   @ApiPropertyOptional({ example: 'https://s3.../business-license.jpg', description: 'URL giấy ĐKKD (cho doanh nghiệp/hộ KD)' })
   @IsOptional()
   @IsUrl()
   businessLicense?: string;
+}
+
+class FacilityLocationCoordinatesDto {
+  @ApiProperty({ example: 10.776889, description: 'Latitude (-90 to 90)' })
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  lat: number;
+
+  @ApiProperty({ example: 106.700806, description: 'Longitude (-180 to 180)' })
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  lng: number;
 }
 
 export class CreateFieldOwnerRegistrationDto {
@@ -58,8 +111,8 @@ export class CreateFieldOwnerRegistrationDto {
   })
   @IsOptional()
   @ValidateNested()
-  @Type(() => PersonalInfoDto)
-  ekycData?: PersonalInfoDto;
+  @Type(() => EkycDataDto)
+  ekycData?: EkycDataDto;
 
   @ApiPropertyOptional({ example: 'Sân bóng Phú Nhuận', description: 'Tên cơ sở vật chất (có thể điền sau khi approve)' })
   @IsOptional()
@@ -70,6 +123,15 @@ export class CreateFieldOwnerRegistrationDto {
   @IsOptional()
   @IsString()
   facilityLocation?: string;
+
+  @ApiPropertyOptional({
+    description: 'Tọa độ địa điểm cơ sở vật chất (latitude, longitude)',
+    type: FacilityLocationCoordinatesDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FacilityLocationCoordinatesDto)
+  facilityLocationCoordinates?: FacilityLocationCoordinatesDto;
 
   @ApiPropertyOptional({
     type: [String],
@@ -155,6 +217,15 @@ export class UpdateFieldOwnerRegistrationDto {
   facilityLocation?: string;
 
   @ApiPropertyOptional({
+    description: 'Tọa độ địa điểm cơ sở vật chất (latitude, longitude)',
+    type: FacilityLocationCoordinatesDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FacilityLocationCoordinatesDto)
+  facilityLocationCoordinates?: FacilityLocationCoordinatesDto;
+
+  @ApiPropertyOptional({
     type: [String],
     enum: SportType,
     example: ['football', 'tennis'],
@@ -209,6 +280,15 @@ export class ApproveFieldOwnerRegistrationDto {
   @IsOptional()
   @IsString()
   facilityLocation?: string;
+
+  @ApiPropertyOptional({
+    description: 'Tọa độ địa điểm cơ sở vật chất (latitude, longitude)',
+    type: FacilityLocationCoordinatesDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FacilityLocationCoordinatesDto)
+  facilityLocationCoordinates?: FacilityLocationCoordinatesDto;
 
   @ApiPropertyOptional({
     type: [String],
@@ -292,7 +372,7 @@ export class FieldOwnerRegistrationResponseDto {
   ekycVerifiedAt?: Date;
 
   @ApiPropertyOptional()
-  ekycData?: PersonalInfoDto;
+  ekycData?: EkycDataDto;
 
   @ApiProperty({ enum: RegistrationStatus })
   status: RegistrationStatus;
@@ -302,6 +382,12 @@ export class FieldOwnerRegistrationResponseDto {
 
   @ApiProperty({ example: 'District 3, Ho Chi Minh City', description: 'Địa điểm cơ sở vật chất' })
   facilityLocation: string;
+
+  @ApiPropertyOptional({
+    description: 'Tọa độ địa điểm cơ sở vật chất (latitude, longitude)',
+    type: FacilityLocationCoordinatesDto,
+  })
+  facilityLocationCoordinates?: FacilityLocationCoordinatesDto;
 
   @ApiPropertyOptional({
     type: [String],
