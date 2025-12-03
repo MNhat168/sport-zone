@@ -98,12 +98,16 @@ export class FieldsService {
         let sortOptions: any = {};
         if (query?.sortBy === 'price' && query?.sortOrder) {
             sortOptions.basePrice = query.sortOrder === 'asc' ? 1 : -1;
+            this.logger.log(`[FieldsService.findAll] Sorting by price: ${query.sortOrder}, sortOptions: ${JSON.stringify(sortOptions)}`);
+        } else {
+            this.logger.log(`[FieldsService.findAll] No sorting applied. sortBy: ${query?.sortBy}, sortOrder: ${query?.sortOrder}`);
         }
 
         // Only apply sort if sortOptions is not empty
         const queryBuilder = this.fieldModel.find(filter);
         if (Object.keys(sortOptions).length > 0) {
             queryBuilder.sort(sortOptions);
+            this.logger.log(`[FieldsService.findAll] Applied sort to query`);
         }
 
         const fields = await queryBuilder.lean();
