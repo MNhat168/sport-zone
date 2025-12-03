@@ -47,6 +47,8 @@ export class FieldsController {
     @Query('radius') radius?: number,
     @Query('limit') limit?: number,
     @Query('sportType') sportType?: string,
+    @Query('name') name?: string,
+    @Query('location') location?: string,
   ) {
     if (!lat || !lng) {
       throw new BadRequestException('lat and lng parameters are required');
@@ -70,7 +72,7 @@ export class FieldsController {
       throw new BadRequestException('Limit must be between 1 and 100');
     }
 
-    return this.fieldsService.findNearbyFieldsPublic(lat, lng, searchRadius, resultLimit, sportType);
+    return this.fieldsService.findNearbyFieldsPublic(lat, lng, searchRadius, resultLimit, sportType, name, location);
   }
 
   @Get(':id')

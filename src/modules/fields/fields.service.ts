@@ -642,7 +642,9 @@ export class FieldsService {
         longitude: number, 
         radius: number = 10, // Default 10km radius
         limit: number = 20, // Default 20 results
-        sportType?: string
+        sportType?: string,
+        name?: string,
+        location?: string
     ): Promise<Array<{
         id: string;
         name: string;
@@ -680,6 +682,14 @@ export class FieldsService {
 
             if (sportType) {
                 filter.sportType = new RegExp(`^${sportType}$`, 'i');
+            }
+
+            if (name) {
+                filter.name = { $regex: name, $options: 'i' };
+            }
+
+            if (location) {
+                filter['location.address'] = { $regex: location, $options: 'i' };
             }
 
             // Use projection to only fetch needed fields for better performance
