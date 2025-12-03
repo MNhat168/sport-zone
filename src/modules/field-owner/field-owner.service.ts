@@ -17,7 +17,6 @@ import { FieldOwnerProfile } from './entities/field-owner-profile.entity';
 import {
   FieldOwnerRegistrationRequest,
   RegistrationStatus,
-  OwnerType,
 } from './entities/field-owner-registration-request.entity';
 import { BankAccount, BankAccountStatus } from './entities/bank-account.entity';
 import {
@@ -2283,7 +2282,6 @@ export class FieldOwnerService {
     return {
       id: (request._id as Types.ObjectId).toString(),
       userId: request.userId?.toString(),
-      ownerType: request.ownerType as OwnerType,
       personalInfo: request.personalInfo,
       documents: request.documents, // @deprecated - idFront/idBack replaced by eKYC
       ekycSessionId: request.ekycSessionId,

@@ -956,7 +956,7 @@ export class BookingsService {
     const invoices = bookings.map(b => {
       const bookingId = b._id || b.id || b.bookingId;
       const fieldName = (b.field && (b.field.name || b.field.title)) || b.fieldName || 'Unknown Field';
-
+      const fieldImage = (b.field && (b.field.images?.[0] || b.field.image)) || b.fieldImage || '-';
       // date may be string or Date
       const dateIso = b.date ? new Date(b.date).toISOString().split('T')[0] : null;
       const timeRange = `${b.startTime || ''}${b.startTime && b.endTime ? ' - ' : ''}${b.endTime || ''}`;
@@ -970,6 +970,7 @@ export class BookingsService {
       return {
         bookingId,
         name: fieldName,
+        fieldImage,
         date: dateIso,
         time: timeRange,
         payment,
