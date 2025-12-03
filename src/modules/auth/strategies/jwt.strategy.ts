@@ -47,7 +47,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           }
 
           if (token) {
-            console.log('✅ [JwtStrategy] Token extracted successfully, length:', typeof token === 'string' ? token.length : 0);
+            const tokenStr = String(token);
+            console.log('✅ [JwtStrategy] Token extracted successfully, length:', tokenStr.length);
           } else {
             console.log('❌ [JwtStrategy] No token found in cookies');
           }
