@@ -60,6 +60,8 @@ export class FieldsService {
         latitude?: number;
         longitude?: number;
         radius?: number; // in kilometers
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
     }): Promise<FieldsDto[]> {
         // Lọc theo tên và loại thể thao
         const filter: any = { isActive: true };
@@ -92,9 +94,19 @@ export class FieldsService {
             };
         }
 
-        const fields = await this.fieldModel
-            .find(filter)
-            .lean();
+        // Build sort options
+        let sortOptions: any = {};
+        if (query?.sortBy === 'price' && query?.sortOrder) {
+            sortOptions.basePrice = query.sortOrder === 'asc' ? 1 : -1;
+        }
+
+        // Only apply sort if sortOptions is not empty
+        const queryBuilder = this.fieldModel.find(filter);
+        if (Object.keys(sortOptions).length > 0) {
+            queryBuilder.sort(sortOptions);
+        }
+
+        const fields = await queryBuilder.lean();
 
         return fields.map(field => {
             // Format price for display using PriceFormatService
@@ -743,6 +755,7 @@ export class FieldsService {
                         longitude: fieldLongitude,
                         distance: Math.round(distance * 100) / 100, // Round to 2 decimal places
                         rating: field.rating || 0,
+                        basePrice: field.basePrice || 0, // Add basePrice for sorting
                         price: price,
                         sportType: field.sportType,
                         images: validImages,
