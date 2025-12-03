@@ -56,6 +56,7 @@ export class FieldsService {
         name?: string; 
         location?: string; 
         sportType?: string;
+        sportTypes?: string[];
         latitude?: number;
         longitude?: number;
         radius?: number; // in kilometers
@@ -63,7 +64,18 @@ export class FieldsService {
         // Lọc theo tên và loại thể thao
         const filter: any = { isActive: true };
         if (query?.name) filter.name = { $regex: query.name, $options: 'i' };
-        if (query?.sportType) filter.sportType = new RegExp(`^${query.sportType}$`, 'i');
+        
+        // Priority: sportTypes > sportType
+        if (query?.sportTypes && query.sportTypes.length > 0) {
+            // Filter by multiple sports using $in operator
+            filter.sportType = { 
+                $in: query.sportTypes.map(s => new RegExp(`^${s}$`, 'i'))
+            };
+        } else if (query?.sportType) {
+            // Backward compatible: single sport
+            filter.sportType = new RegExp(`^${query.sportType}$`, 'i');
+        }
+        
         if (query?.location) filter['location.address'] = { $regex: query.location, $options: 'i' };
 
         // Location-based search with radius

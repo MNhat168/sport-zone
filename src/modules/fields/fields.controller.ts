@@ -16,14 +16,21 @@ export class FieldsController {
     @Query('name') name?: string,
     @Query('location') location?: string,
     @Query('sportType') sportType?: string,
+    @Query('sportTypes') sportTypes?: string | string[],
     @Query('latitude') latitude?: number,
     @Query('longitude') longitude?: number,
     @Query('radius') radius?: number,
   ): Promise<FieldsDto[]> {
+    // Convert sportTypes to array if it's a string
+    const sportTypesArray = sportTypes
+      ? (Array.isArray(sportTypes) ? sportTypes : [sportTypes])
+      : undefined;
+
     return this.fieldsService.findAll({
       name,
       location,
       sportType,
+      sportTypes: sportTypesArray,
       latitude,
       longitude,
       radius,
