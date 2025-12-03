@@ -8,22 +8,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(private configService: ConfigService) {
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
-        // Từ cookie - improved for multipart requests
+        // Từ cookie
         (req) => {
-          let token = null;
-          
-          // Debug logging
-          if (!req) {
-            console.log('🔍 [JwtStrategy] Request object is null');
-            return null;
-          }
-          
-          if (!req.cookies) {
-            console.log('🔍 [JwtStrategy] req.cookies is undefined/null. Available keys:', Object.keys(req));
-            // Try to check if cookies might be in a different location
-            if (req.headers && req.headers.cookie) {
-              console.log('🔍 [JwtStrategy] Found cookies in headers.cookie:', req.headers.cookie.substring(0, 100));
-            }
+          if (!req?.cookies) {
             return null;
           }
           
@@ -33,32 +20,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           const clientHeader = (req.headers['x-client-type'] as string) || '';
           const isAdminClient = clientHeader === 'admin';
 
-          console.log('🔍 [JwtStrategy] Extracting token - Client type:', clientHeader || 'web', 'isAdmin:', isAdminClient);
-          console.log('🔍 [JwtStrategy] Available cookies:', Object.keys(req.cookies));
-          console.log('🔍 [JwtStrategy] Cookie values:', {
-            access_token: req.cookies['access_token'] ? 'exists' : 'missing',
-            access_token_admin: req.cookies['access_token_admin'] ? 'exists' : 'missing',
-          });
-
-          if (isAdminClient) {
-            token = req.cookies['access_token_admin'] || req.cookies['access_token'];
-          } else {
-            token = req.cookies['access_token'] || req.cookies['access_token_admin'];
-          }
-
-          if (token) {
-            const tokenStr = String(token);
-            console.log('✅ [JwtStrategy] Token extracted successfully, length:', tokenStr.length);
-          } else {
-            console.log('❌ [JwtStrategy] No token found in cookies');
-          }
-
-          // Special handling for multipart requests (giữ nguyên behaviour cũ)
-          if (req.headers['content-type']?.includes('multipart/form-data') && token) {
-            // no-op
-          }
+          const token = isAdminClient
+            ? req.cookies['access_token_admin'] || req.cookies['access_token']
+            : req.cookies['access_token'] || req.cookies['access_token_admin'];
           
-          return token;
+          return token || null;
         },
         // Từ Authorization header (fallback cho Postman)
         ExtractJwt.fromAuthHeaderAsBearerToken(),
