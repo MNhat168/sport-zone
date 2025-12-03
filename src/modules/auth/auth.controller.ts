@@ -161,8 +161,8 @@ export class AuthController {
   /**
    * Xác thực 1-click qua link trong email
    * GET /auth/verify-email?email=...&token=...
-   * - Thành công: redirect về FRONTEND_URL với trạng thái thành công
-   * - Thất bại: redirect về FRONTEND_URL với trạng thái lỗi
+   * - Thành công: redirect về FRONTEND_URL/auth với trạng thái thành công
+   * - Thất bại: redirect về FRONTEND_URL/auth với trạng thái lỗi
    */
   @Get('verify-email')
   @ApiOperation({ summary: 'Xác thực 1-click qua link email' })
@@ -180,9 +180,9 @@ export class AuthController {
       } else {
         await this.authService.verifyByToken(token);
       }
-      return res.redirect(`${frontend}/verify-email/success`);
+      return res.redirect(`${frontend}/auth?verified=success`);
     } catch (err) {
-      return res.redirect(`${frontend}/verify-email/failed`);
+      return res.redirect(`${frontend}/auth?verified=failed`);
     }
   }
 

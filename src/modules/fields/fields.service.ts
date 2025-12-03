@@ -5,7 +5,7 @@ import { Model, Types } from 'mongoose';
 import { FieldsDto, CreateFieldDto, UpdateFieldDto, CreateFieldWithFilesDto } from './dtos/fields.dto';
 import { FieldOwnerProfileDto, CreateFieldOwnerProfileDto, UpdateFieldOwnerProfileDto } from '../field-owner/dtos/field-owner-profile.dto';
 import { FieldOwnerProfile } from '../field-owner/entities/field-owner-profile.entity';
-import { FieldOwnerRegistrationRequest, RegistrationStatus, OwnerType } from '../field-owner/entities/field-owner-registration-request.entity';
+import { FieldOwnerRegistrationRequest, RegistrationStatus } from '../field-owner/entities/field-owner-registration-request.entity';
 import { BankAccount, BankAccountStatus } from '../field-owner/entities/bank-account.entity';
 import { CreateFieldOwnerRegistrationDto, FieldOwnerRegistrationResponseDto, ApproveFieldOwnerRegistrationDto, RejectFieldOwnerRegistrationDto } from '../field-owner/dtos/field-owner-registration.dto';
 import { CreateBankAccountDto, BankAccountResponseDto, UpdateBankAccountStatusDto } from '../field-owner/dtos/bank-account.dto';
@@ -2840,7 +2840,6 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
         return {
             id: request._id.toString(),
             userId: request.userId?._id?.toString() || request.userId?.toString() || '',
-            ownerType: request.ownerType,
             personalInfo: request.personalInfo,
             documents: request.documents,
 

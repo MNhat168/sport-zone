@@ -12,7 +12,7 @@ import {
   Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { OwnerType, RegistrationStatus } from '../entities/field-owner-registration-request.entity';
+import { RegistrationStatus } from '../entities/field-owner-registration-request.entity';
 import { SportType } from 'src/common/enums/sport-type.enum';
 
 class PersonalInfoDto {
@@ -189,11 +189,6 @@ export class CreateFieldOwnerRegistrationDto {
 }
 
 export class UpdateFieldOwnerRegistrationDto {
-  @ApiPropertyOptional({ enum: OwnerType })
-  @IsOptional()
-  @IsEnum(OwnerType)
-  ownerType?: OwnerType;
-
   @ApiPropertyOptional()
   @IsOptional()
   @ValidateNested()
@@ -353,8 +348,6 @@ export class FieldOwnerRegistrationResponseDto {
   @ApiProperty()
   userId: string;
 
-  @ApiProperty({ enum: OwnerType })
-  ownerType: OwnerType;
 
   @ApiProperty()
   personalInfo: PersonalInfoDto;

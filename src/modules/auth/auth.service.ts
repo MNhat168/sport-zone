@@ -5,6 +5,7 @@ import { User, UserRole } from '../users/entities/user.entity';
 import * as bcrypt from 'bcrypt';
 import * as nodemailer from 'nodemailer';
 import { EmailService } from '../email/email.service';
+import { EmailQueueService } from '../email/email-queue.service';
 import { ConfigService } from '@nestjs/config';
 import { TokenPayload } from './interfaces/token.interface';
 import { JwtService } from '@nestjs/jwt';
@@ -20,6 +21,7 @@ export class AuthService {
     private readonly http_service: HttpService,
     @Inject(USER_REPOSITORY) private readonly user_repository: UserRepositoryInterface,
     private readonly emailService: EmailService,
+    private readonly emailQueue: EmailQueueService,
   ) { }
 
   generateAccessToken(payload: TokenPayload) {
@@ -90,10 +92,16 @@ export class AuthService {
     const existing = await this.userModel.findOne({ email });
     if (existing) throw new BadRequestException('Email already registered');
     const hashed = await bcrypt.hash(password, 10);
+
     // Generate JWT verification token (no need to store in database)
     const verificationToken = this.generateVerificationToken(email);
-    // Send email using template verify-email.hbs
-    await this.emailService.sendEmailVerification(email, verificationToken);
+
+    // Enqueue email sending to background worker instead of awaiting SMTP directly
+    this.emailQueue.enqueue({
+      type: 'VERIFY_EMAIL',
+      email,
+      token: verificationToken,
+    });
     // Save user with isVerified: false (no verificationToken field needed)
     const user = new this.userModel({
       fullName,
@@ -207,8 +215,13 @@ export class AuthService {
     if (!user) throw new BadRequestException('User not found');
     // Generate JWT token for reset password (no need to store in database)
     const resetPasswordToken = this.generateResetPasswordToken(email);
-    // Send email using EmailService
-    await this.emailService.sendResetPassword(email, resetPasswordToken);
+
+    // Enqueue reset password email to background worker
+    this.emailQueue.enqueue({
+      type: 'RESET_PASSWORD',
+      email,
+      token: resetPasswordToken,
+    });
     return { message: 'Reset password link sent to email' };
   }
 

@@ -3,12 +3,6 @@ import { Types } from 'mongoose';
 import { BaseEntity } from 'src/common/entities/base.entity';
 import { FacilityInfo, FacilityInfoSchema } from './facility-info.entity';
 
-export enum OwnerType {
-  INDIVIDUAL = 'individual',
-  BUSINESS = 'business',
-  HOUSEHOLD = 'household',
-}
-
 export enum RegistrationStatus {
   PENDING = 'pending',
   APPROVED = 'approved',
@@ -19,9 +13,6 @@ export enum RegistrationStatus {
 export class FieldOwnerRegistrationRequest extends BaseEntity {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
   userId: Types.ObjectId;
-
-  @Prop({ type: String, enum: OwnerType, default: OwnerType.INDIVIDUAL })
-  ownerType: OwnerType;
 
   // Personal Information
   @Prop({

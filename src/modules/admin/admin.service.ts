@@ -435,7 +435,7 @@ export class AdminService {
                 { notes: regex },
             ] as any;
         }
-
+        
         const sort: Record<string, 1 | -1> = { [sortBy]: sortOrder === 'asc' ? 1 : -1 };
 
         const skip = (page - 1) * limit;
