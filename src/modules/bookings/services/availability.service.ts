@@ -223,11 +223,11 @@ export class AvailabilityService {
   async getExistingBookingsForDate(fieldId: string, date: Date): Promise<Booking[]> {
     try {
       // Normalize date to start/end of day in Vietnam timezone (UTC+7)
-      const startOfDay = new Date(date);
-      startOfDay.setUTCHours(-7, 0, 0, 0); // Start of day in Vietnam = UTC-7
+const startOfDay = new Date(date);
+startOfDay.setHours(0, 0, 0, 0); // Start of local day (Vietnam)
 
-      const endOfDay = new Date(date);
-      endOfDay.setUTCHours(16, 59, 59, 999); // End of day in Vietnam = UTC+17-1ms
+const endOfDay = new Date(date);
+endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
 
       // Query Booking collection for confirmed and pending bookings
       const bookings = await this.bookingModel.find({

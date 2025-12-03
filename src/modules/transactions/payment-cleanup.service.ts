@@ -44,16 +44,14 @@ export class PaymentCleanupService {
       // - Since Vietnam offset is constant (UTC+7), comparing UTC times directly 
       //   gives the same result as comparing in Vietnam timezone
       // - The 5-minute expiration is based on Vietnam local time, but UTC comparison is mathematically equivalent
-      const nowUTC = new Date();
+      // Use Vietnam local time as source of truth because timestamps are stored in UTC+7
+      const nowVN = this.timezoneService.getCurrentVietnamTime();
       
-      // Calculate expiration threshold: 5 minutes ago
-      // Since we're comparing UTC times and offset is constant, this works correctly
-      const expirationThresholdUTC = new Date(nowUTC.getTime() - (this.PAYMENT_EXPIRATION_MINUTES * 60 * 1000));
+      // Calculate expiration threshold in Vietnam time
+      const expirationThresholdVN = new Date(nowVN.getTime() - (this.PAYMENT_EXPIRATION_MINUTES * 60 * 1000));
 
-      this.logger.debug(`[Cleanup] Current time (Vietnam UTC+7): ${this.timezoneService.formatVietnamTime(nowUTC, 'readable')}`);
-      this.logger.debug(`[Cleanup] Current time (UTC): ${nowUTC.toISOString()}`);
-      this.logger.debug(`[Cleanup] Expiration threshold (Vietnam UTC+7): ${this.timezoneService.formatVietnamTime(expirationThresholdUTC, 'readable')}`);
-      this.logger.debug(`[Cleanup] Looking for payments created before (UTC): ${expirationThresholdUTC.toISOString()}`);
+      this.logger.debug(`[Cleanup] Current time (Vietnam UTC+7): ${this.timezoneService.formatVietnamTime(nowVN, 'readable')}`);
+      this.logger.debug(`[Cleanup] Expiration threshold (Vietnam UTC+7): ${this.timezoneService.formatVietnamTime(expirationThresholdVN, 'readable')}`);
 
       // Debug: Check all pending payments first
       const allPendingPayments = await this.transactionModel.find({
@@ -114,10 +112,10 @@ export class PaymentCleanupService {
         //   comparing UTC times directly gives the same result as comparing in Vietnam timezone
         // - Example: If booking created at 10:00 UTC (17:00 VN), and now is 10:05 UTC (17:05 VN),
         //   the difference is 5 minutes in both UTC and Vietnam time
-        const bookingCreatedAtUTC = new Date((booking as any).createdAt);
+        const bookingCreatedAtVN = new Date((booking as any).createdAt);
         
-        // Compare UTC times directly (mathematically equivalent to Vietnam timezone comparison)
-        const timeSinceBookingMs = nowUTC.getTime() - bookingCreatedAtUTC.getTime();
+        // Compare in Vietnam time (timestamps stored as UTC+7)
+        const timeSinceBookingMs = nowVN.getTime() - bookingCreatedAtVN.getTime();
         const timeSinceBookingMinutes = timeSinceBookingMs / 1000 / 60;
         
         // Payment is expired if booking was created >= 5 minutes ago
@@ -127,7 +125,7 @@ export class PaymentCleanupService {
         this.logger.debug(
           `[Cleanup] Payment ${payment._id}: ` +
           `booking created ${timeSinceBookingMinutes.toFixed(2)} minutes ago ` +
-          `(Vietnam time: ${this.timezoneService.formatVietnamTime(bookingCreatedAtUTC, 'readable')}, UTC: ${bookingCreatedAtUTC.toISOString()}) ` +
+          `(Vietnam time: ${this.timezoneService.formatVietnamTime(bookingCreatedAtVN, 'readable')}) ` +
           `booking status: ${(booking as any).status} ` +
           `${isExpired ? (hasDataInconsistency ? '⚠️ DATA INCONSISTENCY - Will fix' : '⚠️ EXPIRED') : '⏳ Still valid'}`
         );
@@ -197,9 +195,9 @@ export class PaymentCleanupService {
 
     // ✅ Server-agnostic: Works correctly on any server timezone (Render, AWS, etc.)
     // Use UTC time for comparison (MongoDB stores UTC, offset is constant UTC+7)
-    const nowUTC = new Date();
-    const createdAtUTC = new Date(payment.createdAt);
-    const minutesElapsed = (nowUTC.getTime() - createdAtUTC.getTime()) / 1000 / 60;
+    const nowVN = this.timezoneService.getCurrentVietnamTime();
+    const createdAtVN = new Date(payment.createdAt);
+    const minutesElapsed = (nowVN.getTime() - createdAtVN.getTime()) / 1000 / 60;
     
     // Return true if payment is 3+ minutes old (2 minutes left)
     return minutesElapsed >= (this.PAYMENT_EXPIRATION_MINUTES - 2);
@@ -217,9 +215,9 @@ export class PaymentCleanupService {
 
     // ✅ Server-agnostic: Works correctly on any server timezone (Render, AWS, etc.)
     // Use UTC time for calculation (MongoDB stores UTC, offset is constant UTC+7)
-    const nowUTC = new Date();
-    const createdAtUTC = new Date(payment.createdAt);
-    const elapsedSeconds = (nowUTC.getTime() - createdAtUTC.getTime()) / 1000;
+    const nowVN = this.timezoneService.getCurrentVietnamTime();
+    const createdAtVN = new Date(payment.createdAt);
+    const elapsedSeconds = (nowVN.getTime() - createdAtVN.getTime()) / 1000;
     const expirationSeconds = this.PAYMENT_EXPIRATION_MINUTES * 60;
     
     const remainingSeconds = Math.max(0, expirationSeconds - elapsedSeconds);
@@ -242,8 +240,7 @@ export class PaymentCleanupService {
     }
 
     // Use Vietnam timezone for extension time
-    const nowVietnam = this.timezoneService.getCurrentVietnamTime();
-    const nowUTC = new Date(); // Store UTC in database
+    const nowVN = this.timezoneService.getCurrentVietnamTime();
     const extensions = ((payment as any).metadata?.extensions || 0) + 1;
     const totalExtendedMinutes = ((payment as any).metadata?.totalExtendedMinutes || 0) + additionalMinutes;
 
@@ -253,16 +250,15 @@ export class PaymentCleanupService {
     }
 
     // Calculate extended expiration in Vietnam timezone, then convert to UTC for storage
-    const extendedExpirationVietnam = new Date(nowVietnam.getTime() + additionalMinutes * 60 * 1000);
-    const extendedExpirationUTC = new Date(extendedExpirationVietnam.getTime() - (7 * 60 * 60 * 1000));
+    const extendedExpirationVietnam = new Date(nowVN.getTime() + additionalMinutes * 60 * 1000);
 
     await this.transactionModel.findByIdAndUpdate(paymentId, {
       metadata: {
         ...((payment as any).metadata || {}),
         extensions,
         totalExtendedMinutes,
-        lastExtendedAt: nowUTC,
-        extendedExpirationTime: extendedExpirationUTC,
+        lastExtendedAt: nowVN,
+        extendedExpirationTime: extendedExpirationVietnam,
       },
     });
 
@@ -276,7 +272,7 @@ export class PaymentCleanupService {
       extensions,
       additionalMinutes,
       totalExtendedMinutes,
-      extendedAt: nowUTC,
+      extendedAt: nowVN,
     });
   }
 
@@ -292,19 +288,17 @@ export class PaymentCleanupService {
 
     const metadata = (payment as any).metadata || {};
     
-    // If payment has been extended, use extended expiration time
+    // If payment has been extended, use extended expiration time (stored in UTC+7)
     if (metadata.extendedExpirationTime) {
       return new Date(metadata.extendedExpirationTime);
     }
 
     // Otherwise, use original expiration (createdAt + 5 minutes in Vietnam timezone)
-    const createdAtUTC = new Date(payment.createdAt);
-    const createdAtVietnam = this.timezoneService.toVietnamTime(createdAtUTC);
-    const originalExpirationVietnam = new Date(createdAtVietnam);
+    const createdAtVN = new Date(payment.createdAt);
+    const originalExpirationVietnam = new Date(createdAtVN);
     originalExpirationVietnam.setMinutes(
       originalExpirationVietnam.getMinutes() + this.PAYMENT_EXPIRATION_MINUTES
     );
-    // Convert back to UTC for consistency
-    return new Date(originalExpirationVietnam.getTime() - (7 * 60 * 60 * 1000));
+    return originalExpirationVietnam;
   }
 }

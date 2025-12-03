@@ -14,8 +14,8 @@ import { Document } from 'mongoose';
   timestamps: {
     createdAt: true,
     updatedAt: true,
-    // ✅ Use UTC time - MongoDB stores in UTC, we convert to Vietnam time for display
-    currentTime: () => new Date()
+    // ⚠️ Save timestamps as Vietnam time (UTC+7) by shifting +7h before persist
+    currentTime: () => new Date(Date.now() + 7 * 60 * 60 * 1000)
   },
   toJSON: {
     transform: function(_, ret: any) {
@@ -91,7 +91,7 @@ export function configureBaseEntitySchema(schema: any) {
   schema.set('timestamps', {
     createdAt: true,
     updatedAt: true,
-    // ✅ Use UTC time - MongoDB stores in UTC, we convert to Vietnam time for display
-    currentTime: () => new Date()
+    // ⚠️ Save timestamps as Vietnam time (UTC+7) by shifting +7h before persist
+    currentTime: () => new Date(Date.now() + 7 * 60 * 60 * 1000)
   });
 }

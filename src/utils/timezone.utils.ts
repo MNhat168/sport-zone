@@ -7,14 +7,9 @@
  */
 export function convertToVietnamTime(utcDate: Date): Date {
     if (!utcDate) return utcDate;
-    
-    // Create new date instance để tránh modify original
-    const vietnamTime = new Date(utcDate);
-    
-    // Add 7 hours for Vietnam timezone (UTC+7)
-    vietnamTime.setHours(vietnamTime.getHours() + 7);
-    
-    return vietnamTime;
+    // New behavior: dữ liệu đã được lưu theo UTC+7, không cần cộng offset khi đọc/hiển thị
+    // Trả về bản sao để tránh mutate đối tượng gốc
+    return new Date(utcDate);
 }
 
 /**
@@ -28,10 +23,11 @@ export function getCurrentVietnamTime(): Date {
  * Format date to Vietnam timezone string
  */
 export function formatVietnamTime(date: Date, format: 'iso' | 'readable' = 'iso'): string {
-    const vietnamTime = convertToVietnamTime(date);
-    
+    const baseDate = date instanceof Date ? date : new Date(date);
+
     if (format === 'readable') {
-        return vietnamTime.toLocaleString('vi-VN', {
+        // Hiển thị theo múi giờ Việt Nam nhưng KHÔNG đổi mốc thời gian
+        return baseDate.toLocaleString('vi-VN', {
             timeZone: 'Asia/Ho_Chi_Minh',
             year: 'numeric',
             month: '2-digit',
@@ -39,26 +35,37 @@ export function formatVietnamTime(date: Date, format: 'iso' | 'readable' = 'iso'
             hour: '2-digit',
             minute: '2-digit',
             second: '2-digit',
-            hour12: false
+            hour12: false,
         });
     }
-    
-    // ISO format with +07:00 timezone
-    return vietnamTime.toISOString().replace('Z', '+07:00');
+
+    // Chuẩn ISO có offset +07:00, tính toán phần ngày/giờ theo Asia/Ho_Chi_Minh rồi đóng gói offset
+    // Vì Việt Nam không DST, offset luôn +07:00
+    const dtf = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false,
+    });
+    const parts = dtf.formatToParts(baseDate);
+    const map = Object.fromEntries(parts.map(p => [p.type, p.value]));
+    return `${map.year}-${map.month}-${map.day}T${map.hour}:${map.minute}:${map.second}+07:00`;
 }
 
 /**
  * Create date in Vietnam timezone
  */
 export function createVietnamDate(
-    year: number, 
-    month: number, 
-    day: number, 
-    hour: number = 0, 
-    minute: number = 0, 
+    year: number,
+    month: number,
+    day: number,
+    hour: number = 0,
+    minute: number = 0,
     second: number = 0
 ): Date {
-    // Tạo date local rồi convert về UTC-7 để lưu database
-    const localDate = new Date(year, month - 1, day, hour, minute, second);
-    return new Date(localDate.getTime() - (7 * 60 * 60 * 1000));
+    // Dữ liệu được hiểu là thời gian Việt Nam; tạo Date tương ứng với mốc đó
+    // Cách đơn giản và nhất quán: lấy thời điểm theo VN bằng cách cộng offset +7 vào UTC mốc 0h cùng ngày
+    const vnLocal = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+    // vnLocal hiện đang ở UTC mốc theo input; để biểu diễn đúng VN (UTC+7), dịch thêm +7h
+    return new Date(vnLocal.getTime() - (0 * 60 * 60 * 1000)); // giữ nguyên, không trừ 7h nữa
 }

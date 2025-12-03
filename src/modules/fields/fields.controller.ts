@@ -1,5 +1,6 @@
 import { Controller, Get, Query, Param, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { Types } from 'mongoose';
 import { FieldsService } from './fields.service';
 import { FieldsDto } from './dtos/fields.dto';
 
@@ -69,8 +70,13 @@ export class FieldsController {
   @ApiOperation({ summary: 'Get field by ID' })
   @ApiParam({ name: 'id', description: 'Field ID' })
   @ApiResponse({ status: 200, description: 'Field retrieved successfully', type: FieldsDto })
+  @ApiResponse({ status: 400, description: 'Invalid field ID format' })
   @ApiResponse({ status: 404, description: 'Field not found' })
   async findOne(@Param('id') id: string): Promise<FieldsDto> {
+    // Validate ObjectId format to prevent CastError
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException(`Invalid field ID format: "${id}". Field ID must be a valid MongoDB ObjectId.`);
+    }
     return this.fieldsService.findOne(id);
   }
 
@@ -78,13 +84,17 @@ export class FieldsController {
   @ApiOperation({ summary: 'Get field availability for date range' })
   @ApiParam({ name: 'id', description: 'Field ID' })
   @ApiResponse({ status: 200, description: 'Field availability retrieved successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid field ID format or date range' })
   @ApiResponse({ status: 404, description: 'Field not found' })
-  @ApiResponse({ status: 400, description: 'Invalid date range' })
   async getAvailability(
     @Param('id') id: string,
     @Query('startDate') startDate: string,
     @Query('endDate') endDate: string,
   ) {
+    // Validate ObjectId format to prevent CastError
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException(`Invalid field ID format: "${id}". Field ID must be a valid MongoDB ObjectId.`);
+    }
     if (!startDate || !endDate) {
       throw new BadRequestException('startDate and endDate are required');
     }
@@ -107,8 +117,13 @@ export class FieldsController {
   @ApiOperation({ summary: 'Get field amenities' })
   @ApiParam({ name: 'id', description: 'Field ID' })
   @ApiResponse({ status: 200, description: 'Field amenities retrieved successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid field ID format' })
   @ApiResponse({ status: 404, description: 'Field not found' })
   async getFieldAmenities(@Param('id') fieldId: string) {
+    // Validate ObjectId format to prevent CastError
+    if (!Types.ObjectId.isValid(fieldId)) {
+      throw new BadRequestException(`Invalid field ID format: "${fieldId}". Field ID must be a valid MongoDB ObjectId.`);
+    }
     return this.fieldsService.getFieldAmenities(fieldId);
   }
 }

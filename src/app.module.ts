@@ -1,10 +1,8 @@
 import { LessonTypesModule } from './modules/lessontypes/lesson-types.module';
 import { Module } from '@nestjs/common';
-import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CommonModule } from './common/common.module';
-import { GlobalTimezoneInterceptor } from './common/interceptors/global-timezone.interceptor';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
@@ -72,10 +70,6 @@ import { ChatModule } from '@modules/chat/chat.module';
   controllers: [AppController],
   providers: [
     AppService,
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: GlobalTimezoneInterceptor,
-    },
   ],
 })
 export class AppModule { }
