@@ -75,23 +75,37 @@ export class AuthController {
     const refreshCookieName = isAdminClient ? 'refresh_token_admin' : 'refresh_token';
 
     // Access token
-    res.cookie(accessCookieName, accessToken, {
+    const accessCookieConfig = {
       ...cookieOptions,
       // Nếu rememberMe = true: cookie tồn tại 15 phút
       // Nếu rememberMe = false: session cookie (xóa khi đóng browser)
       expires: rememberMe 
         ? new Date(Date.now() + accessMs) 
         : undefined,
+    };
+    res.cookie(accessCookieName, accessToken, accessCookieConfig);
+    console.log('🍪 [setAuthCookies] Set access cookie:', {
+      name: accessCookieName,
+      hasValue: !!accessToken,
+      valueLength: accessToken?.length,
+      options: accessCookieConfig,
     });
 
     // Refresh token
-    res.cookie(refreshCookieName, refreshToken, {
+    const refreshCookieConfig = {
       ...cookieOptions,
       // Nếu rememberMe = true: cookie tồn tại 7 ngày
       // Nếu rememberMe = false: session cookie (xóa khi đóng browser)
       expires: rememberMe 
         ? new Date(Date.now() + refreshMs) 
         : undefined,
+    };
+    res.cookie(refreshCookieName, refreshToken, refreshCookieConfig);
+    console.log('🍪 [setAuthCookies] Set refresh cookie:', {
+      name: refreshCookieName,
+      hasValue: !!refreshToken,
+      valueLength: refreshToken?.length,
+      options: refreshCookieConfig,
     });
   }
 

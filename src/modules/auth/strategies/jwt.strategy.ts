@@ -11,24 +11,52 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         // Từ cookie - improved for multipart requests
         (req) => {
           let token = null;
-          if (req && req.cookies) {
-            // Ưu tiên chọn cookie theo loại client
-            // - Admin FE gửi header: X-Client-Type: admin
-            // - FE user gửi header: X-Client-Type: web (hoặc không gửi)
-            const clientHeader = (req.headers['x-client-type'] as string) || '';
-            const isAdminClient = clientHeader === 'admin';
-
-            if (isAdminClient) {
-              token = req.cookies['access_token_admin'] || req.cookies['access_token'];
-            } else {
-              token = req.cookies['access_token'] || req.cookies['access_token_admin'];
-            }
-
-            // Special handling for multipart requests (giữ nguyên behaviour cũ)
-            if (req.headers['content-type']?.includes('multipart/form-data') && token) {
-              // no-op
-            }
+          
+          // Debug logging
+          if (!req) {
+            console.log('🔍 [JwtStrategy] Request object is null');
+            return null;
           }
+          
+          if (!req.cookies) {
+            console.log('🔍 [JwtStrategy] req.cookies is undefined/null. Available keys:', Object.keys(req));
+            // Try to check if cookies might be in a different location
+            if (req.headers && req.headers.cookie) {
+              console.log('🔍 [JwtStrategy] Found cookies in headers.cookie:', req.headers.cookie.substring(0, 100));
+            }
+            return null;
+          }
+          
+          // Ưu tiên chọn cookie theo loại client
+          // - Admin FE gửi header: X-Client-Type: admin
+          // - FE user gửi header: X-Client-Type: web (hoặc không gửi)
+          const clientHeader = (req.headers['x-client-type'] as string) || '';
+          const isAdminClient = clientHeader === 'admin';
+
+          console.log('🔍 [JwtStrategy] Extracting token - Client type:', clientHeader || 'web', 'isAdmin:', isAdminClient);
+          console.log('🔍 [JwtStrategy] Available cookies:', Object.keys(req.cookies));
+          console.log('🔍 [JwtStrategy] Cookie values:', {
+            access_token: req.cookies['access_token'] ? 'exists' : 'missing',
+            access_token_admin: req.cookies['access_token_admin'] ? 'exists' : 'missing',
+          });
+
+          if (isAdminClient) {
+            token = req.cookies['access_token_admin'] || req.cookies['access_token'];
+          } else {
+            token = req.cookies['access_token'] || req.cookies['access_token_admin'];
+          }
+
+          if (token) {
+            console.log('✅ [JwtStrategy] Token extracted successfully, length:', typeof token === 'string' ? token.length : 0);
+          } else {
+            console.log('❌ [JwtStrategy] No token found in cookies');
+          }
+
+          // Special handling for multipart requests (giữ nguyên behaviour cũ)
+          if (req.headers['content-type']?.includes('multipart/form-data') && token) {
+            // no-op
+          }
+          
           return token;
         },
         // Từ Authorization header (fallback cho Postman)

@@ -14,8 +14,7 @@ export class JwtAccessTokenGuard extends AuthGuard('jwt') {
 		context: ExecutionContext,
 	): boolean | Promise<boolean> | Observable<boolean> {
 		const req = context.switchToHttp().getRequest();
-		// Removed verbose request logging
-
+		
 		const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
 			context.getHandler(),
 			context.getClass(),
@@ -25,12 +24,26 @@ export class JwtAccessTokenGuard extends AuthGuard('jwt') {
 			return true;
 		}
 		
+		// Debug logging before authentication
+		console.log('🔍 [JwtAccessTokenGuard] canActivate - Request path:', req.path);
+		console.log('🔍 [JwtAccessTokenGuard] canActivate - Cookies in req.cookies:', req.cookies ? Object.keys(req.cookies) : 'undefined');
+		console.log('🔍 [JwtAccessTokenGuard] canActivate - Cookie header:', req.headers?.cookie ? req.headers.cookie.substring(0, 200) : 'missing');
+		
 		return super.canActivate(context);
 	}
 
 	handleRequest(err: any, user: any, info: any, context: ExecutionContext) {
-		// Removed verbose logging; only throw structured errors when needed
-		console.log('JwtAccessTokenGuard handleRequest - User:', user ? { userId: user.userId, role: user.role } : null);
+		const request = context.switchToHttp().getRequest();
+		console.log('🔍 [JwtAccessTokenGuard] handleRequest called');
+		console.log('🔍 [JwtAccessTokenGuard] User:', user ? { userId: user.userId, role: user.role } : null);
+		console.log('🔍 [JwtAccessTokenGuard] Error:', err);
+		console.log('🔍 [JwtAccessTokenGuard] Info:', info);
+		console.log('🔍 [JwtAccessTokenGuard] Request cookies:', request?.cookies ? Object.keys(request.cookies) : 'no cookies');
+		console.log('🔍 [JwtAccessTokenGuard] Request headers:', {
+			'x-client-type': request?.headers?.['x-client-type'],
+			cookie: request?.headers?.cookie ? 'exists' : 'missing',
+		});
+		
 		if (err || !user) {
 			// Check if token is expired
 			if (info && info.name === 'TokenExpiredError') {
