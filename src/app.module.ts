@@ -29,7 +29,8 @@ import { ChatModule } from '@modules/chat/chat.module';
         LessonTypesModule, 
     ConfigModule.forRoot({
       isGlobal: true, // ← cho phép dùng ở mọi module
-      envFilePath: '.env',
+      // Dùng .env.prod khi NODE_ENV=production, fallback về .env
+      envFilePath: process.env.NODE_ENV === 'production' ? '.env.prod' : '.env',
       load: [envConfig], // Load custom config
     }),
     MongooseModule.forRoot(process.env.MONGODB_URI!, {

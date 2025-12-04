@@ -44,8 +44,35 @@ export class AuthController {
     refreshToken: string, 
     rememberMe: boolean,
     clientType: 'admin' | 'web' = 'web',
+    req?: any,  // Thêm req để detect origin
   ): void {
     const isProduction = process.env.NODE_ENV === 'production';
+    
+    // Detect nếu đang chạy trên server (không phải localhost)
+    // Kiểm tra origin từ request hoặc từ ENV
+    const origin = req?.headers?.origin || req?.headers?.referer || '';
+    const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1') || !origin;
+    const isCrossOrigin = !isLocalhost && origin && !origin.includes(req?.headers?.host || '');
+    
+    // Detect HTTPS: kiểm tra nhiều nguồn
+    // 1. req.secure (sau khi trust proxy)
+    // 2. x-forwarded-proto header (từ reverse proxy)
+    // 3. x-forwarded-ssl header (một số proxy dùng)
+    // 4. NODE_ENV production (thường có HTTPS)
+    // 5. origin bắt đầu bằng https:// (trường hợp proxy không set X-Forwarded-Proto)
+    const forwardedProto = req?.headers?.['x-forwarded-proto'];
+    const forwardedSsl = req?.headers?.['x-forwarded-ssl'];
+    const forceSecure = String(process.env.FORCE_SECURE_COOKIES || '').toLowerCase() === 'true';
+    const hasHttps = 
+      req?.secure === true || 
+      forwardedProto === 'https' || 
+      forwardedSsl === 'on' ||
+      origin.startsWith('https://') ||
+      (isProduction && !isLocalhost) ||
+      forceSecure; // Cho phép ép bật Secure qua ENV
+    
+    // Nếu cross-origin hoặc production, cần sameSite: 'none' + secure: true
+    const needsCrossSiteCookie = isCrossOrigin || isProduction;
 
     // Đọc thời gian hết hạn từ ENV (cùng giá trị với JwtService)
     const accessExpCfg = this.configService.get<string>('JWT_ACCESS_TOKEN_EXPIRATION_TIME') ?? '1d';
@@ -57,19 +84,53 @@ export class AuthController {
      * Cấu hình cookie chung
      *
      * Lưu ý về SameSite:
-     * - DEV (localhost): dùng 'lax' để đơn giản, không bắt buộc HTTPS
-     * - PROD (Vercel FE gọi Railway BE khác domain): bắt buộc dùng 'none' + secure: true
+     * - DEV localhost: dùng 'lax' để đơn giản, không bắt buộc HTTPS
+     * - Cross-origin hoặc PROD: bắt buộc dùng 'none' + secure: true
      *   nếu không browser sẽ KHÔNG lưu/gửi cookie cross-site → JwtAccessTokenGuard luôn nhận user = null
+     * 
+     * Lưu ý về Domain:
+     * - Không set domain để cookie hoạt động với mọi subdomain
+     * - Với localhost, không cần set domain (browser tự xử lý)
+     * - Với production, có thể cần set domain nếu FE và BE ở khác domain
      */
-    const sameSiteOption = isProduction ? 'none' : 'lax';
+    let sameSiteOption: 'lax' | 'none' | 'strict' = 'lax';
+    let secureOption = false;
+    
+    if (needsCrossSiteCookie && hasHttps) {
+      // Cross-origin với HTTPS: dùng 'none' + secure
+      sameSiteOption = 'none';
+      secureOption = true;
+    } else if (needsCrossSiteCookie && !hasHttps) {
+      // Cross-origin nhưng không có HTTPS: vẫn dùng 'none' nhưng secure: false
+      // Browser có thể reject, nhưng thử xem
+      sameSiteOption = 'none';
+      secureOption = false;
+      console.warn('⚠️ [setAuthCookies] Cross-origin cookie without HTTPS - browser may reject');
+    } else {
+      // Same-origin hoặc localhost: dùng 'lax'
+      sameSiteOption = 'lax';
+      secureOption = isProduction;
+    }
+    
+    // Xác định domain dựa trên môi trường
+    // Không set domain cho localhost (để hoạt động với mọi port)
+    // Set domain cho production nếu cần (ví dụ: .yourdomain.com)
+    const cookieDomain = isProduction 
+      ? process.env.COOKIE_DOMAIN || undefined  // Có thể set trong ENV nếu cần
+      : undefined;  // Localhost: không set domain
 
-    const cookieOptions = {
+    const cookieOptions: any = {
       httpOnly: true,          // Không thể truy cập từ JavaScript (bảo mật)
-      secure: isProduction,    // Chỉ gửi qua HTTPS ở production (Railway dùng HTTPS)
-      sameSite: sameSiteOption as 'lax' | 'none',
+      secure: secureOption,     // Chỉ gửi qua HTTPS khi cần
+      sameSite: sameSiteOption,
       path: '/',
     };
-
+    
+    // Chỉ thêm domain nếu được set (undefined = không set domain)
+    if (cookieDomain) {
+      cookieOptions.domain = cookieDomain;
+    }
+    
     const isAdminClient = clientType === 'admin';
     const accessCookieName = isAdminClient ? 'access_token_admin' : 'access_token';
     const refreshCookieName = isAdminClient ? 'refresh_token_admin' : 'refresh_token';
@@ -77,22 +138,30 @@ export class AuthController {
     // Access token
     res.cookie(accessCookieName, accessToken, {
       ...cookieOptions,
-      // Nếu rememberMe = true: cookie tồn tại 15 phút
-      // Nếu rememberMe = false: session cookie (xóa khi đóng browser)
-      expires: rememberMe 
-        ? new Date(Date.now() + accessMs) 
-        : undefined,
+      expires: rememberMe ? new Date(Date.now() + accessMs) : undefined,
     });
 
     // Refresh token
     res.cookie(refreshCookieName, refreshToken, {
       ...cookieOptions,
-      // Nếu rememberMe = true: cookie tồn tại 7 ngày
-      // Nếu rememberMe = false: session cookie (xóa khi đóng browser)
-      expires: rememberMe 
-        ? new Date(Date.now() + refreshMs) 
-        : undefined,
+      expires: rememberMe ? new Date(Date.now() + refreshMs) : undefined,
     });
+    
+    // Log cookie config để debug
+    console.log('🍪 [setAuthCookies] Cookie config:', {
+      origin: origin || 'no origin',
+      isLocalhost,
+      isCrossOrigin,
+      hasHttps,
+      sameSite: sameSiteOption,
+      secure: secureOption,
+      host: req?.headers?.host,
+    });
+    
+    // Log warning nếu cross-origin không có HTTPS
+    if (needsCrossSiteCookie && !hasHttps) {
+      console.warn('⚠️ [setAuthCookies] Cross-origin cookie without HTTPS - browser may reject');
+    }
   }
 
   /**
@@ -161,8 +230,8 @@ export class AuthController {
   /**
    * Xác thực 1-click qua link trong email
    * GET /auth/verify-email?email=...&token=...
-   * - Thành công: redirect về FRONTEND_URL với trạng thái thành công
-   * - Thất bại: redirect về FRONTEND_URL với trạng thái lỗi
+   * - Thành công: redirect về FRONTEND_URL/auth với trạng thái thành công
+   * - Thất bại: redirect về FRONTEND_URL/auth với trạng thái lỗi
    */
   @Get('verify-email')
   @ApiOperation({ summary: 'Xác thực 1-click qua link email' })
@@ -180,9 +249,9 @@ export class AuthController {
       } else {
         await this.authService.verifyByToken(token);
       }
-      return res.redirect(`${frontend}/verify-email/success`);
+      return res.redirect(`${frontend}/auth?verified=success`);
     } catch (err) {
-      return res.redirect(`${frontend}/verify-email/failed`);
+      return res.redirect(`${frontend}/auth?verified=failed`);
     }
   }
 
@@ -215,14 +284,10 @@ export class AuthController {
     description: 'Email hoặc mật khẩu không đúng',
   })
   async login(@Body() loginDto: LoginWithRememberDto, @Req() req: any, @Res() res: Response) {
-    console.log('🔐 Login attempt for:', loginDto.email);
-    
     const result = await this.authService.login({ 
       ...loginDto, 
       rememberMe: !!loginDto.rememberMe 
     });
-    
-    console.log('✅ Login successful, setting cookies');
     
     // Xác định loại client từ header
     const clientHeader = (req.headers['x-client-type'] as string) || '';
@@ -235,6 +300,7 @@ export class AuthController {
       result.refreshToken, 
       !!loginDto.rememberMe,
       clientType,
+      req,
     );
     
     return res.status(HttpStatus.OK).json({ user: result.user });
@@ -299,6 +365,7 @@ export class AuthController {
       result.refreshToken, 
       !!sign_in_token.rememberMe,
       clientType,
+      req,  // Pass req để detect origin
     );
     
     return res.status(HttpStatus.OK).json({ 
@@ -337,7 +404,7 @@ export class AuthController {
     }
     
     // Set lại cookies với cùng pattern & đúng loại client
-    this.setAuthCookies(res, newAccessToken, newRefreshToken, hasRefreshToken, clientType);
+    this.setAuthCookies(res, newAccessToken, newRefreshToken, hasRefreshToken, clientType, req);
 
     return res.status(HttpStatus.OK).json({ 
       message: 'Token refreshed successfully' 

@@ -8,28 +8,23 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(private configService: ConfigService) {
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
-        // Từ cookie - improved for multipart requests
+        // Từ cookie
         (req) => {
-          let token = null;
-          if (req && req.cookies) {
-            // Ưu tiên chọn cookie theo loại client
-            // - Admin FE gửi header: X-Client-Type: admin
-            // - FE user gửi header: X-Client-Type: web (hoặc không gửi)
-            const clientHeader = (req.headers['x-client-type'] as string) || '';
-            const isAdminClient = clientHeader === 'admin';
-
-            if (isAdminClient) {
-              token = req.cookies['access_token_admin'] || req.cookies['access_token'];
-            } else {
-              token = req.cookies['access_token'] || req.cookies['access_token_admin'];
-            }
-
-            // Special handling for multipart requests (giữ nguyên behaviour cũ)
-            if (req.headers['content-type']?.includes('multipart/form-data') && token) {
-              // no-op
-            }
+          if (!req?.cookies) {
+            return null;
           }
-          return token;
+          
+          // Ưu tiên chọn cookie theo loại client
+          // - Admin FE gửi header: X-Client-Type: admin
+          // - FE user gửi header: X-Client-Type: web (hoặc không gửi)
+          const clientHeader = (req.headers['x-client-type'] as string) || '';
+          const isAdminClient = clientHeader === 'admin';
+
+          const token = isAdminClient
+            ? req.cookies['access_token_admin'] || req.cookies['access_token']
+            : req.cookies['access_token'] || req.cookies['access_token_admin'];
+          
+          return token || null;
         },
         // Từ Authorization header (fallback cho Postman)
         ExtractJwt.fromAuthHeaderAsBearerToken(),

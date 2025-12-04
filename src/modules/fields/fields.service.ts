@@ -56,14 +56,28 @@ export class FieldsService {
         name?: string; 
         location?: string; 
         sportType?: string;
+        sportTypes?: string[];
         latitude?: number;
         longitude?: number;
         radius?: number; // in kilometers
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
     }): Promise<FieldsDto[]> {
         // Lọc theo tên và loại thể thao
         const filter: any = { isActive: true };
         if (query?.name) filter.name = { $regex: query.name, $options: 'i' };
-        if (query?.sportType) filter.sportType = new RegExp(`^${query.sportType}$`, 'i');
+        
+        // Priority: sportTypes > sportType
+        if (query?.sportTypes && query.sportTypes.length > 0) {
+            // Filter by multiple sports using $in operator
+            filter.sportType = { 
+                $in: query.sportTypes.map(s => new RegExp(`^${s}$`, 'i'))
+            };
+        } else if (query?.sportType) {
+            // Backward compatible: single sport
+            filter.sportType = new RegExp(`^${query.sportType}$`, 'i');
+        }
+        
         if (query?.location) filter['location.address'] = { $regex: query.location, $options: 'i' };
 
         // Location-based search with radius
@@ -80,9 +94,27 @@ export class FieldsService {
             };
         }
 
-        const fields = await this.fieldModel
-            .find(filter)
-            .lean();
+        // Build sort options
+        let sortOptions: any = {};
+        console.log('[FieldsService.findAll] Query params:', { sortBy: query?.sortBy, sortOrder: query?.sortOrder });
+        
+        if (query?.sortBy === 'price' && query?.sortOrder) {
+            sortOptions.basePrice = query.sortOrder === 'asc' ? 1 : -1;
+            console.log(`[FieldsService.findAll] ✅ Sorting by price: ${query.sortOrder}, sortOptions:`, sortOptions);
+        } else {
+            console.log(`[FieldsService.findAll] ❌ No sorting applied. sortBy: ${query?.sortBy}, sortOrder: ${query?.sortOrder}`);
+        }
+
+        // Only apply sort if sortOptions is not empty
+        const queryBuilder = this.fieldModel.find(filter);
+        if (Object.keys(sortOptions).length > 0) {
+            queryBuilder.sort(sortOptions);
+            console.log(`[FieldsService.findAll] ✅ Applied sort to MongoDB query`);
+        } else {
+            console.log(`[FieldsService.findAll] ⚠️ No sort applied - sortOptions is empty`);
+        }
+
+        const fields = await queryBuilder.lean();
 
         return fields.map(field => {
             // Format price for display using PriceFormatService
@@ -630,7 +662,9 @@ export class FieldsService {
         longitude: number, 
         radius: number = 10, // Default 10km radius
         limit: number = 20, // Default 20 results
-        sportType?: string
+        sportType?: string,
+        name?: string,
+        location?: string
     ): Promise<Array<{
         id: string;
         name: string;
@@ -668,6 +702,14 @@ export class FieldsService {
 
             if (sportType) {
                 filter.sportType = new RegExp(`^${sportType}$`, 'i');
+            }
+
+            if (name) {
+                filter.name = { $regex: name, $options: 'i' };
+            }
+
+            if (location) {
+                filter['location.address'] = { $regex: location, $options: 'i' };
             }
 
             // Use projection to only fetch needed fields for better performance
@@ -721,6 +763,7 @@ export class FieldsService {
                         longitude: fieldLongitude,
                         distance: Math.round(distance * 100) / 100, // Round to 2 decimal places
                         rating: field.rating || 0,
+                        basePrice: field.basePrice || 0, // Add basePrice for sorting
                         price: price,
                         sportType: field.sportType,
                         images: validImages,

@@ -16,17 +16,31 @@ export class FieldsController {
     @Query('name') name?: string,
     @Query('location') location?: string,
     @Query('sportType') sportType?: string,
+    @Query('sportTypes') sportTypes?: string | string[],
     @Query('latitude') latitude?: number,
     @Query('longitude') longitude?: number,
     @Query('radius') radius?: number,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
   ): Promise<FieldsDto[]> {
+    // Log received parameters for debugging
+    console.log('[FieldsController.findAll] Received params:', { sortBy, sortOrder, name, location, sportType });
+    
+    // Convert sportTypes to array if it's a string
+    const sportTypesArray = sportTypes
+      ? (Array.isArray(sportTypes) ? sportTypes : [sportTypes])
+      : undefined;
+
     return this.fieldsService.findAll({
       name,
       location,
       sportType,
+      sportTypes: sportTypesArray,
       latitude,
       longitude,
       radius,
+      sortBy,
+      sortOrder,
     });
   }
 
@@ -40,6 +54,8 @@ export class FieldsController {
     @Query('radius') radius?: number,
     @Query('limit') limit?: number,
     @Query('sportType') sportType?: string,
+    @Query('name') name?: string,
+    @Query('location') location?: string,
   ) {
     if (!lat || !lng) {
       throw new BadRequestException('lat and lng parameters are required');
@@ -63,7 +79,7 @@ export class FieldsController {
       throw new BadRequestException('Limit must be between 1 and 100');
     }
 
-    return this.fieldsService.findNearbyFieldsPublic(lat, lng, searchRadius, resultLimit, sportType);
+    return this.fieldsService.findNearbyFieldsPublic(lat, lng, searchRadius, resultLimit, sportType, name, location);
   }
 
   @Get(':id')

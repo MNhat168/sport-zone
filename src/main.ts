@@ -13,12 +13,11 @@ async function bootstrap() {
   const logger = new Logger(bootstrap.name);
   const app = await NestFactory.create(AppModule);
 
-  // setInterval(() => {
-  //   const used = process.memoryUsage();
-  //   logger.log(
-  //     `Memory: ${Math.round(used.heapUsed / 1024 / 1024)}MB / ${Math.round(used.heapTotal / 1024 / 1024)}MB`,
-  //   );
-  // }, 5000);
+  // Enable trust proxy để đọc x-forwarded-proto từ reverse proxy (Nginx)
+  // Quan trọng khi chạy trên AWS với Let's Encrypt (HTTPS)
+  // NestJS wraps Express, cần lấy Express instance
+  const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.set('trust proxy', true);
 
   app.enableCors({
     origin: (origin, callback) => {
@@ -46,6 +45,7 @@ async function bootstrap() {
       'Accept',
       'Origin',
       'X-Client-Type', // Cho phép header custom dùng để phân biệt FE web / admin
+      'x-client-type', // Thêm biến thể lowercase cho preflight
     ],
     credentials: true,
   });

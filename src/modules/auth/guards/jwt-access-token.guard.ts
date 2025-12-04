@@ -14,8 +14,6 @@ export class JwtAccessTokenGuard extends AuthGuard('jwt') {
 		context: ExecutionContext,
 	): boolean | Promise<boolean> | Observable<boolean> {
 		const req = context.switchToHttp().getRequest();
-		// Removed verbose request logging
-
 		const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
 			context.getHandler(),
 			context.getClass(),
@@ -25,12 +23,19 @@ export class JwtAccessTokenGuard extends AuthGuard('jwt') {
 			return true;
 		}
 		
+		// Debug: Log request info để kiểm tra cookie
+		console.log('🔍 [JwtAccessTokenGuard] Request:', {
+			path: req.path,
+			origin: req.headers?.origin || 'no origin',
+			host: req.headers?.host,
+			hasCookies: !!req.cookies && Object.keys(req.cookies).length > 0,
+			cookieHeader: req.headers?.cookie ? 'exists' : 'missing',
+		});
+		
 		return super.canActivate(context);
 	}
 
 	handleRequest(err: any, user: any, info: any, context: ExecutionContext) {
-		// Removed verbose logging; only throw structured errors when needed
-		console.log('JwtAccessTokenGuard handleRequest - User:', user ? { userId: user.userId, role: user.role } : null);
 		if (err || !user) {
 			// Check if token is expired
 			if (info && info.name === 'TokenExpiredError') {
