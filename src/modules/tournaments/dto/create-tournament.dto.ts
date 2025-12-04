@@ -105,6 +105,9 @@ export class RegisterTournamentDto {
 
   @IsString()
   paymentMethod: string;
+    buyerName: string;
+    buyerEmail: string;
+    buyerPhone: string;
 }
 
 export class ConfirmTournamentDto {

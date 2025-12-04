@@ -9,6 +9,9 @@ import {
 } from './entities/tournament-field-reservation.entity';
 import { Field, FieldSchema } from '../fields/entities/field.entity';
 import { Transaction, TransactionSchema } from '../transactions/entities/transaction.entity';
+import { User, UserSchema } from '@modules/users/entities/user.entity';
+import { TransactionsModule } from '@modules/transactions/transactions.module';
+import { EmailModule } from '@modules/email/email.module';
 
 @Module({
   imports: [
@@ -17,7 +20,10 @@ import { Transaction, TransactionSchema } from '../transactions/entities/transac
       { name: TournamentFieldReservation.name, schema: TournamentFieldReservationSchema },
       { name: Field.name, schema: FieldSchema },
       { name: Transaction.name, schema: TransactionSchema },
+      { name: User.name, schema: UserSchema },
     ]),
+     TransactionsModule,
+     EmailModule
   ],
   controllers: [TournamentController],
   providers: [TournamentService],
