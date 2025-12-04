@@ -1,5 +1,6 @@
 import { Prop, Schema } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
+import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
 
 /**
  * Base Entity with proper UTC timestamps
@@ -14,8 +15,8 @@ import { Document } from 'mongoose';
   timestamps: {
     createdAt: true,
     updatedAt: true,
-    // ⚠️ Save timestamps as Vietnam time (UTC+7) by shifting +7h before persist
-    currentTime: () => new Date(Date.now() + 7 * 60 * 60 * 1000)
+    // Lưu timestamps theo giờ Việt Nam (UTC+7) để dễ kiểm tra trực tiếp trong DB
+    currentTime: () => getCurrentVietnamTimeForDB(),
   },
   toJSON: {
     transform: function(_, ret: any) {
@@ -91,7 +92,7 @@ export function configureBaseEntitySchema(schema: any) {
   schema.set('timestamps', {
     createdAt: true,
     updatedAt: true,
-    // ⚠️ Save timestamps as Vietnam time (UTC+7) by shifting +7h before persist
-    currentTime: () => new Date(Date.now() + 7 * 60 * 60 * 1000)
+    // Lưu timestamps theo giờ Việt Nam (UTC+7) để dễ kiểm tra trực tiếp trong DB
+    currentTime: () => getCurrentVietnamTimeForDB(),
   });
 }

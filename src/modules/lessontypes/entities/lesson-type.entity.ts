@@ -1,7 +1,14 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types, Document } from 'mongoose';
+import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
 
-@Schema({ timestamps: true })
+@Schema({
+  timestamps: {
+    createdAt: true,
+    updatedAt: true,
+    currentTime: () => getCurrentVietnamTimeForDB(),
+  },
+})
 export class LessonType extends Document {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   user: Types.ObjectId;

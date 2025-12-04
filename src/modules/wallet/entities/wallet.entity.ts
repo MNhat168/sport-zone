@@ -23,7 +23,7 @@ export enum WalletRole {
  * - FIELD_OWNER/COACH: Chỉ có pendingBalance (UI display only), tiền tự động chuyển bank sau check-in
  * - ADMIN: Giữ tiền thật trong systemBalance, xử lý tất cả bank transfers
  */
-@Schema({ collection: 'wallets', timestamps: true })
+@Schema({ collection: 'wallets' })
 export class Wallet extends BaseEntity {
   /**
    * Tham chiếu user sở hữu ví

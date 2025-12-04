@@ -2,6 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import mongoose, { Document, Types } from 'mongoose';
 import { SportType, CompetitionFormat } from 'src/common/enums/sport-type.enum';
 import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
+import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
 
 export enum TournamentStatus {
   DRAFT = 'draft', // Initial creation, fields not reserved
@@ -73,7 +74,7 @@ export class Tournament extends BaseEntity {
   @Prop({ 
     type: [{ 
       user: { type: Types.ObjectId, ref: 'User', required: true },
-      registeredAt: { type: Date, default: Date.now },
+      registeredAt: { type: Date, default: () => getCurrentVietnamTimeForDB() },
       transaction: { type: Types.ObjectId, ref: 'Transaction' },
       teamNumber: { type: Number, min: 1 }, // Team assignment
       position: { type: String }, // Position in team (e.g., "Captain", "Player")

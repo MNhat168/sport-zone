@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
+import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
 
 export enum RecommendationType {
   FIELD = 'field',
@@ -7,7 +8,13 @@ export enum RecommendationType {
   TOURNAMENT = 'tournament',
 }
 
-@Schema({ timestamps: true })
+@Schema({
+  timestamps: {
+    createdAt: true,
+    updatedAt: true,
+    currentTime: () => getCurrentVietnamTimeForDB(),
+  },
+})
 export class Recommendation extends Document {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   user: Types.ObjectId;
@@ -27,7 +34,7 @@ export class Recommendation extends Document {
   @Prop({ required: true })
   algorithm: string;
 
-  @Prop({ type: Date, default: Date.now })
+  @Prop({ type: Date, default: () => getCurrentVietnamTimeForDB() })
   expiresAt: Date;
 }
 

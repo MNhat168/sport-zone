@@ -7,4 +7,5 @@ export enum NotificationType {
   NEW_REVIEW = 'new_review',
   COACH_REQUEST = 'coach_request',
   FIELD_APPROVAL = 'field_approval',
+  REPORT_SUBMITTED = 'report_submitted',
 }

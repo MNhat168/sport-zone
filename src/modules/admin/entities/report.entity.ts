@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
+import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
 
 export enum ReportType {
   USER = 'user',
@@ -17,7 +18,13 @@ export enum ReportStatus {
   CLOSED = 'closed',
 }
 
-@Schema({ timestamps: true })
+@Schema({
+  timestamps: {
+    createdAt: true,
+    updatedAt: true,
+    currentTime: () => getCurrentVietnamTimeForDB(),
+  },
+})
 export class Report extends Document {
   @Prop({ type: Types.ObjectId, ref: 'User' })
   reporter?: Types.ObjectId;
