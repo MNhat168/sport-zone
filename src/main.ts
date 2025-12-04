@@ -34,6 +34,8 @@ async function bootstrap() {
       if (isAllowed) {
         callback(null, true);
       } else {
+        // Log rejected origin for debugging
+        logger.warn(`CORS: Rejected origin: ${origin}`);
         callback(new Error('Not allowed by CORS'));
       }
     },
@@ -44,10 +46,19 @@ async function bootstrap() {
       'X-Requested-With',
       'Accept',
       'Origin',
-      'X-Client-Type', // Cho phép header custom dùng để phân biệt FE web / admin
-      'x-client-type', // Thêm biến thể lowercase cho preflight
+      'X-Client-Type',
+      'x-client-type',
+      // Add headers for multipart/form-data
+      'Content-Length',
+      'Content-Disposition',
+    ],
+    exposedHeaders: [
+      'Content-Type',
+      'Content-Length',
+      'Authorization',
     ],
     credentials: true,
+    maxAge: 86400, // Cache preflight requests for 24 hours
   });
   const config_service = app.get(ConfigService);
   // Áp dụng ValidationPipe cho toàn bộ ứng dụng NestJS

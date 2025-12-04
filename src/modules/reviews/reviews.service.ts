@@ -21,12 +21,17 @@ export class ReviewsService {
     type: 'coach';
     rating: number;
     comment: string;
+    title?: string;
   }) {
     // Validate rating and comment
     if (data.rating < 1 || data.rating > 5) {
       throw new BadRequestException('Rating must be between 1 and 5');
     }
-    if (!data.comment || data.comment.length < 10) {
+    const trimmedComment = data.comment ? data.comment.trim() : '';
+    if (!trimmedComment) {
+      throw new BadRequestException('Comment is required');
+    }
+    if (trimmedComment.length < 10) {
       throw new BadRequestException('Comment must be at least 10 characters');
     }
 
@@ -67,16 +72,20 @@ export class ReviewsService {
     const session: ClientSession = await this.reviewModel.db.startSession();
     session.startTransaction();
     try {
-      const review = await this.reviewModel.create([
-        {
-          user: data.user,
-          coach: data.coach,
-          booking: bookingId,
-          type: ReviewType.COACH,
-          rating: data.rating,
-          comment: data.comment,
-        },
-      ], { session });
+      const review = await this.reviewModel.create(
+        [
+          {
+            user: data.user,
+            coach: data.coach,
+            booking: bookingId,
+            type: ReviewType.COACH,
+            rating: data.rating,
+            comment: trimmedComment,
+            title: data.title?.trim(),
+          },
+        ],
+        { session },
+      );
 
       // update coach profile counters and rating
       if (data.coach) {
@@ -116,16 +125,39 @@ export class ReviewsService {
     type: 'field';
     rating: number;
     comment: string;
+    title?: string;
   }) {
     if (data.rating < 1 || data.rating > 5) {
       throw new BadRequestException('Rating must be between 1 and 5');
     }
-    if (!data.comment || data.comment.length < 10) {
-      throw new BadRequestException('Comment must be at least 10 characters');
+    // Trim comment before validation
+    const trimmedComment = data.comment ? data.comment.trim() : '';
+    if (!trimmedComment) {
+      throw new BadRequestException('Comment is required');
     }
-    // If bookingId provided, validate booking exists and belongs to the user
-    if (data.booking) {
-      const booking = await this.bookingModel.findById(data.booking).exec();
+    if (trimmedComment.length < 10) {
+      throw new BadRequestException(`Comment must be at least 10 characters (current: ${trimmedComment.length})`);
+    }
+
+    let bookingId = data.booking;
+
+    // If bookingId is not provided or empty, try to auto-attach the latest booking for this user and field
+    if (!bookingId || bookingId.trim() === '') {
+      const latestBooking = await this.bookingModel.findOne({
+        user: data.user,
+        field: data.field,
+        type: BookingType.FIELD,
+      })
+        .sort({ createdAt: -1 })
+        .exec();
+      if (latestBooking) {
+        bookingId = String(latestBooking._id);
+      }
+    }
+
+    // If bookingId is now present, validate it
+    if (bookingId && bookingId.trim() !== '') {
+      const booking = await this.bookingModel.findById(bookingId).exec();
       if (!booking) {
         throw new BadRequestException('Booking not found');
       }
@@ -145,10 +177,11 @@ export class ReviewsService {
     const review = new this.reviewModel({
       user: data.user,
       field: data.field,
-      booking: data.booking,
+      booking: bookingId && bookingId.trim() !== '' ? bookingId : undefined,
       type: ReviewType.FIELD,
       rating: data.rating,
-      comment: data.comment,
+      comment: trimmedComment,
+      title: data.title?.trim(),
     });
     await review.save();
     return review;
@@ -210,9 +243,32 @@ export class ReviewsService {
   //   return review;
   // }
 
-  // Get all reviews for a specific field *
-  async getAllReviewsForField(fieldId: string) {
-    return this.reviewModel.find({ field: fieldId, type: ReviewType.FIELD });
+  // Get all reviews for a specific field with pagination
+  async getAllReviewsForField(fieldId: string, page = 1, limit = 10) {
+    const filter = { field: fieldId, type: ReviewType.FIELD } as any;
+    const skip = Math.max(0, (page - 1) * limit);
+
+    const [items, total] = await Promise.all([
+      this.reviewModel
+        .find(filter)
+        .populate('user', 'fullName avatarUrl')
+        .populate('booking', 'createdAt startTime endTime date')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.reviewModel.countDocuments(filter).exec(),
+    ]);
+
+    return {
+      data: items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
+    };
   }
 
   // Get all reviews for a specific coach with pagination

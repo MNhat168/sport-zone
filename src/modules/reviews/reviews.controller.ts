@@ -13,20 +13,57 @@ import {
 import { ReviewsService } from './reviews.service';
 import { AuthGuard } from '@nestjs/passport';
 import { UserRole } from '../users/entities/user.entity';
+import { IsString, IsNumber, IsEnum, Min, Max, MinLength, IsOptional, MaxLength } from 'class-validator';
 
 export class CreateCoachReviewDto {
+  @IsEnum(['coach'])
   type: 'coach';
+  
+  @IsNumber()
+  @Min(1)
+  @Max(5)
   rating: number;
+  
+  @IsString()
+  @MinLength(10)
   comment: string;
+  
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  title?: string;
+  
+  @IsString()
   coachId: string;
+  
+  @IsString()
+  @IsOptional()
   bookingId: string;
 }
 
 export class CreateFieldReviewDto {
+  @IsEnum(['field'])
   type: 'field';
+  
+  @IsNumber()
+  @Min(1)
+  @Max(5)
   rating: number;
+  
+  @IsString()
+  @MinLength(10)
   comment: string;
+  
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  title?: string;
+  
+  @IsString()
   fieldId: string;
+  
+  @IsString()
+  @IsOptional()
   bookingId: string;
 }
 
@@ -54,6 +91,7 @@ export class ReviewsController {
       type: 'coach',
       rating: body.rating,
       comment: body.comment,
+      title: body.title,
     });
   }
 
@@ -65,10 +103,11 @@ export class ReviewsController {
     return this.reviewsService.createFieldReview({
       user: userId,
       field: body.fieldId,
-      booking: body.bookingId,
+      booking: body.bookingId && body.bookingId.trim() !== '' ? body.bookingId : '',
       type: 'field',
       rating: body.rating,
       comment: body.comment,
+      title: body.title,
     });
   }
 
@@ -114,11 +153,24 @@ export class ReviewsController {
   //   });
   // }
 
-  // Get all reviews for a specific field
+  // Get all reviews for a specific field (authenticated route)
   @UseGuards(AuthGuard('jwt'))
   @Get('field/:fieldId/all')
   async getAllReviewsForField(@Param('fieldId') fieldId: string) {
     return this.reviewsService.getAllReviewsForField(fieldId);
+  }
+
+  // Public endpoint for retrieving field reviews (used by frontend)
+  // This matches the frontend expectation: GET /reviews/field/:fieldId
+  @Get('field/:fieldId')
+  async getPublicReviewsForField(
+    @Param('fieldId') fieldId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const p = Math.max(1, parseInt(page || '1', 10) || 1);
+    const l = Math.max(1, parseInt(limit || '10', 10) || 10);
+    return this.reviewsService.getAllReviewsForField(fieldId, p, l);
   }
 
   // //Get all reviews for a specific coach

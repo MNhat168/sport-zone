@@ -12,14 +12,17 @@ export class Review extends Document {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   user: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Booking', required: true })
-  booking: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Booking', required: false })
+  booking?: Types.ObjectId;
 
   @Prop({ type: Types.ObjectId, ref: 'Field' })
   field?: Types.ObjectId;
 
   @Prop({ type: Types.ObjectId, ref: 'CoachProfile' })
   coach?: Types.ObjectId;
+
+  @Prop({ type: String, maxlength: 120 })
+  title?: string;
 
   @Prop({ required: true, enum: ReviewType })
   type: ReviewType;
