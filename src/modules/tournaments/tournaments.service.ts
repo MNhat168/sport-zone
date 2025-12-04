@@ -1,23 +1,41 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Tournament, TournamentStatus } from './entities/tournament.entity';
 import { TournamentFieldReservation, ReservationStatus } from './entities/tournament-field-reservation.entity';
 import { Field } from '../fields/entities/field.entity';
 import { Transaction, TransactionStatus, TransactionType } from '../transactions/entities/transaction.entity';
+import { User } from '../users/entities/user.entity'; // Add User import
 import { CreateTournamentDto, RegisterTournamentDto } from './dto/create-tournament.dto';
 import { SPORT_RULES_MAP, TeamSizeMap, calculateParticipants } from 'src/common/enums/sport-type.enum';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
+import { PayOSService } from '@modules/transactions/payos.service';
+import { EmailService } from '@modules/email/email.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ConfigService } from '@nestjs/config'; // Add ConfigService
+import { User as UserEntity } from '../users/entities/user.entity'; // Add proper import
+import { TransactionsService } from '@modules/transactions/transactions.service';
 
 @Injectable()
 export class TournamentService {
+    private readonly logger = new Logger(TournamentService.name);
+
     constructor(
         @InjectModel(Tournament.name) private tournamentModel: Model<Tournament>,
         @InjectModel(TournamentFieldReservation.name)
         private reservationModel: Model<TournamentFieldReservation>,
         @InjectModel(Field.name) private fieldModel: Model<Field>,
         @InjectModel(Transaction.name) private transactionModel: Model<Transaction>,
-    ) { }
+        @InjectModel(UserEntity.name) private userModel: Model<UserEntity>, // Add User model
+        private readonly payosService: PayOSService,
+        private readonly emailService: EmailService,
+        private readonly eventEmitter: EventEmitter2,
+        private readonly configService: ConfigService, // Add ConfigService
+        private readonly transactionsService: TransactionsService,
+    ) {
+        // Setup payment event listeners for tournament registration
+        this.setupPaymentEventListeners();
+    }
 
     async create(createTournamentDto: CreateTournamentDto, userId: string) {
         const sportRules = SPORT_RULES_MAP[createTournamentDto.sportType];
@@ -188,7 +206,12 @@ export class TournamentService {
             throw new BadRequestException('Tournament is not accepting registrations');
         }
 
-        // Check if user already registered
+        // Check if tournament is full
+        if (tournament.participants.length >= tournament.maxParticipants) {
+            throw new BadRequestException('Tournament is full');
+        }
+
+        // Check if user already registered (but pending)
         const alreadyRegistered = tournament.participants.some(
             p => p.user.toString() === userId
         );
@@ -197,52 +220,586 @@ export class TournamentService {
             throw new BadRequestException('Already registered for this tournament');
         }
 
-        // For team sports, check if teams are filled
-        const currentTeamCount = Math.ceil(tournament.participants.length / tournament.teamSize);
+        let paymentMethodValue: number;
+        const paymentMethodStr = dto.paymentMethod as unknown as string;
 
-        // Check if we've reached maximum teams
-        if (currentTeamCount >= tournament.numberOfTeams) {
-            throw new BadRequestException('All tournament teams are already filled');
+        switch (paymentMethodStr.toLowerCase()) {
+            case 'payos':
+                paymentMethodValue = PaymentMethod.PAYOS;
+                break;
+            case 'wallet':
+                paymentMethodValue = PaymentMethod.WALLET;
+                break;
+            case 'momo':
+                paymentMethodValue = PaymentMethod.MOMO;
+                break;
+            case 'banking':
+                paymentMethodValue = PaymentMethod.BANK_TRANSFER;
+                break;
+            default:
+                throw new BadRequestException('Invalid payment method');
         }
 
-        // Check if user's team is full (simplified - in real app you'd have team assignment logic)
-        const participantsInCurrentTeam = tournament.participants.length % tournament.teamSize;
-        if (participantsInCurrentTeam === tournament.teamSize - 1) {
-            // This would be the last spot in a team
-            console.log('Filling a team spot...');
-        }
-
-        // Create payment transaction (held in escrow)
+        // Create payment transaction
         const transaction = new this.transactionModel({
             user: new Types.ObjectId(userId),
             amount: tournament.registrationFee,
             direction: 'in',
-            method: dto.paymentMethod as unknown as PaymentMethod,
+            method: paymentMethodValue,
             type: TransactionType.PAYMENT,
             status: TransactionStatus.PENDING,
             notes: `Tournament registration: ${tournament.name}`,
+            metadata: {
+                tournamentId: tournament._id,
+                tournamentName: tournament.name,
+                sportType: tournament.sportType,
+                category: tournament.category,
+                userId: userId,
+                participantName: dto.buyerName,
+            }
         });
 
         await transaction.save();
 
-        // Add participant
-        tournament.participants.push({
-            user: new Types.ObjectId(userId),
-            registeredAt: new Date(),
-            transaction: transaction._id as Types.ObjectId,
-        });
+        // ✅ REMOVED: Don't add participant immediately
+        // Instead, participant will be added only when payment succeeds
 
-        tournament.totalRegistrationFeesCollected += tournament.registrationFee;
+        let response: any = {
+            success: true,
+            transaction: {
+                _id: transaction._id,
+                status: transaction.status
+            },
+            tournament: tournament,
+            message: 'Registration initiated. Complete payment to confirm your spot.'
+        };
 
-        // Check if minimum threshold is met
-        const requiredParticipants = tournament.minParticipants;
-        if (tournament.participants.length >= requiredParticipants) {
-            await this.confirmTournament(tournament);
+        // Handle payment based on payment method
+        if (paymentMethodValue === PaymentMethod.PAYOS) {
+            const payosResponse = await this.handlePayOSPayment(tournament, transaction, userId, dto);
+            response = { ...response, ...payosResponse };
         }
 
-        await tournament.save();
+        return response;
+    }
+    /**
+ * Handle PayOS payment for tournament registration
+ * Modified to redirect immediately instead of emailing link
+ */
+    private async handlePayOSPayment(
+        tournament: Tournament,
+        transaction: Transaction,
+        userId: string,
+        dto: RegisterTournamentDto
+    ) {
+        try {
+            // Get user details for payment
+            const user = await this.userModel.findById(userId).select('email fullName phone').exec();
 
-        return tournament;
+            if (!user) {
+                throw new BadRequestException('User not found');
+            }
+
+            // ✅ Use existing externalTransactionId or generate one
+            let orderCode: number;
+            let externalIdToUse: string;
+
+            if (transaction.externalTransactionId) {
+                orderCode = Number(transaction.externalTransactionId);
+                externalIdToUse = transaction.externalTransactionId;
+                this.logger.log(`Using existing PayOS orderCode: ${orderCode} for transaction ${transaction._id}`);
+            } else {
+                // Generate order code from transaction ID
+                const transactionIdStr = (transaction._id as Types.ObjectId).toString();
+                const timestamp = Date.now();
+                orderCode = Number(timestamp.toString().slice(-9)); // Use last 9 digits of timestamp
+
+                // Update transaction with external ID
+                transaction.externalTransactionId = orderCode.toString();
+                externalIdToUse = orderCode.toString();
+                await transaction.save();
+
+                this.logger.log(`Generated new PayOS orderCode: ${orderCode} for transaction ${transaction._id}`);
+            }
+
+            // Get frontend and backend URLs from config
+            const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+            const backendUrl = this.configService.get<string>('BACKEND_URL') || 'http://localhost:3000';
+
+            // ✅ Use transaction ID as orderId
+            const orderId = (transaction._id as Types.ObjectId).toString();
+
+            this.logger.log(`Creating PayOS payment with orderId: ${orderId}, orderCode: ${orderCode}`);
+
+            // Create PayOS payment link with immediate redirect URL
+            const paymentLink = await this.payosService.createPaymentUrl({
+                orderId: orderId, // ✅ Use transaction ID
+                orderCode: orderCode,
+                amount: tournament.registrationFee,
+                description: `Đăng ký tham gia giải đấu`,
+                items: [{
+                    name: `Đăng ký giải đấu: ${tournament.name}`,
+                    quantity: 1,
+                    price: tournament.registrationFee
+                }],
+                buyerName: dto.buyerName || user.fullName || 'Người tham gia',
+                buyerEmail: dto.buyerEmail || user.email,
+                buyerPhone: dto.buyerPhone || user.phone,
+                // ✅ CRITICAL: Use direct backend return URL for immediate processing
+                returnUrl: `${backendUrl}/transactions/payos/tournament-return/${tournament._id}`,
+                cancelUrl: `${frontendUrl}/tournaments/${tournament._id}`,
+                expiredAt: 15, // 15 minutes expiration
+            });
+
+            // ✅ Send registration confirmation email (not payment link email)
+            await this.sendTournamentRegistrationConfirmationEmail(userId, tournament, paymentLink.checkoutUrl);
+
+            // ✅ Return the payment URL for immediate redirect
+            return {
+                success: true,
+                transaction: {
+                    _id: transaction._id,
+                    status: transaction.status,
+                    externalTransactionId: externalIdToUse
+                },
+                tournament: tournament,
+                paymentUrl: paymentLink.checkoutUrl, // Return URL for immediate redirect
+                orderCode: orderCode,
+                message: 'Payment URL generated successfully'
+            };
+
+        } catch (error) {
+            this.logger.error('Error creating PayOS payment link:', error);
+            throw new BadRequestException('Failed to create payment link');
+        }
+    }
+
+    /**
+     * Send registration confirmation email (notification only)
+     */
+    private async sendTournamentRegistrationConfirmationEmail(
+        userId: string,
+        tournament: Tournament,
+        paymentUrl?: string
+    ) {
+        try {
+            const user = await this.userModel.findById(userId).select('email fullName');
+
+            if (!user || !user.email) {
+                this.logger.warn(`User ${userId} has no email, cannot send confirmation`);
+                return;
+            }
+
+            // Format tournament date
+            const tournamentDate = new Date(tournament.tournamentDate);
+            const formattedDate = tournamentDate.toLocaleDateString('vi-VN');
+
+            // Create tournament time string
+            let timeString = '';
+            if (tournament.startTime && tournament.endTime) {
+                timeString = ` (${tournament.startTime} - ${tournament.endTime})`;
+            }
+
+            await this.emailService.sendTournamentRegistrationConfirmation({
+                to: user.email,
+                tournament: {
+                    name: tournament.name,
+                    sportType: tournament.sportType,
+                    date: formattedDate,
+                    time: timeString,
+                    location: tournament.location,
+                    registrationFee: tournament.registrationFee,
+                },
+                customer: {
+                    fullName: user.fullName || 'Người tham gia'
+                },
+                // Include payment URL if provided (for reference)
+                paymentUrl: paymentUrl,
+                status: 'pending' // Payment is pending
+            });
+
+            this.logger.log(`Registration confirmation email sent to ${user.email} for tournament ${tournament.name}`);
+
+        } catch (error) {
+            this.logger.error('Error sending registration confirmation email:', error);
+            // Don't throw error - email failure shouldn't block registration
+        }
+    }
+
+    /**
+     * Send payment request email for tournament registration
+     */
+    private async sendTournamentPaymentRequestEmail(
+        userId: string,
+        tournament: Tournament,
+        paymentLink: string,
+        amount: number
+    ) {
+        try {
+            // Get user email
+            const user = await this.userModel.findById(userId).select('email fullName');
+
+            if (!user || !user.email) {
+                this.logger.warn(`User ${userId} has no email, cannot send payment request`);
+                return;
+            }
+
+            const expiresInMinutes = 15; // Payment link expires in 15 minutes
+            const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
+
+            // Format tournament date and time
+            const tournamentDate = new Date(tournament.tournamentDate);
+            const formattedDate = tournamentDate.toLocaleDateString('vi-VN');
+
+            // Create tournament time string if available
+            let timeString = '';
+            if (tournament.startTime && tournament.endTime) {
+                timeString = ` (${tournament.startTime} - ${tournament.endTime})`;
+            }
+
+            await this.emailService.sendTournamentPaymentRequest({
+                to: user.email,
+                tournament: {
+                    name: tournament.name,
+                    sportType: tournament.sportType,
+                    date: formattedDate,
+                    time: timeString,
+                    location: tournament.location,
+                    registrationFee: amount,
+                },
+                customer: {
+                    fullName: user.fullName || 'Người tham gia'
+                },
+                paymentLink,
+                paymentMethod: PaymentMethod.PAYOS,
+                expiresAt: expiresAt.toLocaleString('vi-VN'),
+                expiresInMinutes
+            });
+
+            this.logger.log(`Payment request email sent to ${user.email} for tournament ${tournament.name}`);
+
+        } catch (error) {
+            this.logger.error('Error sending payment request email:', error);
+            // Don't throw error - email failure shouldn't block registration
+        }
+    }
+
+    /**
+     * Confirm tournament payment when payment succeeds
+     */
+    private async confirmTournamentPayment(transactionId: string, userId: string) {
+        try {
+            const transaction = await this.transactionModel.findById(transactionId);
+
+            if (!transaction) {
+                throw new NotFoundException('Transaction not found');
+            }
+
+            // Update transaction status
+            transaction.status = TransactionStatus.SUCCEEDED;
+            await transaction.save();
+
+            // Find tournament where this transaction is used
+            const tournament = await this.tournamentModel.findOne({
+                'participants.transaction': new Types.ObjectId(transactionId),
+                'participants.user': new Types.ObjectId(userId)
+            });
+
+            if (!tournament) {
+                throw new NotFoundException('Tournament not found for this transaction');
+            }
+
+            // Update participant payment status
+            const participantIndex = tournament.participants.findIndex(
+                p => p.user.toString() === userId &&
+                    p.transaction?.toString() === transactionId
+            );
+
+            if (participantIndex >= 0) {
+                tournament.participants[participantIndex].paymentStatus = 'confirmed';
+                await tournament.save();
+            }
+
+            // Send confirmation email
+            await this.sendTournamentRegistrationConfirmation(userId, tournament);
+
+            return tournament;
+        } catch (error) {
+            this.logger.error('Error confirming tournament payment:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Send tournament registration confirmation email
+     */
+    private async sendTournamentRegistrationConfirmation(userId: string, tournament: Tournament) {
+        try {
+            // Get user email
+            const user = await this.userModel.findById(userId).select('email fullName');
+
+            if (!user || !user.email) {
+                this.logger.warn(`User ${userId} has no email, cannot send confirmation`);
+                return;
+            }
+
+            // Format tournament date and time
+            const tournamentDate = new Date(tournament.tournamentDate);
+            const formattedDate = tournamentDate.toLocaleDateString('vi-VN');
+
+            // Create tournament time string if available
+            let timeString = '';
+            if (tournament.startTime && tournament.endTime) {
+                timeString = ` (${tournament.startTime} - ${tournament.endTime})`;
+            }
+
+            await this.emailService.sendTournamentRegistrationConfirmation({
+                to: user.email,
+                tournament: {
+                    name: tournament.name,
+                    sportType: tournament.sportType,
+                    date: formattedDate,
+                    time: timeString,
+                    location: tournament.location,
+                    registrationFee: tournament.registrationFee,
+                    organizer: tournament.organizer,
+                },
+                customer: {
+                    fullName: user.fullName || 'Người tham gia'
+                }
+            });
+
+            this.logger.log(`Registration confirmation email sent to ${user.email} for tournament ${tournament.name}`);
+
+        } catch (error) {
+            this.logger.error('Error sending registration confirmation email:', error);
+        }
+    }
+
+    /**
+     * Setup payment event listeners for tournament registrations
+     * Similar to booking system
+     */
+    private setupPaymentEventListeners() {
+        this.eventEmitter.on('payment.success', this.handleTournamentPaymentSuccess.bind(this));
+        this.eventEmitter.on('payment.failed', this.handleTournamentPaymentFailed.bind(this));
+
+        this.logger.log('✅ Tournament payment event listeners registered');
+    }
+
+    private async handleTournamentPaymentSuccess(event: {
+        paymentId: string;
+        bookingId?: string;
+        tournamentId?: string;
+        userId: string;
+        amount: number;
+        method?: string;
+        transactionId?: string;
+    }) {
+        try {
+            const transaction = await this.transactionModel.findById(event.paymentId);
+
+            if (!transaction) {
+                this.logger.error(`[Tournament Payment Success] Transaction not found: ${event.paymentId}`);
+                return;
+            }
+
+            // Check if this is a tournament payment
+            const isTournamentPayment =
+                event.tournamentId ||
+                (transaction.metadata && transaction.metadata.tournamentId) ||
+                transaction.notes?.includes('Tournament registration');
+
+            if (!isTournamentPayment) {
+                return;
+            }
+
+            this.logger.log(`[Tournament Payment Success] Processing tournament payment ${event.paymentId}`);
+
+            // Get tournament ID from metadata or event
+            const tournamentId = event.tournamentId ||
+                (transaction.metadata?.tournamentId ? transaction.metadata.tournamentId.toString() : null);
+
+            if (!tournamentId) {
+                this.logger.error(`[Tournament Payment Success] No tournament ID found for payment ${event.paymentId}`);
+                return;
+            }
+
+            // Find tournament
+            const tournament = await this.tournamentModel.findById(tournamentId);
+
+            if (!tournament) {
+                this.logger.error(`[Tournament Payment Success] Tournament not found: ${tournamentId}`);
+                return;
+            }
+
+            // ✅ CRITICAL: Check if tournament is still accepting registrations
+            const now = new Date();
+            if (now > tournament.registrationEnd) {
+                this.logger.error(`[Tournament Payment Success] Registration period ended for tournament ${tournamentId}`);
+                // Update transaction status to failed
+                await this.transactionModel.findByIdAndUpdate(
+                    event.paymentId,
+                    {
+                        status: TransactionStatus.FAILED,
+                        notes: `Payment succeeded but registration period ended`,
+                        errorMessage: 'Registration period ended'
+                    }
+                );
+                return;
+            }
+
+            // ✅ CRITICAL: Check if tournament is full
+            if (tournament.participants.length >= tournament.maxParticipants) {
+                this.logger.error(`[Tournament Payment Success] Tournament ${tournamentId} is full`);
+                // Update transaction status to failed
+                await this.transactionModel.findByIdAndUpdate(
+                    event.paymentId,
+                    {
+                        status: TransactionStatus.FAILED,
+                        notes: `Payment succeeded but tournament is full`,
+                        errorMessage: 'Tournament is full'
+                    }
+                );
+
+                // Refund the payment since tournament is full
+                await this.transactionsService.processRefund(
+                    event.paymentId,
+                    event.amount,
+                    'Tournament is full',
+                    'Automatic refund due to tournament being full'
+                );
+                return;
+            }
+
+            // ✅ CRITICAL: Check if user already registered
+            const alreadyRegistered = tournament.participants.some(
+                p => p.user.toString() === event.userId
+            );
+
+            if (alreadyRegistered) {
+                this.logger.warn(`[Tournament Payment Success] User ${event.userId} already registered for tournament ${tournamentId}`);
+                // Update transaction but don't add participant
+                return;
+            }
+
+            tournament.participants.push({
+                user: new Types.ObjectId(event.userId),
+                registeredAt: now,
+                confirmedAt: now, // ✅ ADD THIS
+                transaction: new Types.ObjectId(event.paymentId),
+                paymentStatus: 'confirmed',
+            });
+
+            await tournament.save();
+
+            // Send confirmation email
+            await this.sendTournamentRegistrationConfirmation(event.userId, tournament);
+
+            this.logger.log(`[Tournament Payment Success] ✅ Participant ${event.userId} confirmed for tournament ${tournament.name}`);
+
+        } catch (error) {
+            this.logger.error('[Tournament Payment Success] Error processing tournament payment:', error);
+        }
+    }
+
+    /**
+     * Handle payment failed event for tournament registration
+     */
+    private async handleTournamentPaymentFailed(event: {
+        paymentId: string;
+        bookingId?: string;
+        tournamentId?: string;
+        userId: string;
+        amount: number;
+        method?: string;
+        transactionId?: string;
+        reason: string;
+    }) {
+        try {
+            // Check if this is a tournament payment
+            const transaction = await this.transactionModel.findById(event.paymentId);
+
+            if (!transaction) {
+                return;
+            }
+
+            // Check if this is a tournament payment
+            const isTournamentPayment =
+                event.tournamentId ||
+                (transaction.metadata && transaction.metadata.tournamentId) ||
+                transaction.notes?.includes('Tournament registration');
+
+            if (!isTournamentPayment) {
+                return;
+            }
+
+            this.logger.log(`[Tournament Payment Failed] Processing tournament payment failure ${event.paymentId}`);
+
+            // Get tournament ID from metadata or event
+            const tournamentId = event.tournamentId ||
+                (transaction.metadata?.tournamentId ? transaction.metadata.tournamentId.toString() : null);
+
+            if (!tournamentId) {
+                return;
+            }
+
+            // Find tournament
+            const tournament = await this.tournamentModel.findById(tournamentId);
+
+            if (!tournament) {
+                return;
+            }
+
+            // Remove participant from tournament (payment failed)
+            tournament.participants = tournament.participants.filter(
+                p => !(p.transaction && p.transaction.toString() === event.paymentId)
+            );
+
+            await tournament.save();
+
+            // Send failure notification email
+            await this.sendTournamentPaymentFailedNotification(event.userId, tournament, event.reason);
+
+            this.logger.log(`[Tournament Payment Failed] ❌ Participant ${event.userId} removed from tournament ${tournament.name} due to payment failure`);
+
+        } catch (error) {
+            this.logger.error('[Tournament Payment Failed] Error handling tournament payment failure:', error);
+        }
+    }
+
+    /**
+     * Send tournament payment failed notification
+     */
+    private async sendTournamentPaymentFailedNotification(userId: string, tournament: Tournament, reason: string) {
+        try {
+            const user = await this.userModel.findById(userId).select('email fullName');
+
+            if (!user || !user.email) {
+                return;
+            }
+
+            // Format tournament date
+            const tournamentDate = new Date(tournament.tournamentDate);
+            const formattedDate = tournamentDate.toLocaleDateString('vi-VN');
+
+            await this.emailService.sendTournamentPaymentFailed({
+                to: user.email,
+                tournament: {
+                    name: tournament.name,
+                    date: formattedDate,
+                    sportType: tournament.sportType,
+                    location: tournament.location,
+                },
+                customer: {
+                    fullName: user.fullName || 'Người tham gia'
+                },
+                reason: reason
+            });
+
+        } catch (error) {
+            this.logger.error('Error sending payment failed notification:', error);
+        }
     }
 
     private async confirmTournament(tournament: Tournament) {

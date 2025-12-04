@@ -77,15 +77,23 @@ export class Tournament extends BaseEntity {
       transaction: { type: Types.ObjectId, ref: 'Transaction' },
       teamNumber: { type: Number, min: 1 }, // Team assignment
       position: { type: String }, // Position in team (e.g., "Captain", "Player")
+      paymentStatus: { 
+        type: String, 
+        enum: ['pending', 'confirmed', 'failed', 'refunded'],
+        default: 'pending'
+      },
+      confirmedAt: { type: Date },
     }],
     default: []
   })
   participants: Array<{
+    confirmedAt?: Date; 
     user: Types.ObjectId;
     registeredAt: Date;
     transaction?: Types.ObjectId;
     teamNumber?: number;
     position?: string;
+    paymentStatus?: string;
   }>;
 
   @Prop({ 
@@ -386,19 +394,4 @@ TournamentSchema.methods.getParticipantTeam = function(userId: Types.ObjectId) {
   return this.teams.find(t => t.teamNumber === participant.teamNumber);
 };
 
-TournamentSchema.pre('save', function(next) {
-  // Update maxParticipants and minParticipants based on teams
-  if (this.numberOfTeams && this.teamSize) {
-    const totalParticipants = this.numberOfTeams * this.teamSize;
-    this.maxParticipants = totalParticipants;
-    this.minParticipants = Math.ceil(totalParticipants * 0.5); // 50% for minimum
-  }
-  
-  // Update teams full status
-  this.teams.forEach(team => {
-    team.isFull = team.members.length >= this.teamSize;
-  });
-  
-  next();
-});
 export type TournamentDocument = Tournament & Document;

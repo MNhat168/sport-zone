@@ -1,6 +1,8 @@
+import { SportType } from '@common/enums/sport-type.enum';
 import { MailerService } from '@nestjs-modules/mailer';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Types } from 'mongoose';
 import { PaymentMethod, PaymentMethodLabels } from 'src/common/enums/payment-method.enum';
 
 @Injectable()
@@ -411,4 +413,113 @@ export class EmailService {
 			`,
 		});
 	}
+	async sendTournamentPaymentRequest(payload: {
+    to: string;
+    tournament: {
+        name: string;
+        sportType: string;
+        date: string;
+        time?: string;
+        location: string;
+        registrationFee: number;
+    };
+    customer: { fullName: string };
+    paymentLink: string;
+    paymentMethod?: PaymentMethod | string;
+    expiresAt?: string; // formatted datetime string
+    expiresInMinutes?: number; // minutes until expiration
+}) {
+    let methodLabel = 'Thanh toán trực tuyến';
+    if (payload.paymentMethod !== undefined) {
+        if (typeof payload.paymentMethod === 'number') {
+            methodLabel = PaymentMethodLabels[payload.paymentMethod as PaymentMethod] || methodLabel;
+        } else if (typeof payload.paymentMethod === 'string') {
+            methodLabel = payload.paymentMethod;
+        }
+    }
+
+    const amountFormatted = payload.tournament.registrationFee.toLocaleString('vi-VN') + '₫';
+
+    await this.mailerService.sendMail({
+        to: payload.to,
+        subject: 'Yêu cầu thanh toán đăng ký giải đấu - SportZone',
+        template: 'tournament-payment-request.hbs', // You'll need to create this template
+        context: {
+            title: 'Yêu cầu thanh toán đăng ký giải đấu',
+            tournament: payload.tournament,
+            customer: payload.customer,
+            payment: {
+                methodLabel,
+                link: payload.paymentLink,
+                expiresAt: payload.expiresAt,
+                expiresInMinutes: payload.expiresInMinutes,
+                amountFormatted,
+            },
+        },
+    });
+}
+
+/**
+ * Send tournament registration confirmation email
+ */
+async sendTournamentRegistrationConfirmation(payload: {
+    to: string;
+    tournament: {
+        name: string;
+        sportType: string;
+        date: string;
+        time?: string;
+        location: string;
+        registrationFee: number;
+        organizer?: any;
+    };
+    customer: {
+        fullName: string;
+    };
+    paymentUrl?: string; // ✅ Add this optional parameter
+    status?: 'pending' | 'confirmed' | 'failed'; // ✅ Add this optional parameter
+}) {
+    const amountFormatted = payload.tournament.registrationFee.toLocaleString('vi-VN') + '₫';
+    const organizerName = payload.tournament.organizer?.fullName || 'Ban tổ chức';
+
+    await this.mailerService.sendMail({
+        to: payload.to,
+        subject: 'Xác nhận đăng ký giải đấu thành công - SportZone',
+        template: 'tournament-registration-confirmation.hbs', // Create this template
+        context: {
+            title: 'Xác nhận đăng ký giải đấu thành công',
+            tournament: payload.tournament,
+            customer: payload.customer,
+            organizerName,
+            amountFormatted,
+        },
+    });
+}
+
+/**
+ * Send tournament payment failed notification
+ */
+async sendTournamentPaymentFailed(payload: {
+    to: string;
+    tournament: {
+        name: string;
+        date: string;
+        sportType: string;
+        location: string;
+    };
+    customer: { fullName: string };
+    reason: string;
+}) {
+    await this.mailerService.sendMail({
+        to: payload.to,
+        subject: 'Thanh toán đăng ký giải đấu thất bại - SportZone',
+        template: 'tournament-payment-failed.hbs', // Create this template
+        context: {
+            title: 'Thanh toán đăng ký giải đấu thất bại',
+            tournament: payload.tournament,
+            customer: payload.customer,
+            reason: payload.reason,
+        },
+    });
+}
 }

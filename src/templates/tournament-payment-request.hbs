@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Yêu cầu thanh toán đăng ký giải đấu</title>
+</head>
+<body>
+    <h2>Yêu cầu thanh toán đăng ký giải đấu</h2>
+    <p>Xin chào {{customer.fullName}},</p>
+    <p>Bạn đã đăng ký tham gia giải đấu:</p>
+    <ul>
+        <li><strong>Giải đấu:</strong> {{tournament.name}}</li>
+        <li><strong>Môn thi đấu:</strong> {{tournament.sportType}}</li>
+        <li><strong>Thời gian:</strong> {{tournament.date}}{{#if tournament.time}} {{tournament.time}}{{/if}}</li>
+        <li><strong>Địa điểm:</strong> {{tournament.location}}</li>
+        <li><strong>Phí đăng ký:</strong> {{payment.amountFormatted}}</li>
+    </ul>
+    <p>Vui lòng thanh toán để hoàn tất đăng ký:</p>
+    <a href="{{payment.link}}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
+        Thanh toán ngay
+    </a>
+    <p>Đường link thanh toán sẽ hết hạn sau {{payment.expiresInMinutes}} phút ({{payment.expiresAt}}).</p>
+    <p>Phương thức thanh toán: {{payment.methodLabel}}</p>
+    <p>Trân trọng,<br>Đội ngũ SportZone</p>
+</body>
+</html>

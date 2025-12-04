@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, Param, Req, BadRequestException, NotFoundException, Delete, Patch, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Param, Req, BadRequestException, NotFoundException, Delete, Patch, HttpCode, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBody } from '@nestjs/swagger';
 import { TransactionsService } from './transactions.service';
 import { PaymentCleanupService } from './payment-cleanup.service';
@@ -28,6 +28,7 @@ import {
 } from './dto/payos.dto';
 import { Inject, forwardRef } from '@nestjs/common';
 import { FieldOwnerService } from '../field-owner/field-owner.service';
+import { Response } from 'express';
 
 @ApiTags('Transactions')
 @Controller('transactions')
@@ -1918,5 +1919,162 @@ export class TransactionsController {
         }
         return await this.payosService.cancelTransaction(orderCodeNum, dto?.cancellationReason);
     }
+
+    /**
+ * Tournament-specific PayOS return URL
+ * Handles return from tournament payment and redirects to tournament page
+ */
+@Get('payos/tournament-return/:tournamentId')
+@ApiOperation({
+    summary: 'Tournament PayOS Return URL',
+    description: 'Handle return from tournament payment and redirect to tournament page with status'
+})
+@ApiParam({ name: 'tournamentId', description: 'Tournament ID' })
+@ApiQuery({ name: 'orderCode', description: 'PayOS order code', required: false })
+@ApiQuery({ name: 'status', description: 'Payment status', required: false })
+async handleTournamentPaymentReturn(
+    @Param('tournamentId') tournamentId: string,
+    @Query() query: any,
+    @Res() res: Response
+) {
+    try {
+        const orderCode = query.orderCode ? Number(query.orderCode) : null;
+        const status = query.status;
+        
+        // Get frontend URL from config
+        const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+        
+        if (!orderCode) {
+            // Redirect to tournament page with error
+            return res.redirect(`${frontendUrl}/tournaments/${tournamentId}?payment=error&reason=missing_order_code`);
+        }
+
+        console.log(`[Tournament Payment Return] Processing return for orderCode: ${orderCode}, tournament: ${tournamentId}`);
+
+        // Query transaction from PayOS
+        const payosTransaction = await this.payosService.queryTransaction(orderCode);
+
+        // Find local transaction
+        const transaction = await this.transactionsService.getPaymentByExternalId(String(orderCode));
+
+        if (!transaction) {
+            console.warn(`[Tournament Payment Return] Transaction not found for orderCode: ${orderCode}`);
+            return res.redirect(`${frontendUrl}/tournaments/${tournamentId}?payment=error&reason=transaction_not_found`);
+        }
+
+        // Map PayOS status to our TransactionStatus enum
+        let newStatus: TransactionStatus;
+        let paymentStatus: 'success' | 'failed' | 'pending' | 'cancelled';
+        
+        if (payosTransaction.status === 'PAID') {
+            newStatus = TransactionStatus.SUCCEEDED;
+            paymentStatus = 'success';
+        } else if (payosTransaction.status === 'CANCELLED' || payosTransaction.status === 'EXPIRED') {
+            newStatus = TransactionStatus.FAILED;
+            paymentStatus = 'failed';
+        } else if (payosTransaction.status === 'PENDING' || payosTransaction.status === 'PROCESSING') {
+            newStatus = TransactionStatus.PROCESSING;
+            paymentStatus = 'pending';
+        } else {
+            newStatus = TransactionStatus.FAILED;
+            paymentStatus = 'cancelled';
+        }
+
+        // Update transaction status if not already finalized
+        if (transaction.status !== TransactionStatus.SUCCEEDED && transaction.status !== TransactionStatus.FAILED) {
+            console.log(`[Tournament Payment Return] Updating transaction ${transaction._id} from ${transaction.status} to ${newStatus}`);
+            
+            const updated = await this.transactionsService.updatePaymentStatus(
+                (transaction._id as any).toString(),
+                newStatus,
+                undefined,
+                {
+                    payosOrderCode: payosTransaction.orderCode,
+                    payosReference: payosTransaction.reference,
+                    payosAccountNumber: payosTransaction.accountNumber,
+                    payosTransactionDateTime: payosTransaction.transactionDateTime,
+                }
+            );
+
+            // Emit payment events based on status
+            if (newStatus === TransactionStatus.FAILED) {
+                const bookingIdStr = updated.booking 
+                    ? (typeof updated.booking === 'string' 
+                        ? updated.booking 
+                        : (updated.booking as any)?._id 
+                            ? String((updated.booking as any)._id)
+                            : String(updated.booking))
+                    : undefined;
+                
+                const userIdStr = updated.user
+                    ? (typeof updated.user === 'string'
+                        ? updated.user
+                        : (updated.user as any)?._id
+                            ? String((updated.user as any)._id)
+                            : String(updated.user))
+                    : undefined;
+
+                const reason = payosTransaction.status === 'CANCELLED' 
+                    ? 'PayOS transaction cancelled' 
+                    : 'PayOS transaction expired';
+
+                this.eventEmitter.emit('payment.failed', {
+                    paymentId: String(updated._id),
+                    tournamentId: tournamentId,
+                    userId: userIdStr,
+                    amount: updated.amount,
+                    method: updated.method,
+                    transactionId: payosTransaction.reference || String(payosTransaction.orderCode),
+                    reason,
+                });
+            } else if (newStatus === TransactionStatus.SUCCEEDED) {
+                // Double-check transaction status
+                const verifiedTransaction = await this.transactionsService.getPaymentById(
+                    (updated._id as any).toString()
+                );
+                
+                if (verifiedTransaction && verifiedTransaction.status === TransactionStatus.SUCCEEDED) {
+                    const bookingIdStr = updated.booking
+                        ? (typeof updated.booking === 'string'
+                            ? updated.booking
+                            : (updated.booking as any)?._id
+                                ? String((updated.booking as any)._id)
+                                : String(updated.booking))
+                        : undefined;
+
+                    const userIdStr = updated.user
+                        ? (typeof updated.user === 'string'
+                            ? updated.user
+                            : (updated.user as any)?._id
+                                ? String((updated.user as any)._id)
+                                : String(updated.user))
+                        : undefined;
+
+                    // Emit payment.success event for tournament
+                    this.eventEmitter.emit('payment.success', {
+                        paymentId: String(updated._id),
+                        tournamentId: tournamentId,
+                        userId: userIdStr,
+                        amount: updated.amount,
+                        method: updated.method,
+                        transactionId: payosTransaction.reference,
+                    });
+                }
+            }
+        }
+
+        // Redirect to tournament page with payment status
+        return res.redirect(
+            `${frontendUrl}/tournaments/${tournamentId}?payment=${paymentStatus}&orderCode=${orderCode}`
+        );
+
+    } catch (error) {
+        console.error('[Tournament Payment Return] Error:', error);
+        const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+        return res.redirect(
+            `${frontendUrl}/tournaments/${tournamentId}?payment=error&reason=system_error`
+        );
+    }
+}
 }
 
