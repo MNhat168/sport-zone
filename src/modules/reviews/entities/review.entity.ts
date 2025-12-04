@@ -1,13 +1,20 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { SportType } from 'src/common/enums/sport-type.enum';
+import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
 
 export enum ReviewType {
   FIELD = 'field',
   COACH = 'coach',
 }
 
-@Schema({ timestamps: true })
+@Schema({
+  timestamps: {
+    createdAt: true,
+    updatedAt: true,
+    currentTime: () => getCurrentVietnamTimeForDB(),
+  },
+})
 export class Review extends Document {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   user: Types.ObjectId;

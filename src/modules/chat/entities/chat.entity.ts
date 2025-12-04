@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { BaseEntity } from 'src/common/entities/base.entity';
+import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
 import { User } from '../../users/entities/user.entity';
 import { Field } from '../../fields/entities/field.entity';
 
@@ -34,7 +35,7 @@ export class Message {
   @Prop({ type: Boolean, default: false })
   isRead: boolean;
 
-  @Prop({ type: Date, default: Date.now })
+  @Prop({ type: Date, default: () => getCurrentVietnamTimeForDB() })
   sentAt: Date;
 }
 
@@ -60,7 +61,7 @@ export class ChatRoom extends BaseEntity {
   @Prop({ type: String, enum: ChatStatus, default: ChatStatus.ACTIVE })
   status: ChatStatus;
 
-  @Prop({ type: Date, default: Date.now })
+  @Prop({ type: Date, default: () => getCurrentVietnamTimeForDB() })
   lastMessageAt: Date;
 
   @Prop({ type: Boolean, default: false })

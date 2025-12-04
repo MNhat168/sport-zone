@@ -6,6 +6,7 @@ import { Notification, NotificationSchema } from './entities/notification.entity
 import { NotificationListener } from './notifications.listener';
 import { NotificationRepository } from './repositories/notification.repository';
 import { NOTIFICATION_REPOSITORY } from './interfaces/notifications.interface';
+import { NotificationsGateway } from './notifications.gateway';
 import { Booking, BookingSchema } from '../bookings/entities/booking.entity';
 import { Field, FieldSchema } from '../fields/entities/field.entity';
 import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entities/field-owner-profile.entity';
@@ -28,11 +29,12 @@ import { EmailModule } from '../email/email.module';
     NotificationsService,
     NotificationListener,
     NotificationRepository,
+    NotificationsGateway,
     {
       provide: NOTIFICATION_REPOSITORY,
       useClass: NotificationRepository,
     }
   ],
-  exports: [NotificationsService]
+  exports: [NotificationsService, NotificationsGateway]
 })
 export class NotificationsModule { }

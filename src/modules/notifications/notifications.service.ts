@@ -4,17 +4,43 @@ import { CreateNotificationDto } from './dtos/create-notification.dto';
 import { Notification } from './entities/notification.entity';
 import { NotificationRepositoryInterface, NOTIFICATION_REPOSITORY } from './interfaces/notifications.interface';
 import { NotificationType } from 'src/common/enums/notification-type.enum';
+import { NotificationsGateway } from './notifications.gateway';
 
 @Injectable()
 export class NotificationsService {
     constructor(
         @Inject(NOTIFICATION_REPOSITORY)
-        private readonly notificationRepository: NotificationRepositoryInterface,
-    ) {}
+    private readonly notificationRepository: NotificationRepositoryInterface,
+    private readonly notificationsGateway: NotificationsGateway,
+  ) {}
 
-    async create(dto: CreateNotificationDto): Promise<Notification> {
-        return this.notificationRepository.create(dto);
+  async create(dto: CreateNotificationDto): Promise<Notification> {
+    const notification = await this.notificationRepository.create(dto);
+
+    try {
+      // Emit realtime notification to user if connected
+      const recipientId =
+        typeof notification.recipient === 'string'
+          ? notification.recipient
+          : (notification.recipient as any)?.toString?.() ?? '';
+
+      if (recipientId) {
+        this.notificationsGateway.emitToUser(recipientId, {
+          id: (notification as any)._id?.toString?.() ?? undefined,
+          title: notification.title,
+          message: notification.message,
+          type: notification.type,
+          isRead: notification.isRead,
+          createdAt: notification['createdAt'],
+          metadata: notification['metadata'] ?? undefined,
+        });
+      }
+    } catch {
+      // Avoid breaking main flow if websocket fails
     }
+
+    return notification;
+  }
 
     async getUserNotifications(userId: string): Promise<Notification[]> {
         const notifications = await this.notificationRepository.findByCondition({

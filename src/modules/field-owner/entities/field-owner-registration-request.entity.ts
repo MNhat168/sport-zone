@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { BaseEntity } from 'src/common/entities/base.entity';
+import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
 import { FacilityInfo, FacilityInfoSchema } from './facility-info.entity';
 
 export enum RegistrationStatus {
@@ -90,7 +91,7 @@ export class FieldOwnerRegistrationRequest extends BaseEntity {
   @Prop({ type: String })
   rejectionReason?: string;
 
-  @Prop({ type: Date, default: Date.now })
+  @Prop({ type: Date, default: () => getCurrentVietnamTimeForDB() })
   submittedAt: Date;
 
   @Prop({ type: Date })

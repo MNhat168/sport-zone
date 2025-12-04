@@ -15,6 +15,7 @@ import { ReviewsModule } from './modules/reviews/reviews.module';
 import { AiModule } from './modules/ai/ai.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
 import { SchedulesModule } from './modules/schedules/schedules.module';
@@ -62,6 +63,7 @@ import { ChatModule } from '@modules/chat/chat.module';
     AiModule,
     NotificationsModule,
     AdminModule,
+    ReportsModule,
     SchedulesModule,
     CoachesModule,
     AmenitiesModule,

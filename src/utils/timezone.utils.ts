@@ -16,6 +16,19 @@ export function convertToVietnamTime(utcDate: Date): Date {
  * Get current Vietnam time
  */
 export function getCurrentVietnamTime(): Date {
+    // Dữ liệu trong DB đã được lưu theo giờ Việt Nam (UTC+7),
+    // nên cho mục đích hiển thị/log chỉ cần new Date() là đủ.
+    return new Date();
+}
+
+/**
+ * Get current Vietnam time for DB storage
+ * 
+ * Dùng hàm này khi bạn muốn:
+ * - Server deploy ở bất kỳ timezone nào
+ * - Nhưng giá trị lưu trong MongoDB luôn trùng với giờ Việt Nam khi nhìn bằng mắt
+ */
+export function getCurrentVietnamTimeForDB(): Date {
     return new Date(Date.now() + (7 * 60 * 60 * 1000));
 }
 
