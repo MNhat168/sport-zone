@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
+import { HydratedDocument, Types } from 'mongoose';
 import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
 
 export type UserDocument = HydratedDocument<User>;
@@ -42,6 +42,12 @@ export class User extends BaseEntity {
 
   @Prop({ type: [String] })
   favouriteSports?: string[];
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
+  favouriteCoaches?: Types.ObjectId[];
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Field' }], default: [] })
+  favouriteFields?: Types.ObjectId[];
 
   @Prop({ type: Boolean, default: true })
   isActive: boolean;

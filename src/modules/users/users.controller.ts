@@ -3,6 +3,7 @@ import {
   Get,
   Param,
   Body,
+  Delete,
   UseInterceptors,
   UploadedFiles,
   NotFoundException,
@@ -30,6 +31,8 @@ import { Multer } from 'multer';
 import { AuthGuard } from '@nestjs/passport';
 import { UserRole } from './entities/user.entity';
 import { SetFavouriteSportsDto } from './dto/set-favourite-sports.dto';
+import { SetFavouriteCoachesDto } from './dto/set-favourite-coaches.dto';
+import { SetFavouriteFieldsDto } from './dto/set-favourite-fields.dto';
 import { Roles } from 'src/decorators/roles.decorator';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 @ApiTags('Users')
@@ -86,6 +89,84 @@ export class UsersController {
       userEmail,
       body.favouriteSports,
     );
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
+  @Post('favourite-coaches')
+  async setFavouriteCoaches(
+    @Request() req,
+    @Body() body: SetFavouriteCoachesDto,
+  ) {
+    const userEmail = req.user.email;
+    const user = await this.usersService.findByEmail(userEmail);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    // Only regular users can set favourite coaches
+    if (user.role !== UserRole.USER) {
+      throw new BadRequestException('Only users with role USER can set favourite coaches');
+    }
+
+    return this.usersService.setFavouriteCoaches(userEmail, body.favouriteCoaches);
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
+  @Delete('favourite-coaches')
+  async removeFavouriteCoaches(
+    @Request() req,
+    @Body() body: SetFavouriteCoachesDto,
+  ) {
+    const userEmail = req.user.email;
+    const user = await this.usersService.findByEmail(userEmail);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (user.role !== UserRole.USER) {
+      throw new BadRequestException('Only users with role USER can remove favourite coaches');
+    }
+
+    return this.usersService.removeFavouriteCoaches(userEmail, body.favouriteCoaches);
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
+  @Post('favourite-fields')
+  async setFavouriteFields(
+    @Request() req,
+    @Body() body: SetFavouriteFieldsDto,
+  ) {
+    const userEmail = req.user.email;
+    const user = await this.usersService.findByEmail(userEmail);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    // Only regular users can set favourite fields
+    if (user.role !== UserRole.USER) {
+      throw new BadRequestException('Only users with role USER can set favourite fields');
+    }
+
+    return this.usersService.setFavouriteFields(userEmail, body.favouriteFields);
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
+  @Delete('favourite-fields')
+  async removeFavouriteFields(
+    @Request() req,
+    @Body() body: SetFavouriteFieldsDto,
+  ) {
+    const userEmail = req.user.email;
+    const user = await this.usersService.findByEmail(userEmail);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (user.role !== UserRole.USER) {
+      throw new BadRequestException('Only users with role USER can remove favourite fields');
+    }
+
+    return this.usersService.removeFavouriteFields(userEmail, body.favouriteFields);
   }
 
   @UseGuards(JwtAccessTokenGuard, RolesGuard)

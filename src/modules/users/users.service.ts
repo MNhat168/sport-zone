@@ -15,8 +15,10 @@ import { AwsS3Service } from 'src/service/aws-s3.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { GetAllUsersDto } from './dto/get-all-users.dto';
 import { GetAllUsersResponseDto, UserListDto } from './dto/get-all-users-response.dto';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
+import { UserRole } from './entities/user.entity';
+import { Field } from '../fields/entities/field.entity';
 
 @Injectable()
 export class UsersService {
@@ -26,6 +28,7 @@ export class UsersService {
     private readonly awsS3Service: AwsS3Service,
     private readonly configService: ConfigService,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    @InjectModel(Field.name) private readonly fieldModel: Model<Field>,
   ) {}
 
   async findOneByCondition(condition: FilterQuery<User>): Promise<User | null> {
@@ -128,6 +131,178 @@ export class UsersService {
     }
 
     user.favouriteSports.push(...newSports);
+    await user.save();
+    return user;
+  }
+
+  async setFavouriteCoaches(email: string, favouriteCoaches: string[]) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (!Array.isArray(favouriteCoaches)) {
+      throw new BadRequestException('favouriteCoaches must be an array');
+    }
+
+    // Validate and convert coach IDs to ObjectId
+    const validIds: Types.ObjectId[] = [];
+    for (const id of favouriteCoaches) {
+      if (typeof id !== 'string') continue;
+      if (!Types.ObjectId.isValid(id)) continue;
+      validIds.push(new Types.ObjectId(id));
+    }
+
+    if (validIds.length === 0) {
+      throw new BadRequestException('No valid coach IDs provided');
+    }
+
+    // Ensure the provided IDs belong to users with role COACH
+    const coaches = (await this.userModel
+      .find({ _id: { $in: validIds }, role: UserRole.COACH })
+      .select('_id')
+      .lean()
+      .exec()) as unknown as { _id: Types.ObjectId }[];
+
+    if (!coaches || coaches.length === 0) {
+      throw new BadRequestException('No valid coaches found for provided IDs');
+    }
+
+    const coachIdStrings = coaches.map((c) => c._id.toString());
+
+    // Ensure user's favouriteCoaches is an array
+    if (!Array.isArray(user.favouriteCoaches)) user.favouriteCoaches = [];
+
+    const currentCoachIds = user.favouriteCoaches.map((c: any) => c.toString());
+
+    // Filter new coach IDs (remove duplicates)
+    const newCoachIds = coachIdStrings.filter((id) => !currentCoachIds.includes(id));
+
+    if (newCoachIds.length === 0) {
+      throw new BadRequestException('All provided coaches are already in favourites');
+    }
+
+    user.favouriteCoaches.push(...newCoachIds.map((id) => new Types.ObjectId(id)));
+    await user.save();
+    return user;
+  }
+
+  async removeFavouriteCoaches(email: string, coachIds: string[]) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (!Array.isArray(coachIds)) {
+      throw new BadRequestException('coachIds must be an array');
+    }
+
+    const validIds = coachIds.filter(id => typeof id === 'string' && Types.ObjectId.isValid(id));
+    if (validIds.length === 0) {
+      throw new BadRequestException('No valid coach IDs provided');
+    }
+
+    // Remove any matching IDs from user's favouriteCoaches
+    if (!Array.isArray(user.favouriteCoaches) || user.favouriteCoaches.length === 0) {
+      throw new BadRequestException('No favourite coaches to remove');
+    }
+
+    const validIdStrings = validIds.map(id => new Types.ObjectId(id).toString());
+
+    const beforeCount = (user.favouriteCoaches || []).length;
+    user.favouriteCoaches = (user.favouriteCoaches || []).filter((c: any) => !validIdStrings.includes((c as any).toString()));
+    const afterCount = (user.favouriteCoaches || []).length;
+
+    if (beforeCount === afterCount) {
+      throw new BadRequestException('None of the provided coach IDs were in favourites');
+    }
+
+    await user.save();
+    return user;
+  }
+
+  async removeFavouriteFields(email: string, fieldIds: string[]) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (!Array.isArray(fieldIds)) {
+      throw new BadRequestException('fieldIds must be an array');
+    }
+
+    const validIds = fieldIds.filter(id => typeof id === 'string' && Types.ObjectId.isValid(id));
+    if (validIds.length === 0) {
+      throw new BadRequestException('No valid field IDs provided');
+    }
+
+    // If user has no favourites, nothing to remove
+    if (!Array.isArray(user.favouriteFields) || user.favouriteFields.length === 0) {
+      throw new BadRequestException('No favourite fields to remove');
+    }
+
+    const validIdStrings = validIds.map(id => new Types.ObjectId(id).toString());
+    const beforeCount = (user.favouriteFields || []).length;
+
+    user.favouriteFields = (user.favouriteFields || []).filter((f: any) => !validIdStrings.includes((f as any).toString()));
+
+    const afterCount = (user.favouriteFields || []).length;
+    if (beforeCount === afterCount) {
+      throw new BadRequestException('None of the provided field IDs were in favourites');
+    }
+
+    await user.save();
+    return user;
+  }
+
+  async setFavouriteFields(email: string, favouriteFields: string[]) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (!Array.isArray(favouriteFields)) {
+      throw new BadRequestException('favouriteFields must be an array');
+    }
+
+    // Validate and convert field IDs to ObjectId
+    const validIds: Types.ObjectId[] = [];
+    for (const id of favouriteFields) {
+      if (typeof id !== 'string') continue;
+      if (!Types.ObjectId.isValid(id)) continue;
+      validIds.push(new Types.ObjectId(id));
+    }
+
+    if (validIds.length === 0) {
+      throw new BadRequestException('No valid field IDs provided');
+    }
+
+    // Ensure the provided IDs correspond to existing active fields
+    const fields = (await this.fieldModel
+      .find({ _id: { $in: validIds }, isActive: true })
+      .select('_id')
+      .lean()
+      .exec()) as unknown as { _id: Types.ObjectId }[];
+
+    if (!fields || fields.length === 0) {
+      throw new BadRequestException('No valid fields found for provided IDs');
+    }
+
+    const fieldIdStrings = fields.map((f) => f._id.toString());
+
+    // Ensure user's favouriteFields is an array
+    if (!Array.isArray(user.favouriteFields)) user.favouriteFields = [];
+
+    const currentFieldIds = user.favouriteFields.map((c: any) => c.toString());
+
+    // Filter new field IDs (remove duplicates)
+    const newFieldIds = fieldIdStrings.filter((id) => !currentFieldIds.includes(id));
+
+    if (newFieldIds.length === 0) {
+      throw new BadRequestException('All provided fields are already in favourites');
+    }
+
+    user.favouriteFields.push(...newFieldIds.map((id) => new Types.ObjectId(id)));
     await user.save();
     return user;
   }
