@@ -17,7 +17,7 @@ import { GetAllUsersDto } from './dto/get-all-users.dto';
 import { GetAllUsersResponseDto, UserListDto } from './dto/get-all-users-response.dto';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
-import { UserRole } from './entities/user.entity';
+import { UserRole } from '@common/enums/user.enum';
 import { Field } from '../fields/entities/field.entity';
 
 @Injectable()

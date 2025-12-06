@@ -6,7 +6,7 @@ import {
   IsUrl,
   IsBoolean,
 } from 'class-validator';
-import { BankAccountStatus } from '../entities/bank-account.entity';
+import { BankAccountStatus } from '@common/enums/bank-account.enum';
 
 export class CreateBankAccountDto {
   @ApiProperty({ example: 'NGUYEN VAN A', description: 'Tên chủ tài khoản (phải trùng với CCCD)' })

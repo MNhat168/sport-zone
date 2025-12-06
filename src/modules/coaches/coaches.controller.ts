@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query, BadRequestException } from '@nestjs/common';
 import { CoachesService } from './coaches.service';
 import { CoachesDto } from './dtos/coaches.dto';
 import { SportType } from 'src/common/enums/sport-type.enum';
@@ -17,12 +17,14 @@ export class CoachesController {
     @Query('sportType') sportType?: SportType,
     @Query('minRate') minRate?: number,
     @Query('maxRate') maxRate?: number,
+    @Query('district') district?: string,
   ): Promise<CoachesDto[]> {
     return this.coachesService.findAll({
       name,
       sportType,
       minRate: minRate ? Number(minRate) : undefined,
       maxRate: maxRate ? Number(maxRate) : undefined,
+      district,
     });
   }
 
@@ -30,5 +32,23 @@ export class CoachesController {
   @Get(':id')
   async getCoachById(@Param('id') coachId: string): Promise<CoachesDto> {
     return this.coachesService.getCoachById(coachId);
+  }
+
+  // GET /coaches/:id/bank-account
+  @Get(':id/bank-account')
+  async getCoachBankAccount(@Param('id') coachId: string): Promise<any> {
+    return this.coachesService.getCoachBankAccount(coachId);
+  }
+
+  // GET /coaches/:id/slots
+  @Get(':id/slots')
+  async getCoachAvailableSlots(
+    @Param('id') coachId: string,
+    @Query('date') date: string,
+  ): Promise<any> {
+    if (!date) {
+      throw new BadRequestException('Date parameter is required');
+    }
+    return this.coachesService.getCoachAvailableSlots(coachId, date);
   }
 }

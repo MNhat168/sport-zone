@@ -8,6 +8,8 @@ import { Schedule, ScheduleSchema } from '../schedules/entities/schedule.entity'
 import { Field, FieldSchema } from '../fields/entities/field.entity';
 import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entities/field-owner-profile.entity';
 import { User, UserSchema } from '../users/entities/user.entity';
+import { CoachProfile, CoachProfileSchema } from '../coaches/entities/coach-profile.entity';
+import { Transaction, TransactionSchema } from '../transactions/entities/transaction.entity';
 
 // Services and Controllers
 import { BookingsService } from './bookings.service';
@@ -45,6 +47,8 @@ import { BookingEmailService } from './services/booking-email.service';
       { name: Field.name, schema: FieldSchema },
       { name: FieldOwnerProfile.name, schema: FieldOwnerProfileSchema },
       { name: User.name, schema: UserSchema },
+      { name: CoachProfile.name, schema: CoachProfileSchema },
+      { name: Transaction.name, schema: TransactionSchema },
     ]),
     EventEmitterModule,
     forwardRef(() => TransactionsModule),

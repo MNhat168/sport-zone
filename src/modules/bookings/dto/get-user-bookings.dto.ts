@@ -1,73 +1,112 @@
-import { IsOptional, IsEnum, IsNumber, Min, Max } from 'class-validator';
+import { IsOptional, IsEnum, IsNumber, Min, Max, IsIn } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { BookingStatus, BookingType } from '../entities/booking.entity';
+import { BookingStatus, BookingType } from '@common/enums/booking.enum';
 
 /**
  * DTO cho query parameters khi lấy danh sách booking của user
  */
 export class GetUserBookingsDto {
-    /**
-     * Filter theo trạng thái booking
-     * @example "confirmed"
-     */
-    @ApiPropertyOptional({
-        enum: BookingStatus,
-        description: 'Filter theo trạng thái booking',
-        example: 'confirmed'
-    })
-    @IsOptional()
-    @IsEnum(BookingStatus)
-    status?: BookingStatus;
+  /**
+   * Filter theo trạng thái booking (lifecycle)
+   * @example "confirmed"
+   */
+  @ApiPropertyOptional({
+    enum: BookingStatus,
+    description: 'Filter theo trạng thái booking (lifecycle)',
+    example: 'confirmed'
+  })
+  @IsOptional()
+  @IsEnum(BookingStatus)
+  status?: BookingStatus;
 
-    /**
-     * Filter theo loại booking
-     * @example "field"
-     */
-    @ApiPropertyOptional({
-        enum: BookingType,
-        description: 'Filter theo loại booking',
-        example: 'field'
-    })
-    @IsOptional()
-    @IsEnum(BookingType)
-    type?: BookingType;
+  /**
+   * Filter theo trạng thái thanh toán
+   * @example "paid"
+   */
+  @ApiPropertyOptional({
+    enum: ['unpaid', 'paid', 'refunded'],
+    description: 'Filter theo trạng thái thanh toán',
+    example: 'paid'
+  })
+  @IsOptional()
+  @IsIn(['unpaid', 'paid', 'refunded'])
+  paymentStatus?: 'unpaid' | 'paid' | 'refunded';
 
-    /**
-     * Số lượng booking trả về
-     * @example 10
-     */
-    @ApiPropertyOptional({
-        type: Number,
-        minimum: 1,
-        maximum: 100,
-        default: 10,
-        description: 'Số lượng booking trả về (1-100)',
-        example: 10
-    })
-    @IsOptional()
-    @Transform(({ value }) => parseInt(value))
-    @IsNumber()
-    @Min(1)
-    @Max(100)
-    limit?: number = 10;
+  /**
+   * Filter theo trạng thái duyệt ghi chú (owner)
+   * @example "pending"
+   */
+  @ApiPropertyOptional({
+    enum: ['pending', 'approved', 'rejected'],
+    description: 'Filter theo trạng thái duyệt ghi chú (owner)',
+    example: 'pending'
+  })
+  @IsOptional()
+  @IsIn(['pending', 'approved', 'rejected'])
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
 
-    /**
-     * Trang hiện tại (bắt đầu từ 1)
-     * @example 1
-     */
-    @ApiPropertyOptional({
-        type: Number,
-        minimum: 1,
-        default: 1,
-        description: 'Trang hiện tại (bắt đầu từ 1)',
-        example: 1
-    })
-    @IsOptional()
-    @Transform(({ value }) => parseInt(value))
-    @IsNumber()
-    @Min(1)
-    page?: number = 1;
+  /**
+   * Filter theo trạng thái phản hồi coach
+   * @example "accepted"
+   */
+  @ApiPropertyOptional({
+    enum: ['pending', 'accepted', 'declined'],
+    description: 'Filter theo trạng thái phản hồi coach',
+    example: 'accepted'
+  })
+  @IsOptional()
+  @IsIn(['pending', 'accepted', 'declined'])
+  coachStatus?: 'pending' | 'accepted' | 'declined';
+
+  /**
+   * Filter theo loại booking
+   * @example "field"
+   */
+  @ApiPropertyOptional({
+    enum: BookingType,
+    description: 'Filter theo loại booking',
+    example: 'field'
+  })
+  @IsOptional()
+  @IsEnum(BookingType)
+  type?: BookingType;
+
+  /**
+   * Số lượng booking trả về
+   * @example 10
+   */
+  @ApiPropertyOptional({
+    type: Number,
+    minimum: 1,
+    maximum: 100,
+    default: 10,
+    description: 'Số lượng booking trả về (1-100)',
+    example: 10
+  })
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value))
+  @IsNumber()
+  @Min(1)
+  @Max(100)
+  limit?: number = 10;
+
+  /**
+   * Trang hiện tại (bắt đầu từ 1)
+   * @example 1
+   */
+  @ApiPropertyOptional({
+    type: Number,
+    minimum: 1,
+    default: 1,
+    description: 'Trang hiện tại (bắt đầu từ 1)',
+    example: 1
+  })
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value))
+  @IsNumber()
+  @Min(1)
+  page?: number = 1;
 }
 
 /**

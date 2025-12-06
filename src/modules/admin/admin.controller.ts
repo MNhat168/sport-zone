@@ -4,6 +4,7 @@ import { AdminService } from './admin.service';
 import { UserRoleStatDto, UserMonthlyStatsDto } from './dto/user.dto';
 import { BookingMonthlyStatsDto } from './dto/booking.dto';
 import { ListTransactionsDto } from './dto/list-transactions.dto';
+import { ListBookingsDto } from './dto/list-bookings.dto';
 import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { Roles } from 'src/decorators/roles.decorator';
@@ -93,5 +94,13 @@ export class AdminController {
     @Roles(UserRole.ADMIN)
     listTransactions(@Query() query: ListTransactionsDto) {
         return this.adminService.listTransactions(query);
+    }
+
+    // Admin: Danh sách bookings có filter/sort/pagination
+    @Get('bookings')
+    @UseGuards(JwtAccessTokenGuard, RolesGuard)
+    @Roles(UserRole.ADMIN)
+    listBookings(@Query() query: ListBookingsDto) {
+        return this.adminService.listBookings(query);
     }
 }

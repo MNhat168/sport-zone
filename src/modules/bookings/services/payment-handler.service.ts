@@ -2,17 +2,19 @@ import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/co
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types, ClientSession } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Booking, BookingStatus } from '../entities/booking.entity';
+import { Booking } from '../entities/booking.entity';
+import { BookingStatus, BookingType } from '@common/enums/booking.enum';
 import { Schedule } from '../../schedules/entities/schedule.entity';
 import { User } from '../../users/entities/user.entity';
 import { FieldOwnerProfile } from '../../field-owner/entities/field-owner-profile.entity';
+import { CoachProfile } from '../../coaches/entities/coach-profile.entity';
 import { EmailService } from '../../email/email.service';
 import { BookingEmailService } from './booking-email.service';
 import { TransactionsService } from '../../transactions/transactions.service';
-import { TransactionStatus } from '../../transactions/entities/transaction.entity';
+import { TransactionStatus } from '@common/enums/transaction.enum';
 import { CleanupService } from '../../../service/cleanup.service';
 import { WalletService } from '../../wallet/wallet.service';
-import { WalletRole } from '../../wallet/entities/wallet.entity';
+import { WalletRole } from '@common/enums/wallet.enum';
 import { InjectConnection } from '@nestjs/mongoose';
 
 /**
@@ -30,6 +32,8 @@ export class PaymentHandlerService implements OnModuleInit {
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(FieldOwnerProfile.name)
     private readonly fieldOwnerProfileModel: Model<FieldOwnerProfile>,
+    @InjectModel(CoachProfile.name)
+    private readonly coachProfileModel: Model<CoachProfile>,
     @InjectConnection() private readonly connection: any,
     private readonly eventEmitter: EventEmitter2,
     private readonly emailService: EmailService,
@@ -145,23 +149,46 @@ export class PaymentHandlerService implements OnModuleInit {
         `proceeding to confirm booking ${event.bookingId}`
       );
 
-      // ✅ SECURITY: Atomic update with condition check (prevents race condition)
+      // Trường hợp giao dịch XÁC THỰC TÀI KHOẢN COACH (không gắn booking)
+      if (!transaction.booking && (transaction as any).metadata?.purpose === 'ACCOUNT_VERIFICATION' && (transaction as any).metadata?.targetRole === 'coach') {
+        const coachUserId = (transaction.user as any)?.toString?.() || String(transaction.user);
+        const coachProfileId = (transaction as any).metadata?.coachId;
+        // Đánh dấu verified (idempotent)
+        if (coachProfileId) {
+          await this.coachProfileModel.findByIdAndUpdate(coachProfileId, {
+            $set: { bankVerified: true, bankVerifiedAt: new Date() }
+          }, { new: true });
+        } else if (coachUserId) {
+          await this.coachProfileModel.findOneAndUpdate({ user: new Types.ObjectId(coachUserId) }, {
+            $set: { bankVerified: true, bankVerifiedAt: new Date() }
+          }, { new: true });
+        }
+        this.logger.log(`[Payment Success] ✅ Marked coach ${coachProfileId || coachUserId} as bankVerified`);
+        // Không cần xử lý booking, kết thúc nhanh
+        await session.commitTransaction();
+        return;
+      }
+
+      // ✅ CRITICAL: Atomic update with condition check (prevents race condition)
       // This ensures only ONE update happens even if webhook is called multiple times
+      // Determine booking type to decide lifecycle change
+      const current = await this.bookingModel.findById(event.bookingId).session(session).select('type status');
+const isCoach = !!current && (current as any).type === BookingType.COACH;
+
       const updateResult = await this.bookingModel.findOneAndUpdate(
         {
           _id: new Types.ObjectId(event.bookingId),
-          status: { $ne: BookingStatus.CONFIRMED } // ✅ Only update if NOT already confirmed
         },
         {
           $set: {
-            status: BookingStatus.CONFIRMED,
+            paymentStatus: 'paid',
+            ...(isCoach ? {} : { status: BookingStatus.CONFIRMED }),
             transaction: new Types.ObjectId(event.paymentId)
           }
         },
         {
-          new: true, // Return updated document
-          session, // Use transaction session
-          // ✅ SECURITY: Write concern for durability
+          new: true,
+          session,
           writeConcern: { w: 'majority', j: true }
         }
       ).exec();
@@ -276,7 +303,7 @@ export class PaymentHandlerService implements OnModuleInit {
       this.eventEmitter.emit('booking.confirmed', {
         bookingId: event.bookingId,
         userId: event.userId,
-        fieldId: updateResult.field.toString(),
+        fieldId: updateResult.field?.toString() || null,
         date: updateResult.date,
       });
 
@@ -327,38 +354,86 @@ export class PaymentHandlerService implements OnModuleInit {
 
   /**
    * Release schedule slots when booking is cancelled
+   * Uses MongoDB $pull operator for atomic slot removal
+   * Handles date normalization to match schedule storage format
+   * 
+   * ⚠️ IMPORTANT: 
+   * - booking.date and schedule.date are stored as UTC midnight (no offset)
+   * - Must use setUTCHours(0,0,0,0) to normalize date correctly
+   * - This works correctly regardless of server timezone (UTC+8 Singapore, etc.)
    */
   async releaseBookingSlots(booking: Booking): Promise<void> {
     try {
-      this.logger.log(`[Release Slots] Releasing slots for booking ${booking._id}`);
+      this.logger.log(
+        `[Release Slots] 🔓 Releasing schedule slots for booking ${booking._id} ` +
+        `(field: ${booking.field}, date: ${new Date(booking.date).toISOString().split('T')[0]}, ` +
+        `slot: ${booking.startTime}-${booking.endTime})`
+      );
 
-      const schedule = await this.scheduleModel.findOne({
-        field: booking.field,
-        date: booking.date
-      });
+      // ✅ CRITICAL: Use UTC methods to normalize date, not local time methods
+      // setHours() uses LOCAL timezone → wrong on Singapore server (UTC+8)
+      // Must use setUTCHours() to ensure date stays at UTC midnight
+      // booking.date and schedule.date are stored as UTC midnight (no offset)
+      const bookingDate = new Date(booking.date);
+      bookingDate.setUTCHours(0, 0, 0, 0);
 
-      if (!schedule) {
-        this.logger.warn(`[Release Slots] No schedule found for field ${booking.field} on ${booking.date}`);
+      this.logger.debug(
+        `[Release Slots] Searching for schedule: field=${booking.field}, ` +
+        `date=${bookingDate.toISOString()} (normalized to UTC midnight), ` +
+        `slot=${booking.startTime}-${booking.endTime}`
+      );
+
+      // Use MongoDB $pull operator for atomic slot removal
+      // This removes ALL matching slots (handles case where multiple slots exist)
+      const updateResult = await this.scheduleModel.findOneAndUpdate(
+        {
+          field: booking.field,
+          date: bookingDate
+        },
+        {
+          $pull: {
+            bookedSlots: {
+              startTime: booking.startTime,
+              endTime: booking.endTime
+            }
+          },
+          $inc: { version: 1 }
+        },
+        {
+          new: true
+        }
+      ).exec();
+
+      if (!updateResult) {
+        this.logger.warn(
+          `[Release Slots] ⚠️ No schedule found for field ${booking.field} on ${bookingDate.toISOString()} ` +
+          `(booking date: ${booking.date.toISOString()}) - slot may have already been released or schedule doesn't exist`
+        );
         return;
       }
 
-      // Remove the booking's slots from bookedSlots array
-      const originalLength = schedule.bookedSlots.length;
-      schedule.bookedSlots = schedule.bookedSlots.filter(slot =>
-        !(slot.startTime === booking.startTime && slot.endTime === booking.endTime)
+      // Check if slots were actually removed by comparing array lengths
+      // Note: $pull removes all matching entries, so we can't get exact count
+      // But we can verify the slot is no longer in the array
+      const slotStillExists = updateResult.bookedSlots.some(
+        slot => slot.startTime === booking.startTime && slot.endTime === booking.endTime
       );
 
-      const removedCount = originalLength - schedule.bookedSlots.length;
-
-      if (removedCount > 0) {
-        await schedule.save();
-        this.logger.log(`[Release Slots] ✅ Released ${removedCount} slot(s) for booking ${booking._id}`);
+      if (slotStillExists) {
+        this.logger.warn(
+          `[Release Slots] ⚠️ Slot ${booking.startTime}-${booking.endTime} still exists in schedule ` +
+          `after removal attempt for booking ${booking._id} - this may indicate a data inconsistency`
+        );
       } else {
-        this.logger.warn(`[Release Slots] No matching slots found to release for booking ${booking._id}`);
+        this.logger.log(
+          `[Release Slots] ✅ Successfully released slot ${booking.startTime}-${booking.endTime} ` +
+          `from schedule (field: ${booking.field}, date: ${bookingDate.toISOString().split('T')[0]}) ` +
+          `for booking ${booking._id}`
+        );
       }
 
     } catch (error) {
-      this.logger.error('[Release Slots] Error releasing booking slots', error);
+      this.logger.error(`[Release Slots] Error releasing slots for booking ${booking._id}:`, error);
       // Don't throw - this is a cleanup operation
     }
   }
@@ -461,8 +536,9 @@ export class PaymentHandlerService implements OnModuleInit {
         this.logger.log(`[Refund V2] ✅ Credit refund completed for booking ${bookingId}`);
       }
 
-      // Update booking status to REFUNDED
+      // Update booking status to REFUNDED and map new payment status field
       booking.status = BookingStatus.CANCELLED;
+      (booking as any).paymentStatus = 'refunded';
       await booking.save({ session });
 
       // Commit transaction

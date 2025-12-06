@@ -1,7 +1,8 @@
 import { Injectable, BadRequestException, HttpException, HttpStatus, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { User, UserRole } from '../users/entities/user.entity';
+import { User } from '../users/entities/user.entity';
+import { UserRole } from '@common/enums/user.enum';
 import * as bcrypt from 'bcrypt';
 import * as nodemailer from 'nodemailer';
 import { EmailService } from '../email/email.service';
@@ -114,6 +115,40 @@ export class AuthService {
     });
     await user.save();
     return { message: 'Verification code sent to email' };
+  }
+
+  /**
+   * Claim guest account (email đã được dùng để đặt sân ẩn danh)
+   * - Nếu email tồn tại và chưa có password → cho phép đặt password, điền thêm thông tin
+   * - Nếu email đã có password → báo lỗi đã đăng ký
+   */
+  async claimGuestAccount(body: {
+    email: string;
+    password: string;
+    fullName?: string;
+    phone?: string;
+  }) {
+    const { email, password, fullName, phone } = body;
+
+    const user = await this.userModel.findOne({ email });
+    if (!user) {
+      throw new BadRequestException('Email chưa được dùng để đặt sân. Vui lòng đăng ký mới.');
+    }
+
+    if (user.password) {
+      throw new BadRequestException('Email đã được đăng ký. Vui lòng đăng nhập.');
+    }
+
+    // Set password và cập nhật thông tin nếu đang trống
+    const hashed = await bcrypt.hash(password, 10);
+    user.password = hashed;
+    if (fullName && !user.fullName) user.fullName = fullName;
+    if (phone && !user.phone) user.phone = phone;
+    user.isVerified = true; // guest đã xác thực qua email khi đặt sân
+
+    await user.save();
+
+    return { message: 'Thiết lập mật khẩu thành công. Bạn có thể đăng nhập với email này.' };
   }
 
   async verify(email: string, verificationToken: string) {

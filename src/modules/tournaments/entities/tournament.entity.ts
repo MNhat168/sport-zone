@@ -3,15 +3,7 @@ import mongoose, { Document, Types } from 'mongoose';
 import { SportType, CompetitionFormat } from 'src/common/enums/sport-type.enum';
 import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
 import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
-
-export enum TournamentStatus {
-  DRAFT = 'draft', // Initial creation, fields not reserved
-  PENDING = 'pending', // Fields reserved, waiting for minimum participants
-  CONFIRMED = 'confirmed', // Minimum threshold met, fields booked
-  ONGOING = 'ongoing',
-  COMPLETED = 'completed',
-  CANCELLED = 'cancelled',
-}
+import { TournamentStatus } from '@common/enums/tournament.enum';
 
 @Schema()
 export class Tournament extends BaseEntity {

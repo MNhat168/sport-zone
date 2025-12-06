@@ -139,6 +139,9 @@ export class FieldsDto {
     @ApiProperty({ example: true, description: 'Trạng thái hoạt động' })
     isActive: boolean;
 
+    @ApiProperty({ example: false, description: 'Trạng thái xác minh bởi admin' })
+    isAdminVerify: boolean;
+
     @ApiPropertyOptional({ example: 'Bảo trì định kỳ', description: 'Ghi chú bảo trì' })
     maintenanceNote?: string;
 
@@ -158,14 +161,14 @@ export class FieldsDto {
     updatedAt?: Date;
 
     @ApiPropertyOptional({
-        description: 'Danh sách tiện ích đã populate (tên + giá)',
+        description: 'Danh sách tiện ích đã populate (tên + giá + type)',
         type: 'array',
         example: [
-            { amenityId: '652a7b1e1c9d440000a1b2c1', name: 'Bóng', price: 0 },
-            { amenityId: '652a7b1e1c9d440000a1b2c7', name: 'Thuê vợt', price: 50000 }
+            { amenityId: '652a7b1e1c9d440000a1b2c1', name: 'Bóng', price: 0, type: 'facility' },
+            { amenityId: '652a7b1e1c9d440000a1b2c7', name: 'Thuê vợt', price: 50000, type: 'other' }
         ]
     })
-    amenities?: { amenityId: string; name: string; price: number }[];
+    amenities?: { amenityId: string; name: string; price: number; type?: string }[];
 }
 
 /**

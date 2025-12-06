@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { ReviewsService } from './reviews.service';
 import { AuthGuard } from '@nestjs/passport';
-import { UserRole } from '../users/entities/user.entity';
+import { UserRole } from '@common/enums/user.enum';
 import { IsString, IsNumber, IsEnum, Min, Max, MinLength, IsOptional, MaxLength } from 'class-validator';
 
 export class CreateCoachReviewDto {

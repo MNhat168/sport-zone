@@ -5,10 +5,9 @@ import { CreateWalletDto } from './dto/create-wallet.dto';
 import { AdjustWalletBalanceDto } from './dto/adjust-wallet-balance.dto';
 import { 
   Wallet, 
-  WalletDocument, 
-  WalletStatus, 
-  WalletRole 
+  WalletDocument
 } from './entities/wallet.entity';
+import { WalletStatus, WalletRole } from '@common/enums/wallet.enum';
 import {
   FieldOwnerWalletDto,
   UserWalletDto,

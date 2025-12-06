@@ -31,6 +31,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { FieldOwnerService } from './field-owner.service';
+import { FieldsService } from '../fields/fields.service';
 import { AwsS3Service } from '../../service/aws-s3.service';
 import {
   CreateFieldDto,
@@ -39,6 +40,7 @@ import {
   OwnerFieldsResponseDto,
   UpdateFieldDto,
 } from '../fields/dtos/fields.dto';
+import { UpdateFieldVerificationDto } from '../fields/dtos/update-field-verification.dto';
 import {
   CreateFieldOwnerProfileDto,
   FieldOwnerProfileDto,
@@ -60,8 +62,8 @@ import type { IFile } from '../../interfaces/file.interface';
 import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { Roles } from 'src/decorators/roles.decorator';
-import { UserRole } from '../users/entities/user.entity';
-import { BankAccountStatus } from './entities/bank-account.entity';
+import { UserRole } from '@common/enums/user.enum';
+import { BankAccountStatus } from '@common/enums/bank-account.enum';
 import { EkycService } from '../ekyc/ekyc.service';
 import {
   CreateEkycSessionDto,
@@ -76,6 +78,7 @@ export class FieldOwnerController {
 
   constructor(
     private readonly fieldOwnerService: FieldOwnerService,
+    private readonly fieldsService: FieldsService,
     private readonly awsS3Service: AwsS3Service,
     private readonly ekycService: EkycService,
   ) {}
@@ -690,6 +693,19 @@ export class FieldOwnerController {
       dto.notes,
       dto.rejectionReason,
     );
+  }
+
+  @UseGuards(JwtAccessTokenGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Patch('admin/fields/:id/verify')
+  @ApiOperation({ summary: 'Admin: update field verification status' })
+  @ApiParam({ name: 'id', description: 'Field ID' })
+  @ApiResponse({ status: 200, description: 'Field verification updated successfully', type: FieldsDto })
+  async updateFieldVerification(
+    @Param('id') fieldId: string,
+    @Body() dto: UpdateFieldVerificationDto,
+  ): Promise<FieldsDto> {
+    return this.fieldsService.updateFieldVerification(fieldId, dto.isAdminVerify);
   }
 }
 

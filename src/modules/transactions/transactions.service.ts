@@ -2,7 +2,8 @@ import { Injectable, Logger, BadRequestException, NotFoundException } from '@nes
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types, ClientSession } from 'mongoose';
-import { Transaction, TransactionStatus, TransactionType } from './entities/transaction.entity';
+import { Transaction } from './entities/transaction.entity';
+import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 import * as crypto from 'crypto';
 import * as qs from 'qs';
@@ -33,13 +34,20 @@ export class TransactionsService {
    */
   async createPayment(data: CreatePaymentData, session?: ClientSession): Promise<Transaction> {
     try {
+      // Nếu là chuyển khoản ngân hàng (BANK_TRANSFER), mặc định set trạng thái thành SUCCEEDED
+      // để tránh nằm ở trạng thái pending không cần thiết (luồng upload chứng từ đã xử lý riêng).
+      const initialStatus =
+        data.method === PaymentMethod.BANK_TRANSFER
+          ? TransactionStatus.SUCCEEDED
+          : TransactionStatus.PENDING;
+
       const transaction = new this.transactionModel({
         booking: new Types.ObjectId(data.bookingId),
         user: new Types.ObjectId(data.userId),
         amount: data.amount,
         direction: 'in',
         method: data.method,
-        status: TransactionStatus.PENDING,
+        status: initialStatus,
         type: TransactionType.PAYMENT,
         notes: data.paymentNote || null,
         // ✅ CRITICAL: Store externalTransactionId for PayOS/VNPay lookup
@@ -60,6 +68,44 @@ export class TransactionsService {
     } catch (error) {
       this.logger.error('Error creating transaction', error);
       throw new BadRequestException('Failed to create transaction');
+    }
+  }
+
+  /**
+   * Tạo transaction xác thực tài khoản cho Coach (10k)
+   */
+  async createCoachBankVerificationTransaction(params: {
+    coachUserId: string;
+    coachProfileId: string;
+    bankAccountNumber: string;
+    bankName: string;
+    method: PaymentMethod;
+    amount?: number; // default 10000
+  }, session?: ClientSession): Promise<Transaction> {
+    const amount = params.amount ?? 10000;
+    try {
+      const tx = new this.transactionModel({
+        booking: undefined,
+        user: new Types.ObjectId(params.coachUserId),
+        amount,
+        direction: 'in',
+        method: params.method,
+        status: TransactionStatus.PENDING,
+        type: TransactionType.PAYMENT,
+        metadata: {
+          purpose: 'ACCOUNT_VERIFICATION',
+          targetRole: 'coach',
+          coachId: params.coachProfileId,
+          bankAccount: params.bankAccountNumber,
+          bankName: params.bankName,
+        },
+      });
+      const saved = session ? await tx.save({ session }) : await tx.save();
+      this.logger.log(`Created coach verification tx ${saved._id} for user ${params.coachUserId}`);
+      return saved;
+    } catch (err) {
+      this.logger.error('Error creating coach verification transaction', err);
+      throw new BadRequestException('Failed to create coach verification transaction');
     }
   }
 

@@ -1,6 +1,6 @@
 import { IsArray, IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator'
 import { Type } from 'class-transformer'
-import { TransactionStatus, TransactionType } from '../../transactions/entities/transaction.entity'
+import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum'
 import { PaymentMethod } from '../../../common/enums/payment-method.enum'
 
 export class ListTransactionsDto {

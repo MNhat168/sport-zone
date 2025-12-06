@@ -29,7 +29,7 @@ export function getCurrentVietnamTime(): Date {
  * - Nhưng giá trị lưu trong MongoDB luôn trùng với giờ Việt Nam khi nhìn bằng mắt
  */
 export function getCurrentVietnamTimeForDB(): Date {
-    return new Date(Date.now() + (7 * 60 * 60 * 1000));
+    return new Date(Date.now() + (8 * 60 * 60 * 1000));
 }
 
 /**

@@ -12,7 +12,7 @@ import {
   Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { RegistrationStatus } from '../entities/field-owner-registration-request.entity';
+import { RegistrationStatus } from '@common/enums/field-owner-registration.enum';
 import { SportType } from 'src/common/enums/sport-type.enum';
 
 class PersonalInfoDto {

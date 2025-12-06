@@ -1,13 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
-
-export enum ReservationStatus {
-  PENDING = 'pending', // Temporary hold
-  CONFIRMED = 'confirmed', // Converted to booking
-  RELEASED = 'released', // Cancelled due to low turnout
-  EXPIRED = 'expired', // Past deadline
-}
+import { ReservationStatus } from '@common/enums/tournament-field-reservation.enum';
 
 @Schema()
 export class TournamentFieldReservation extends BaseEntity {

@@ -1,12 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
-
-export enum RecommendationType {
-  FIELD = 'field',
-  COACH = 'coach',
-  TOURNAMENT = 'tournament',
-}
+import { RecommendationType } from '@common/enums/recommendation.enum';
 
 @Schema({
   timestamps: {

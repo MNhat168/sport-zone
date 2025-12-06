@@ -1,22 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
-
-export enum ReportType {
-  USER = 'user',
-  BOOKING = 'booking',
-  PAYMENT = 'payment',
-  REVIEW = 'review',
-  COACH = 'coach',
-  FIELD = 'field',
-}
-
-export enum ReportStatus {
-  OPEN = 'open',
-  IN_PROGRESS = 'in_progress',
-  RESOLVED = 'resolved',
-  CLOSED = 'closed',
-}
+import { ReportType, ReportStatus } from '@common/enums/report.enum';
 
 @Schema({
   timestamps: {

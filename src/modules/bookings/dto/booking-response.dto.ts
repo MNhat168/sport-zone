@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { BookingStatus, BookingType } from '../entities/booking.entity';
+import { BookingStatus, BookingType } from '@common/enums/booking.enum';
 
 /**
  * DTO cho response booking với Vietnam timezone

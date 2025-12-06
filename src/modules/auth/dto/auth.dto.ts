@@ -2,6 +2,50 @@ import { IsEmail, IsString, Length, IsPhoneNumber, IsDateString, IsOptional } fr
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
+ * DTO cho việc nhận (claim) tài khoản guest đã tạo bằng email khi đặt ẩn danh
+ */
+export class ClaimGuestDto {
+    @ApiProperty({
+        example: 'guest@example.com',
+        description: 'Email đã dùng để đặt sân (guest)',
+    })
+    @IsEmail({}, { message: 'Email không hợp lệ' })
+    email: string;
+
+    @ApiProperty({
+        example: 'Password123!',
+        description: 'Mật khẩu mới (6-50 ký tự)',
+        minLength: 6,
+        maxLength: 50,
+    })
+    @IsString()
+    @Length(6, 50, { message: 'Mật khẩu phải có độ dài từ 6-50 ký tự' })
+    password: string;
+
+    @ApiPropertyOptional({
+        example: 'Nguyễn Văn A',
+        description: 'Tên đầy đủ (tùy chọn, sẽ ghi đè nếu trống)',
+        minLength: 2,
+        maxLength: 50,
+    })
+    @IsOptional()
+    @IsString()
+    @Length(2, 50, { message: 'Tên phải có độ dài từ 2-50 ký tự' })
+    fullName?: string;
+
+    @ApiPropertyOptional({
+        example: '0123456789',
+        description: 'Số điện thoại (tùy chọn, 10 chữ số)',
+        minLength: 10,
+        maxLength: 10,
+    })
+    @IsOptional()
+    @IsString()
+    @Length(10, 10, { message: 'Số điện thoại phải có 10 chữ số' })
+    phone?: string;
+}
+
+/**
  * DTO cho việc đăng ký người dùng mới
  */
 export class RegisterDto {

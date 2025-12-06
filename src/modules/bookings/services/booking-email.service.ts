@@ -6,6 +6,7 @@ import { Field } from '../../fields/entities/field.entity';
 import { FieldOwnerProfile } from '../../field-owner/entities/field-owner-profile.entity';
 import { User } from '../../users/entities/user.entity';
 import { EmailService } from '../../email/email.service';
+import { EmailQueueService } from '../../email/email-queue.service';
 
 @Injectable()
 export class BookingEmailService {
@@ -17,6 +18,7 @@ export class BookingEmailService {
         @InjectModel(FieldOwnerProfile.name) private readonly fieldOwnerProfileModel: Model<FieldOwnerProfile>,
         @InjectModel(User.name) private readonly userModel: Model<User>,
         private readonly emailService: EmailService,
+        private readonly emailQueue: EmailQueueService,
     ) { }
 
     /**
@@ -81,21 +83,27 @@ export class BookingEmailService {
                 }
             }
 
-            // Send emails (non-blocking but awaited here for consistency)
+            // Enqueue emails to avoid blocking HTTP response
             if (ownerEmail) {
-                await this.emailService.sendFieldOwnerBookingNotification({
-                    ...emailPayloadBase,
-                    to: ownerEmail,
-                    preheader: 'Đặt sân thành công - Đơn mới',
-                }).catch(err => this.logger.warn('[BookingEmail] Owner email failed', err));
+                this.emailQueue.enqueue({
+                    type: 'FIELD_OWNER_BOOKING',
+                    payload: {
+                        ...emailPayloadBase,
+                        to: ownerEmail,
+                        preheader: 'Đặt sân thành công - Đơn mới',
+                    },
+                });
             }
 
             if (customerUser.email) {
-                await this.emailService.sendCustomerBookingConfirmation({
-                    ...emailPayloadBase,
-                    to: customerUser.email,
-                    preheader: 'Đặt sân thành công',
-                }).catch(err => this.logger.warn('[BookingEmail] Customer email failed', err));
+                this.emailQueue.enqueue({
+                    type: 'CUSTOMER_BOOKING',
+                    payload: {
+                        ...emailPayloadBase,
+                        to: customerUser.email,
+                        preheader: 'Đặt sân thành công',
+                    },
+                });
             }
         } catch (err) {
             this.logger.warn('[BookingEmail] Failed to send confirmation emails', err);

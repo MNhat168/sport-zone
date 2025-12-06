@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { ChatRoom, Message, ChatStatus, MessageType } from './entities/chat.entity';
+import { ChatRoom, Message } from './entities/chat.entity';
+import { ChatStatus, MessageType } from '@common/enums/chat.enum';
 import { User } from '../users/entities/user.entity';
 import { FieldOwnerProfile } from '../field-owner/entities/field-owner-profile.entity';
 import { Field } from '../fields/entities/field.entity';

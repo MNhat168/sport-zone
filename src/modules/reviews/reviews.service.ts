@@ -1,8 +1,10 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ClientSession } from 'mongoose';
-import { Review, ReviewType } from './entities/review.entity';
-import { Booking, BookingType } from '../bookings/entities/booking.entity';
+import { Review } from './entities/review.entity';
+import { ReviewType } from '@common/enums/review.enum';
+import { Booking } from '../bookings/entities/booking.entity';
+import { BookingType } from '@common/enums/booking.enum';
 import { CoachProfile } from 'src/modules/coaches/entities/coach-profile.entity';
 
 @Injectable()

@@ -3,7 +3,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Schedule } from '../../schedules/entities/schedule.entity';
 import { Field } from '../../fields/entities/field.entity';
-import { Booking, BookingStatus } from '../entities/booking.entity';
+import { Booking } from '../entities/booking.entity';
+import { BookingStatus } from '@common/enums/booking.enum';
 import { FieldAvailabilityQueryDto } from '../dto/create-field-booking-lazy.dto';
 
 /**
@@ -222,12 +223,14 @@ export class AvailabilityService {
    */
   async getExistingBookingsForDate(fieldId: string, date: Date): Promise<Booking[]> {
     try {
-      // Normalize date to start/end of day in Vietnam timezone (UTC+7)
+      // ✅ CRITICAL: Normalize date using UTC methods to avoid server timezone issues
+      // setHours() uses LOCAL timezone → wrong on Singapore server (UTC+8)
+      // Must use setUTCHours() to ensure consistency with how dates are stored
 const startOfDay = new Date(date);
-startOfDay.setHours(0, 0, 0, 0); // Start of local day (Vietnam)
+startOfDay.setUTCHours(0, 0, 0, 0); // Start of UTC day
 
 const endOfDay = new Date(date);
-endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
+endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
 
       // Query Booking collection for confirmed and pending bookings
       const bookings = await this.bookingModel.find({
@@ -407,7 +410,7 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
   /**
    * Convert time string (HH:MM) to minutes since midnight
    */
-  private timeStringToMinutes(timeString: string): number {
+  timeStringToMinutes(timeString: string): number {
     const [hours, minutes] = timeString.split(':').map(Number);
     return hours * 60 + minutes;
   }
@@ -415,7 +418,7 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
   /**
    * Convert minutes since midnight to time string (HH:MM)
    */
-  private minutesToTimeString(minutes: number): string {
+  minutesToTimeString(minutes: number): string {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
@@ -424,7 +427,7 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
   /**
    * Get day of week from date
    */
-  private getDayOfWeek(date: Date): string {
+  getDayOfWeek(date: Date): string {
     const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
     return days[date.getDay()];
   }

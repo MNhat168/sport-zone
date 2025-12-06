@@ -2,7 +2,7 @@ import { Controller, Post, Body, BadRequestException, UseGuards, Get, Query, Res
 import { AuthService } from './auth.service';
 import { Inject } from '@nestjs/common';
 import { SignInTokenDto } from './dto/sign-in-token.dto';
-import { RegisterDto, LoginDto, VerifyAccountDto, ForgotPasswordDto, ResetPasswordDto, LoginWithRememberDto } from './dto/auth.dto';
+import { RegisterDto, LoginDto, VerifyAccountDto, ForgotPasswordDto, ResetPasswordDto, LoginWithRememberDto, ClaimGuestDto } from './dto/auth.dto';
 import { HttpStatus } from '@nestjs/common';
 import { JwtRefreshTokenGuard } from './guards/jwt-refresh-token.guard';
 import { JwtAccessTokenGuard } from './guards/jwt-access-token.guard';
@@ -206,6 +206,23 @@ export class AuthController {
   })
   async register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
+  }
+
+  /**
+   * Claim tài khoản guest (đặt mật khẩu cho email đã đặt sân ẩn danh)
+   */
+  @Post('claim-guest')
+  @ApiOperation({ summary: 'Thiết lập mật khẩu cho tài khoản guest (email đã dùng khi đặt sân)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Thiết lập mật khẩu thành công',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Email chưa tồn tại hoặc đã có tài khoản',
+  })
+  async claimGuest(@Body() dto: ClaimGuestDto) {
+    return this.authService.claimGuestAccount(dto);
   }
 
   /**

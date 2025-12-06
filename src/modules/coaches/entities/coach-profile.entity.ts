@@ -36,8 +36,42 @@ export class CoachProfile extends BaseEntity {
   @Prop({ type: String, default: 'novice' })
   rank?: string;
 
-  @Prop({ type: String, default: '', required: false })
-  location?: string;
+  // Location with geo coordinates (similar to Field entity)
+  @Prop({
+    _id: false,
+    type: {
+      address: { type: String, required: false },
+      geo: {
+        type: {
+          type: String,
+          enum: ['Point'],
+          required: false,
+        },
+        coordinates: {
+          type: [Number],
+          required: false,
+        },
+      },
+    },
+    required: false,
+  })
+  location?: {
+    address?: string;
+    geo?: {
+      type: 'Point';
+      coordinates: [number, number]; // [longitude, latitude]
+    };
+  };
+
+  // Xác thực tài khoản ngân hàng
+  @Prop({ type: Boolean, default: false })
+  bankVerified?: boolean;
+
+  @Prop({ type: Date, required: false })
+  bankVerifiedAt?: Date;
 }
 
 export const CoachProfileSchema = SchemaFactory.createForClass(CoachProfile);
+
+// Create 2dsphere index for geo queries
+CoachProfileSchema.index({ 'location.geo': '2dsphere' });

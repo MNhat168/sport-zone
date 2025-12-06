@@ -29,7 +29,7 @@ import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
 import { USER_REPOSITORY } from './interface/users.interface';
 import { Multer } from 'multer';
 import { AuthGuard } from '@nestjs/passport';
-import { UserRole } from './entities/user.entity';
+import { UserRole } from '@common/enums/user.enum';
 import { SetFavouriteSportsDto } from './dto/set-favourite-sports.dto';
 import { SetFavouriteCoachesDto } from './dto/set-favourite-coaches.dto';
 import { SetFavouriteFieldsDto } from './dto/set-favourite-fields.dto';

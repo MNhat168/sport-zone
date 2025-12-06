@@ -4,8 +4,8 @@ import { BaseEntity } from 'src/common/entities/base.entity';
 
 @Schema()
 export class Schedule extends BaseEntity {
-  @Prop({ type: Types.ObjectId, ref: 'Field', required: true }) // Làm required để tránh conflict thiếu field
-  field: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Field', required: false }) // Optional for coach schedules without field
+  field?: Types.ObjectId;
 
   @Prop({ type: Types.ObjectId, ref: 'CoachProfile' })
   coach?: Types.ObjectId;
@@ -38,4 +38,6 @@ export class Schedule extends BaseEntity {
 // Create compound index for efficient queries and upserts
 export const ScheduleSchema = SchemaFactory.createForClass(Schedule);
 ScheduleSchema.index({ field: 1, date: 1 }, { unique: true });
+// Index for coach schedules (coach + date should be unique)
+ScheduleSchema.index({ coach: 1, date: 1 }, { unique: true, sparse: true });
 

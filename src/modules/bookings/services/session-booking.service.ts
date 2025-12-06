@@ -2,7 +2,8 @@ import { Injectable, NotFoundException, BadRequestException, Logger, InternalSer
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Booking, BookingStatus, BookingType } from '../entities/booking.entity';
+import { Booking } from '../entities/booking.entity';
+import { BookingStatus, BookingType } from '@common/enums/booking.enum';
 import { CoachesService } from '../../coaches/coaches.service';
 import { FieldsService } from '../../fields/fields.service';
 import {

@@ -1,20 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
+import { WalletStatus, WalletRole } from '@common/enums/wallet.enum';
 
 export type WalletDocument = HydratedDocument<Wallet>;
-
-export enum WalletStatus {
-  ACTIVE = 'active',
-  SUSPENDED = 'suspended',
-  CLOSED = 'closed',
-}
-
-export enum WalletRole {
-  ADMIN = 'admin',
-  FIELD_OWNER = 'field_owner',
-  USER = 'user',
-}
 
 /**
  * Wallet Entity V2

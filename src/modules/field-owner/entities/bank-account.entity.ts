@@ -1,19 +1,19 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { FieldOwnerProfile } from './field-owner-profile.entity';
+import { CoachProfile } from '../../coaches/entities/coach-profile.entity';
 import { User } from '../../users/entities/user.entity';
 import { BaseEntity } from 'src/common/entities/base.entity';
-
-export enum BankAccountStatus {
-  PENDING = 'pending',
-  VERIFIED = 'verified',
-  REJECTED = 'rejected',
-}
+import { BankAccountStatus } from '@common/enums/bank-account.enum';
 
 @Schema()
 export class BankAccount extends BaseEntity {
-  @Prop({ type: Types.ObjectId, ref: 'FieldOwnerProfile', required: true, index: true })
-  fieldOwner: Types.ObjectId;
+  // Owner can be either FieldOwner or Coach (only one should be set)
+  @Prop({ type: Types.ObjectId, ref: 'FieldOwnerProfile', index: true })
+  fieldOwner?: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'CoachProfile', index: true })
+  coach?: Types.ObjectId;
 
   @Prop({ required: true })
   accountName: string;
@@ -79,13 +79,35 @@ export class BankAccount extends BaseEntity {
 
   @Prop({ type: String })
   verificationQrCode?: string; // Payment QR Code URL
+
+  // QR Code URL for bank transfer (used for coach bookings)
+  @Prop({ type: String })
+  qrCodeUrl?: string; // QR Code URL for payment
 }
 
 export const BankAccountSchema = SchemaFactory.createForClass(BankAccount);
 
+// Validation: Ensure either fieldOwner or coach is set, but not both
+BankAccountSchema.pre('validate', function(next) {
+  const hasFieldOwner = !!this.fieldOwner;
+  const hasCoach = !!this.coach;
+  
+  if (!hasFieldOwner && !hasCoach) {
+    return next(new Error('Either fieldOwner or coach must be set'));
+  }
+  
+  if (hasFieldOwner && hasCoach) {
+    return next(new Error('Cannot set both fieldOwner and coach'));
+  }
+  
+  next();
+});
+
 // Indexes
 BankAccountSchema.index({ fieldOwner: 1, status: 1 });
+BankAccountSchema.index({ coach: 1, status: 1 });
 BankAccountSchema.index({ status: 1 });
 BankAccountSchema.index({ fieldOwner: 1, isDefault: 1 });
+BankAccountSchema.index({ coach: 1, isDefault: 1 });
 BankAccountSchema.index({ verificationOrderCode: 1 }); // For webhook lookup
 

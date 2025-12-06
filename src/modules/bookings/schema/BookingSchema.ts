@@ -8,9 +8,20 @@ export const BookingSchema = SchemaFactory.createForClass(Booking);
 // Thêm pre-save hook để validate numSlots và start/end time
 // Lý do: Validate slot hợp lệ để ngăn lỗi booking không khớp với field constraints
 BookingSchema.pre('save', async function (this: HydratedDocument<Booking>, next) {
-    // Since we use Pure Lazy Creation, field is directly referenced, no need to check schedule
+    // Skip field validation for coach bookings without field
+    // Field is optional for coach bookings, required for field bookings
     if (!this.field) {
-        return next(new Error('Field is required'));
+        // For coach bookings without field, use default slotDuration (60 minutes)
+        if (this.type === 'coach') {
+            const startMin = timeToMinutes(this.startTime);
+            const endMin = timeToMinutes(this.endTime);
+            const defaultSlotDuration = 60; // 60 minutes default
+            const calculatedNumSlots = (endMin - startMin) / defaultSlotDuration;
+            this.numSlots = Math.round(calculatedNumSlots); // Auto-set numSlots
+            return next();
+        }
+        // Field bookings still require field
+        return next(new Error('Field is required for field bookings'));
     }
 
     const field = await this.model('Field').findById(this.field) as HydratedDocument<any> & { slotDuration: number; minSlots: number; maxSlots: number };

@@ -16,9 +16,10 @@ import { Field } from '../fields/entities/field.entity';
 import { FieldOwnerProfile } from './entities/field-owner-profile.entity';
 import {
   FieldOwnerRegistrationRequest,
-  RegistrationStatus,
 } from './entities/field-owner-registration-request.entity';
-import { BankAccount, BankAccountStatus } from './entities/bank-account.entity';
+import { RegistrationStatus } from '@common/enums/field-owner-registration.enum';
+import { BankAccount } from './entities/bank-account.entity';
+import { BankAccountStatus } from '@common/enums/bank-account.enum';
 import {
   FieldsDto,
   CreateFieldDto,
@@ -45,9 +46,11 @@ import {
 import { AwsS3Service } from '../../service/aws-s3.service';
 import type { IFile } from '../../interfaces/file.interface';
 import { Booking } from '../bookings/entities/booking.entity';
-import { User, UserRole } from '../users/entities/user.entity';
+import { User } from '../users/entities/user.entity';
+import { UserRole } from '@common/enums/user.enum';
 import { PriceFormatService } from '../../service/price-format.service';
-import { Transaction, TransactionStatus, TransactionType } from '../transactions/entities/transaction.entity';
+import { Transaction } from '../transactions/entities/transaction.entity';
+import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum';
 import { PayOSService } from '../transactions/payos.service';
 import { EmailService } from '../email/email.service';
 import { FieldsService } from '../fields/fields.service';
@@ -169,6 +172,7 @@ export class FieldOwnerService {
           basePrice: field.basePrice,
           price,
           isActive: field.isActive,
+          isAdminVerify: field.isAdminVerify ?? false,
           maintenanceNote: field.maintenanceNote,
           maintenanceUntil: field.maintenanceUntil,
           rating: field.rating,
@@ -552,6 +556,7 @@ export class FieldOwnerService {
         priceRanges: savedField.priceRanges,
         basePrice: savedField.basePrice,
         isActive: savedField.isActive,
+        isAdminVerify: savedField.isAdminVerify ?? false,
         maintenanceNote: savedField.maintenanceNote,
         maintenanceUntil: savedField.maintenanceUntil,
         rating: savedField.rating,
@@ -712,6 +717,7 @@ export class FieldOwnerService {
         priceRanges: savedField.priceRanges,
         basePrice: savedField.basePrice,
         isActive: savedField.isActive,
+        isAdminVerify: savedField.isAdminVerify ?? false,
         maintenanceNote: savedField.maintenanceNote,
         maintenanceUntil: savedField.maintenanceUntil,
         rating: savedField.rating,
@@ -790,6 +796,7 @@ export class FieldOwnerService {
         priceRanges: updatedField.priceRanges,
         basePrice: updatedField.basePrice,
         isActive: updatedField.isActive,
+        isAdminVerify: updatedField.isAdminVerify ?? false,
         maintenanceNote: updatedField.maintenanceNote,
         maintenanceUntil: updatedField.maintenanceUntil,
         rating: updatedField.rating,
@@ -850,11 +857,12 @@ export class FieldOwnerService {
       throw new UnauthorizedException('You are not the owner of this field');
     }
 
+    // ✅ CRITICAL: Use UTC methods to normalize date
     const effectiveDateMidnight = new Date(effectiveDate);
-    effectiveDateMidnight.setHours(0, 0, 0, 0);
+    effectiveDateMidnight.setUTCHours(0, 0, 0, 0);
 
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    today.setUTCHours(0, 0, 0, 0);
     if (effectiveDateMidnight <= today) {
       throw new BadRequestException('effectiveDate must be in the future (after today)');
     }
@@ -890,8 +898,9 @@ export class FieldOwnerService {
     const field = await this.fieldModel.findById(fieldId);
     if (!field) return false;
 
+    // ✅ CRITICAL: Use UTC methods to normalize date
     const effectiveDateMidnight = new Date(effectiveDate);
-    effectiveDateMidnight.setHours(0, 0, 0, 0);
+    effectiveDateMidnight.setUTCHours(0, 0, 0, 0);
 
     if (!field.pendingPriceUpdates) {
       field.pendingPriceUpdates = [];

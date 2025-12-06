@@ -1,4 +1,4 @@
-import { UserRole } from 'src/modules/users/entities/user.entity';
+import { UserRole } from '@common/enums/user.enum';
 
 export class UserRoleStatDto {
     role: UserRole;

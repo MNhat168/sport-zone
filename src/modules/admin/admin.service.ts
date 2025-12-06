@@ -1,13 +1,17 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model } from 'mongoose';
-import { User, UserDocument, UserRole } from 'src/modules/users/entities/user.entity';
-import { Transaction, TransactionDocument, TransactionStatus } from 'src/modules/transactions/entities/transaction.entity';
+import { User, UserDocument } from 'src/modules/users/entities/user.entity';
+import { UserRole } from '@common/enums/user.enum';
+import { Transaction, TransactionDocument } from 'src/modules/transactions/entities/transaction.entity';
+import { TransactionStatus } from '@common/enums/transaction.enum';
 import { Booking, BookingDocument } from '../bookings/entities/booking.entity';
 import { UserRoleStatDto, UserMonthlyStatsDto } from './dto/user.dto';
 import { BookingMonthlyStatsDto } from './dto/booking.dto';
 import { ListTransactionsDto } from './dto/list-transactions.dto';
+import { ListBookingsDto } from './dto/list-bookings.dto';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
+import { BookingStatus, BookingType } from '@common/enums/booking.enum';
 @Injectable()
 export class AdminService {
     constructor(
@@ -461,6 +465,97 @@ export class AdminService {
                 })
                 .lean(),
             this.transactionModel.countDocuments(filter),
+        ]);
+
+        const totalPages = Math.ceil(total / limit) || 1;
+        return {
+            data,
+            total,
+            page,
+            limit,
+            totalPages,
+            hasNextPage: page < totalPages,
+            hasPrevPage: page > 1,
+        };
+    }
+
+    // ==============================
+    // Bookings listing (Admin)
+    // ==============================
+    async listBookings(query: ListBookingsDto) {
+        const {
+            search,
+            status,
+            type,
+            paymentStatus,
+            approvalStatus,
+            startDate,
+            endDate,
+            page = 1,
+            limit = 10,
+            sortBy = 'createdAt',
+            sortOrder = 'desc',
+        } = query;
+
+        const filter: FilterQuery<BookingDocument> = {};
+
+        if (status && status.length > 0) {
+            filter.status = { $in: status } as any;
+        }
+        if (type && type.length > 0) {
+            filter.type = { $in: type } as any;
+        }
+        if (paymentStatus && paymentStatus.length > 0) {
+            filter.paymentStatus = { $in: paymentStatus } as any;
+        }
+        if (approvalStatus && approvalStatus.length > 0) {
+            filter.approvalStatus = { $in: approvalStatus } as any;
+        }
+        if (startDate || endDate) {
+            filter.date = { ...filter.date } as any;
+            if (startDate) (filter.date as any).$gte = new Date(startDate);
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                (filter.date as any).$lte = end;
+            }
+        }
+        if (search && search.trim().length > 0) {
+            const searchTerm = search.trim();
+            const regex = new RegExp(searchTerm, 'i');
+            // Try to match ObjectId if search term looks like one
+            const isObjectId = /^[0-9a-fA-F]{24}$/.test(searchTerm);
+            filter.$or = [
+                { note: regex },
+                ...(isObjectId ? [{ _id: searchTerm }] : []),
+            ] as any;
+        }
+
+        const sort: Record<string, 1 | -1> = { [sortBy]: sortOrder === 'asc' ? 1 : -1 };
+
+        const skip = (page - 1) * limit;
+
+        const [data, total] = await Promise.all([
+            this.bookingModel
+                .find(filter)
+                .sort(sort)
+                .skip(skip)
+                .limit(limit)
+                .populate('user', 'fullName email')
+                .populate({
+                    path: 'field',
+                    select: 'name sportType address',
+                })
+                .populate({
+                    path: 'requestedCoach',
+                    select: 'fullName',
+                })
+                .populate({
+                    path: 'transaction',
+                    select: '_id amount status method',
+                })
+                .lean(),
+            this.bookingModel.countDocuments(filter),
         ]);
 
         const totalPages = Math.ceil(total / limit) || 1;

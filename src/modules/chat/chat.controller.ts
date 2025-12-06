@@ -12,7 +12,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ChatService } from './chat.service';
 import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
-import { ChatStatus } from './entities/chat.entity';
+import { ChatStatus } from '@common/enums/chat.enum';
 
 @ApiTags('Chat')
 @Controller('chat')

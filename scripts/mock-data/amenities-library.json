@@ -66,14 +66,6 @@
     "type": "other"
   },
   {
-    "name": "Huấn luyện viên Tennis",
-    "description": "HLV có chứng chỉ, kinh nghiệm > 5 năm.",
-    "sportType": "tennis",
-    "isActive": true,
-    "imageUrl": "https://picsum.photos/seed/tenniscoach/400/300",
-    "type": "coach"
-  },
-  {
     "name": "Cho thuê vợt cầu lông",
     "description": "Vợt dành cho người mới chơi và chuyên nghiệp.",
     "sportType": "badminton",
@@ -88,14 +80,6 @@
     "isActive": true,
     "imageUrl": "https://picsum.photos/seed/shuttlecock/400/300",
     "type": "other"
-  },
-  {
-    "name": "Huấn luyện viên cầu lông",
-    "description": "Dạy kèm kỹ thuật cơ bản và nâng cao cho mọi lứa tuổi.",
-    "sportType": "badminton",
-    "isActive": true,
-    "imageUrl": "https://picsum.photos/seed/badmintoncoach/400/300",
-    "type": "coach"
   },
   {
     "name": "Cho thuê bóng đá",
@@ -122,36 +106,12 @@
     "type": "other"
   },
   {
-    "name": "Huấn luyện viên bóng rổ",
-    "description": "HLV hướng dẫn kỹ thuật ném, dẫn bóng và chiến thuật.",
-    "sportType": "basketball",
-    "isActive": true,
-    "imageUrl": "https://picsum.photos/seed/basketballcoach/400/300",
-    "type": "coach"
-  },
-  {
     "name": "Cho thuê phao bơi và ván tập",
     "description": "Dụng cụ hỗ trợ cho trẻ em và người mới tập bơi.",
     "sportType": "swimming",
     "isActive": true,
     "imageUrl": "https://picsum.photos/seed/swimfloat/400/300",
     "type": "other"
-  },
-  {
-    "name": "Huấn luyện viên Bơi lội",
-    "description": "HLV dạy kèm cho trẻ em và người lớn, đảm bảo an toàn.",
-    "sportType": "swimming",
-    "isActive": true,
-    "imageUrl": "https://picsum.photos/seed/swimmingcoach/400/300",
-    "type": "coach"
-  },
-  {
-    "name": "Huấn luyện viên Gym (PT)",
-    "description": "PT xây dựng lộ trình tập luyện và dinh dưỡng cá nhân hóa.",
-    "sportType": "gym",
-    "isActive": true,
-    "imageUrl": "https://picsum.photos/seed/gympt/400/300",
-    "type": "coach"
   },
   {
     "name": "Dịch vụ đo chỉ số InBody",
@@ -176,5 +136,239 @@
     "isActive": true,
     "imageUrl": "https://picsum.photos/seed/pickleballracket/400/300",
     "type": "other"
+  },
+  {
+    "name": "Quầy bar & Nước giải khát",
+    "description": "Quầy bar phục vụ nước giải khát, nước ngọt, bia và đồ uống có cồn.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/bar/400/300",
+    "type": "drink"
+  },
+  {
+    "name": "Cà phê & Trà",
+    "description": "Phục vụ cà phê, trà đá, trà sữa và các loại đồ uống nóng.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/coffee/400/300",
+    "type": "drink"
+  },
+  {
+    "name": "Nước dừa tươi",
+    "description": "Nước dừa tươi mát lạnh, bổ sung điện giải tự nhiên.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/coconut/400/300",
+    "type": "drink"
+  },
+  {
+    "name": "Sinh tố & Nước ép trái cây",
+    "description": "Sinh tố và nước ép trái cây tươi, giàu vitamin.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/smoothie/400/300",
+    "type": "drink"
+  },
+  {
+    "name": "Khu vực nghỉ ngơi",
+    "description": "Khu vực nghỉ ngơi có ghế ngồi, quạt mát, không gian thoáng đãng.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/restarea/400/300",
+    "type": "facility"
+  },
+  {
+    "name": "WiFi miễn phí",
+    "description": "Kết nối WiFi tốc độ cao miễn phí cho khách hàng.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/wifi/400/300",
+    "type": "facility"
+  },
+  {
+    "name": "Hệ thống loa & Âm thanh",
+    "description": "Hệ thống loa chất lượng cao, có thể phát nhạc theo yêu cầu.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/sound/400/300",
+    "type": "facility"
+  },
+  {
+    "name": "Máy lạnh & Quạt",
+    "description": "Hệ thống làm mát hiện đại, đảm bảo không gian mát mẻ.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/aircon/400/300",
+    "type": "facility"
+  },
+  {
+    "name": "Camera an ninh",
+    "description": "Hệ thống camera giám sát 24/7, đảm bảo an ninh cho tài sản.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/camera/400/300",
+    "type": "facility"
+  },
+  {
+    "name": "Khu vực để đồ",
+    "description": "Khu vực để đồ an toàn, có người trông coi.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/storage/400/300",
+    "type": "facility"
+  },
+  {
+    "name": "Máy bán hàng tự động",
+    "description": "Máy bán nước uống, snack tự động, thanh toán bằng thẻ hoặc tiền mặt.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/vending/400/300",
+    "type": "facility"
+  },
+  {
+    "name": "Cho thuê giày thể thao",
+    "description": "Giày thể thao đa dạng size, chất lượng tốt, vệ sinh sau mỗi lần sử dụng.",
+    "sportType": "football",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/footballshoes/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Cho thuê bảo vệ ống chân",
+    "description": "Bảo vệ ống chân đầy đủ size, đảm bảo an toàn khi thi đấu.",
+    "sportType": "football",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/shinguard/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Cho thuê găng tay thủ môn",
+    "description": "Găng tay thủ môn chuyên nghiệp, nhiều size.",
+    "sportType": "football",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/goalkeepergloves/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Cho thuê bóng tennis",
+    "description": "Bóng tennis mới, đúng tiêu chuẩn thi đấu.",
+    "sportType": "tennis",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/tennisball/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Cho thuê giày tennis",
+    "description": "Giày tennis chuyên dụng, nhiều size.",
+    "sportType": "tennis",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/tennisshoes/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Cho thuê băng cố định khớp",
+    "description": "Băng cố định khớp gối, cổ chân, khuỷu tay.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/tape/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Dịch vụ massage & Xoa bóp",
+    "description": "Dịch vụ massage sau tập luyện, giảm đau cơ, thư giãn.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/massage/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Cho thuê khăn tắm",
+    "description": "Khăn tắm sạch sẽ, được giặt và khử trùng sau mỗi lần sử dụng.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/towel/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Dịch vụ giặt ủi",
+    "description": "Dịch vụ giặt và ủi quần áo thể thao, lấy ngay trong ngày.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/laundry/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Cho thuê kính bơi",
+    "description": "Kính bơi chống nước, nhiều size, phù hợp cho trẻ em và người lớn.",
+    "sportType": "swimming",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/goggles/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Cho thuê mũ bơi",
+    "description": "Mũ bơi chống thấm nước, nhiều màu sắc.",
+    "sportType": "swimming",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/swimcap/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Cho thuê bóng chuyền hơi",
+    "description": "Bóng chuyền hơi nhẹ, phù hợp cho người mới chơi và trẻ em.",
+    "sportType": "volleyball",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/volleyballsoft/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Cho thuê bóng rổ size 6",
+    "description": "Bóng rổ size 6 dành cho trẻ em và phụ nữ.",
+    "sportType": "basketball",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/basketball6/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Cho thuê bóng rổ size 5",
+    "description": "Bóng rổ size 5 dành cho trẻ nhỏ.",
+    "sportType": "basketball",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/basketball5/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Dịch vụ sửa chữa dụng cụ",
+    "description": "Sửa chữa vợt, bơm bóng, vá bóng và các dụng cụ thể thao khác.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/repair/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Bán phụ kiện thể thao",
+    "description": "Bán băng cố định, băng gối, đai lưng và các phụ kiện thể thao khác.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/accessories/400/300",
+    "type": "other"
+  },
+  {
+    "name": "Khu vực tập luyện riêng",
+    "description": "Khu vực tập luyện riêng tư, có gương và không gian rộng rãi.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/practiceroom/400/300",
+    "type": "facility"
+  },
+  {
+    "name": "Sân tập phụ",
+    "description": "Sân tập phụ nhỏ hơn, phù hợp cho tập luyện cá nhân hoặc nhóm nhỏ.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/practicecourt/400/300",
+    "type": "facility"
+  },
+  {
+    "name": "Hệ thống đèn LED",
+    "description": "Hệ thống đèn LED hiện đại, đảm bảo ánh sáng tốt cho thi đấu ban đêm.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/ledlight/400/300",
+    "type": "facility"
+  },
+  {
+    "name": "Màn hình hiển thị điểm số",
+    "description": "Màn hình LED hiển thị điểm số, thời gian và thông tin trận đấu.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/scoreboard/400/300",
+    "type": "facility"
+  },
+  {
+    "name": "Khu vực cổ vũ",
+    "description": "Khu vực có ghế ngồi cho khán giả, có mái che.",
+    "isActive": true,
+    "imageUrl": "https://picsum.photos/seed/spectator/400/300",
+    "type": "facility"
   }
 ]

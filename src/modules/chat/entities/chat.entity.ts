@@ -4,19 +4,7 @@ import { BaseEntity } from 'src/common/entities/base.entity';
 import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
 import { User } from '../../users/entities/user.entity';
 import { Field } from '../../fields/entities/field.entity';
-
-export enum MessageType {
-  TEXT = 'text',
-  IMAGE = 'image',
-  FILE = 'file',
-  SYSTEM = 'system',
-}
-
-export enum ChatStatus {
-  ACTIVE = 'active',
-  RESOLVED = 'resolved',
-  ARCHIVED = 'archived',
-}
+import { MessageType, ChatStatus } from '@common/enums/chat.enum';
 
 @Schema()
 export class Message {

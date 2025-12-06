@@ -42,6 +42,9 @@ export class Field extends BaseEntity {
   @Prop({ type: Boolean, default: true })
   isActive: boolean;
 
+  @Prop({ type: Boolean, default: false })
+  isAdminVerify: boolean;
+
   @Prop({ type: String })
   maintenanceNote?: string;
 

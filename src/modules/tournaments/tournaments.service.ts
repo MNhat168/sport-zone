@@ -1,10 +1,13 @@
 import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Tournament, TournamentStatus } from './entities/tournament.entity';
-import { TournamentFieldReservation, ReservationStatus } from './entities/tournament-field-reservation.entity';
+import { Tournament } from './entities/tournament.entity';
+import { TournamentStatus } from '@common/enums/tournament.enum';
+import { TournamentFieldReservation } from './entities/tournament-field-reservation.entity';
+import { ReservationStatus } from '@common/enums/tournament-field-reservation.enum';
 import { Field } from '../fields/entities/field.entity';
-import { Transaction, TransactionStatus, TransactionType } from '../transactions/entities/transaction.entity';
+import { Transaction } from '../transactions/entities/transaction.entity';
+import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum';
 import { User } from '../users/entities/user.entity'; // Add User import
 import { CreateTournamentDto, RegisterTournamentDto } from './dto/create-tournament.dto';
 import { SPORT_RULES_MAP, TeamSizeMap, calculateParticipants } from 'src/common/enums/sport-type.enum';

@@ -5,8 +5,10 @@ import { Model, Types } from 'mongoose';
 import { FieldsDto, CreateFieldDto, UpdateFieldDto, CreateFieldWithFilesDto } from './dtos/fields.dto';
 import { FieldOwnerProfileDto, CreateFieldOwnerProfileDto, UpdateFieldOwnerProfileDto } from '../field-owner/dtos/field-owner-profile.dto';
 import { FieldOwnerProfile } from '../field-owner/entities/field-owner-profile.entity';
-import { FieldOwnerRegistrationRequest, RegistrationStatus } from '../field-owner/entities/field-owner-registration-request.entity';
-import { BankAccount, BankAccountStatus } from '../field-owner/entities/bank-account.entity';
+import { FieldOwnerRegistrationRequest } from '../field-owner/entities/field-owner-registration-request.entity';
+import { RegistrationStatus } from '@common/enums/field-owner-registration.enum';
+import { BankAccount } from '../field-owner/entities/bank-account.entity';
+import { BankAccountStatus } from '@common/enums/bank-account.enum';
 import { CreateFieldOwnerRegistrationDto, FieldOwnerRegistrationResponseDto, ApproveFieldOwnerRegistrationDto, RejectFieldOwnerRegistrationDto } from '../field-owner/dtos/field-owner-registration.dto';
 import { CreateBankAccountDto, BankAccountResponseDto, UpdateBankAccountStatusDto } from '../field-owner/dtos/bank-account.dto';
 import { AwsS3Service } from '../../service/aws-s3.service';
@@ -14,7 +16,8 @@ import type { IFile } from '../../interfaces/file.interface';
 // Import Schedule and Booking models for availability checking
 import { Schedule } from '../schedules/entities/schedule.entity';
 import { Booking } from '../bookings/entities/booking.entity';
-import { User, UserRole } from '../users/entities/user.entity';
+import { User } from '../users/entities/user.entity';
+import { UserRole } from '@common/enums/user.enum';
 // Import utility function
 import { timeToMinutes } from '../../utils/utils';
 import { Amenity } from '../amenities/entities/amenities.entity';
@@ -147,6 +150,7 @@ export class FieldsService {
                 basePrice: field.basePrice, // Keep raw value for calculations
                 price: price, // Add formatted price for display
                 isActive: field.isActive,
+                isAdminVerify: field.isAdminVerify ?? false,
                 maintenanceNote: field.maintenanceNote,
                 maintenanceUntil: field.maintenanceUntil,
                 rating: field.rating,
@@ -281,6 +285,7 @@ export class FieldsService {
                     basePrice: field.basePrice, // Keep raw value for calculations
                     price: price, // Add formatted price for display
                     isActive: field.isActive,
+                    isAdminVerify: field.isAdminVerify ?? false,
                     maintenanceNote: field.maintenanceNote,
                     maintenanceUntil: field.maintenanceUntil,
                     rating: field.rating,
@@ -882,6 +887,7 @@ export class FieldsService {
                         priceRanges: field.priceRanges,
                         basePrice: field.basePrice,
                         isActive: field.isActive,
+                        isAdminVerify: field.isAdminVerify ?? false,
                         maintenanceNote: field.maintenanceNote,
                         maintenanceUntil: field.maintenanceUntil,
                         rating: field.rating,
@@ -904,7 +910,7 @@ export class FieldsService {
     async findOne(id: string): Promise<FieldsDto> {
         const field = await this.fieldModel
             .findById(id)
-            .populate('amenities.amenity', 'name')
+            .populate('amenities.amenity', 'name type')
             .exec();
 
         // Debug logging removed after migration
@@ -944,7 +950,7 @@ export class FieldsService {
         // Performance: do not query by user; owner must be FieldOwnerProfile ObjectId
 
         // Build amenities response (post-migration expects `amenity` ref populated)
-        let amenitiesDto: { amenityId: string; name: string; price: number }[] = [];
+        let amenitiesDto: { amenityId: string; name: string; price: number; type?: string }[] = [];
         const rawAmenities: any[] = Array.isArray((field as any).amenities) ? (field as any).amenities : [];
         if (rawAmenities.length > 0) {
             amenitiesDto = rawAmenities
@@ -952,7 +958,8 @@ export class FieldsService {
                 .map(a => ({
                     amenityId: (a.amenity._id || a.amenity).toString(),
                     name: (a.amenity.name) ?? '',
-                    price: a.price ?? 0
+                    price: a.price ?? 0,
+                    type: a.amenity.type ?? undefined
                 }));
         }
 
@@ -988,6 +995,7 @@ export class FieldsService {
             basePrice: field.basePrice,
             price: price, // Add formatted price for display
             isActive: field.isActive,
+            isAdminVerify: field.isAdminVerify ?? false,
             maintenanceNote: field.maintenanceNote,
             maintenanceUntil: field.maintenanceUntil,
             rating: field.rating,
@@ -1060,6 +1068,7 @@ export class FieldsService {
                 priceRanges: savedField.priceRanges,
                 basePrice: savedField.basePrice,
                 isActive: savedField.isActive,
+                isAdminVerify: savedField.isAdminVerify ?? false,
                 maintenanceNote: savedField.maintenanceNote,
                 maintenanceUntil: savedField.maintenanceUntil,
                 rating: savedField.rating,
@@ -1232,6 +1241,7 @@ export class FieldsService {
                 priceRanges: savedField.priceRanges,
                 basePrice: savedField.basePrice,
                 isActive: savedField.isActive,
+                isAdminVerify: savedField.isAdminVerify ?? false,
                 maintenanceNote: savedField.maintenanceNote,
                 maintenanceUntil: savedField.maintenanceUntil,
                 rating: savedField.rating,
@@ -1315,6 +1325,7 @@ export class FieldsService {
                 priceRanges: updatedField.priceRanges,
                 basePrice: updatedField.basePrice,
                 isActive: updatedField.isActive,
+                isAdminVerify: updatedField.isAdminVerify ?? false,
                 maintenanceNote: updatedField.maintenanceNote,
                 maintenanceUntil: updatedField.maintenanceUntil,
                 rating: updatedField.rating,
@@ -1360,6 +1371,115 @@ export class FieldsService {
             }
             this.logger.error('Error deleting field', error);
             throw new InternalServerErrorException('Failed to delete field');
+        }
+    }
+
+    /**
+     * Admin: Update field verification status
+     * @param fieldId Field ID
+     * @param isAdminVerify Verification status
+     * @returns Updated field DTO
+     */
+    async updateFieldVerification(fieldId: string, isAdminVerify: boolean): Promise<FieldsDto> {
+        try {
+            const field = await this.fieldModel.findByIdAndUpdate(
+                fieldId,
+                { $set: { isAdminVerify } },
+                { new: true }
+            ).populate('amenities.amenity', 'name')
+            .exec();
+
+            if (!field) {
+                throw new NotFoundException('Field not found');
+            }
+
+            // Resolve owner info
+            let ownerId = '';
+            let ownerName: string | undefined = undefined;
+            let ownerPhone: string | undefined = undefined;
+
+            const ownerRef: any = (field as any).owner;
+            if (ownerRef) {
+                if (ownerRef instanceof Types.ObjectId || typeof ownerRef === 'string') {
+                    ownerId = ownerRef.toString();
+                } else if (ownerRef._id) {
+                    ownerId = ownerRef._id.toString();
+                }
+            }
+
+            if (ownerId && Types.ObjectId.isValid(ownerId)) {
+                try {
+                    const profile = await this.fieldOwnerProfileModel
+                        .findById(ownerId)
+                        .populate({ path: 'user', select: 'fullName phone' })
+                        .exec();
+                    if (profile) {
+                        const facility: any = (profile as any).facility || {};
+                        ownerName = facility.facilityName;
+                        ownerPhone = facility.contactPhone || (profile as any).user?.phone;
+                    }
+                } catch {}
+            }
+
+            // Build amenities response
+            let amenitiesDto: { amenityId: string; name: string; price: number }[] = [];
+            const rawAmenities: any[] = Array.isArray((field as any).amenities) ? (field as any).amenities : [];
+            if (rawAmenities.length > 0) {
+                amenitiesDto = rawAmenities
+                    .filter(a => a && a.amenity)
+                    .map(a => ({
+                        amenityId: (a.amenity._id || a.amenity).toString(),
+                        name: (a.amenity.name) ?? '',
+                        price: a.price ?? 0
+                    }));
+            }
+
+            // Format price for display
+            const price = this.priceFormatService.formatPrice(field.basePrice);
+
+            // Filter out invalid/placeholder images
+            const validImages = (field.images || []).filter((img: string) => {
+                if (!img || typeof img !== 'string') return false;
+                if (img.includes('placeholder') || img.includes('placehold.co')) {
+                    return false;
+                }
+                return img.trim().length > 0;
+            });
+
+            return {
+                id: (field._id as Types.ObjectId).toString(),
+                owner: ownerId,
+                ownerName,
+                ownerPhone,
+                name: field.name,
+                sportType: field.sportType,
+                description: field.description,
+                location: field.location,
+                images: validImages,
+                operatingHours: field.operatingHours,
+                slotDuration: field.slotDuration,
+                minSlots: field.minSlots,
+                maxSlots: field.maxSlots,
+                priceRanges: field.priceRanges,
+                basePrice: field.basePrice,
+                price: price,
+                isActive: field.isActive,
+                isAdminVerify: field.isAdminVerify ?? false,
+                maintenanceNote: field.maintenanceNote,
+                maintenanceUntil: field.maintenanceUntil,
+                rating: field.rating,
+                totalReviews: field.totalReviews,
+                amenities: amenitiesDto,
+                createdAt: field.createdAt,
+                updatedAt: field.updatedAt,
+            };
+
+        } catch (error) {
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            this.logger.error('Error updating field verification', error);
+            throw new InternalServerErrorException('Failed to update field verification');
         }
     }
 
@@ -1458,12 +1578,14 @@ export class FieldsService {
      */
     private async getExistingBookingsForDate(fieldId: string, date: Date) {
         try {
-            // Normalize date to start/end of day in Vietnam timezone (UTC+7)
+            // ✅ CRITICAL: Normalize date using UTC methods to avoid server timezone issues
+            // setHours() uses LOCAL timezone → wrong on Singapore server (UTC+8)
+            // Must use setUTCHours() to ensure consistency with how dates are stored
 const startOfDay = new Date(date);
-startOfDay.setHours(0, 0, 0, 0); // Start of local day (Vietnam)
+startOfDay.setUTCHours(0, 0, 0, 0); // Start of UTC day
 
 const endOfDay = new Date(date);
-endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
+endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
 
 
             // Get bookings from Booking collection (Pure Lazy Creation pattern)
@@ -1971,12 +2093,12 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
             throw new UnauthorizedException('You are not the owner of this field');
         }
 
-        // Chuẩn hóa effectiveDate về 00:00:00
+        // ✅ CRITICAL: Use UTC methods to normalize date
         const effectiveDateMidnight = new Date(effectiveDate);
-        effectiveDateMidnight.setHours(0, 0, 0, 0);
+        effectiveDateMidnight.setUTCHours(0, 0, 0, 0);
 
         const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        today.setUTCHours(0, 0, 0, 0);
         if (effectiveDateMidnight <= today) {
             throw new BadRequestException('effectiveDate must be in the future (after today)');
         }
@@ -2014,8 +2136,9 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
         const field = await this.fieldModel.findById(fieldId);
         if (!field) return false;
 
+        // ✅ CRITICAL: Use UTC methods to normalize date
         const effectiveDateMidnight = new Date(effectiveDate);
-        effectiveDateMidnight.setHours(0, 0, 0, 0);
+        effectiveDateMidnight.setUTCHours(0, 0, 0, 0);
 
         // Khởi tạo pendingPriceUpdates nếu chưa có
         if (!field.pendingPriceUpdates) {
@@ -2986,6 +3109,107 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
         } catch (error) {
             this.logger.error('Error getting bank accounts', error);
             throw new InternalServerErrorException('Failed to get bank accounts');
+        }
+    }
+
+    /**
+     * Get field owner's default verified bank account
+     */
+    async getFieldOwnerBankAccount(fieldId: string): Promise<BankAccountResponseDto> {
+        try {
+            // Validate field ID
+            if (!Types.ObjectId.isValid(fieldId)) {
+                throw new BadRequestException(`Invalid field ID format: "${fieldId}"`);
+            }
+
+            // Get field with owner
+            const field = await this.fieldModel.findById(fieldId).exec();
+            if (!field) {
+                throw new NotFoundException(`Field with ID ${fieldId} not found`);
+            }
+
+            // Get owner ID
+            const ownerId = (field as any).owner?.toString();
+            if (!ownerId) {
+                throw new NotFoundException(`Field ${fieldId} does not have an owner`);
+            }
+
+            this.logger.debug(`[getFieldOwnerBankAccount] Looking for bank account for field owner: ${ownerId}, field: ${fieldId}`);
+
+            // First, try to find default verified bank account
+            let bankAccount = await this.bankAccountModel
+                .findOne({
+                    fieldOwner: new Types.ObjectId(ownerId),
+                    isDefault: true,
+                    status: BankAccountStatus.VERIFIED,
+                })
+                .exec();
+
+            if (bankAccount) {
+                this.logger.debug(`[getFieldOwnerBankAccount] Found default verified bank account: ${bankAccount._id}`);
+            } else {
+                this.logger.debug(`[getFieldOwnerBankAccount] No default verified account found, searching for any verified account...`);
+                
+                // If no default verified account, try to find any verified account
+                bankAccount = await this.bankAccountModel
+                    .findOne({
+                        fieldOwner: new Types.ObjectId(ownerId),
+                        status: BankAccountStatus.VERIFIED,
+                    })
+                    .sort({ createdAt: -1 }) // Get the most recent verified account
+                    .exec();
+
+                if (bankAccount) {
+                    this.logger.debug(`[getFieldOwnerBankAccount] Found verified account (not default): ${bankAccount._id}, isDefault: ${bankAccount.isDefault}`);
+                    
+                    // If we found a verified account but it's not default, set it as default for future queries
+                    if (!bankAccount.isDefault) {
+                        this.logger.debug(`[getFieldOwnerBankAccount] Setting account ${bankAccount._id} as default...`);
+                        
+                        // Set other accounts to non-default
+                        await this.bankAccountModel.updateMany(
+                            {
+                                fieldOwner: new Types.ObjectId(ownerId),
+                                _id: { $ne: bankAccount._id },
+                            },
+                            { isDefault: false }
+                        ).exec();
+                        
+                        // Set this account as default
+                        bankAccount.isDefault = true;
+                        await bankAccount.save();
+                        
+                        this.logger.debug(`[getFieldOwnerBankAccount] Account ${bankAccount._id} set as default successfully`);
+                    }
+                } else {
+                    // Debug: Check what accounts exist for this owner
+                    const allAccounts = await this.bankAccountModel
+                        .find({ fieldOwner: new Types.ObjectId(ownerId) })
+                        .select('status isDefault accountNumber bankName')
+                        .lean()
+                        .exec();
+                    
+                    this.logger.warn(
+                        `[getFieldOwnerBankAccount] No verified bank account found. ` +
+                        `Total accounts for owner ${ownerId}: ${allAccounts.length}. ` +
+                        `Accounts: ${JSON.stringify(allAccounts.map(a => ({ status: a.status, isDefault: a.isDefault, accountNumber: a.accountNumber })))}`
+                    );
+                }
+            }
+
+            if (!bankAccount) {
+                throw new NotFoundException(
+                    `No verified bank account found for field owner. Field ID: ${fieldId}`
+                );
+            }
+
+            return this.mapToBankAccountResponseDto(bankAccount);
+        } catch (error) {
+            if (error instanceof NotFoundException || error instanceof BadRequestException) {
+                throw error;
+            }
+            this.logger.error('Error getting field owner bank account', error);
+            throw new InternalServerErrorException('Failed to get field owner bank account');
         }
     }
 

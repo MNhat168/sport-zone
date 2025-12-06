@@ -6,7 +6,7 @@ import { CreateWalletDto } from './dto/create-wallet.dto';
 import { AdjustWalletBalanceDto } from './dto/adjust-wallet-balance.dto';
 import { RefundRequestDto } from './dto/refund-request.dto';
 import { WithdrawRequestDto } from './dto/withdraw-request.dto';
-import { WalletStatus, WalletRole } from './entities/wallet.entity';
+import { WalletStatus, WalletRole } from '@common/enums/wallet.enum';
 import { PaymentHandlerService } from '../bookings/services/payment-handler.service';
 
 @Controller('wallets')

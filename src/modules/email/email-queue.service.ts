@@ -3,7 +3,9 @@ import { EmailService } from './email.service';
 
 type EmailJob =
   | { type: 'VERIFY_EMAIL'; email: string; token: string }
-  | { type: 'RESET_PASSWORD'; email: string; token: string };
+  | { type: 'RESET_PASSWORD'; email: string; token: string }
+  | { type: 'FIELD_OWNER_BOOKING'; payload: any }
+  | { type: 'CUSTOMER_BOOKING'; payload: any };
 
 @Injectable()
 export class EmailQueueService implements OnModuleInit, OnModuleDestroy {
@@ -41,6 +43,12 @@ export class EmailQueueService implements OnModuleInit, OnModuleDestroy {
             break;
           case 'RESET_PASSWORD':
             await this.emailService.sendResetPassword(job.email, job.token);
+            break;
+          case 'FIELD_OWNER_BOOKING':
+            await this.emailService.sendFieldOwnerBookingNotification(job.payload);
+            break;
+          case 'CUSTOMER_BOOKING':
+            await this.emailService.sendCustomerBookingConfirmation(job.payload);
             break;
         }
       } catch (error) {

@@ -1,22 +1,33 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Transaction, TransactionStatus } from '../modules/transactions/entities/transaction.entity';
-import { Booking, BookingStatus } from '../modules/bookings/entities/booking.entity';
+import { Transaction } from '../modules/transactions/entities/transaction.entity';
+import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum';
+import { PaymentMethod } from '@common/enums/payment-method.enum';
+import { Booking } from '../modules/bookings/entities/booking.entity';
+import { BookingStatus } from '@common/enums/booking.enum';
 import { PaymentHandlerService } from '../modules/bookings/services/payment-handler.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { TimezoneService } from '../common/services/timezone.service';
+import { getCurrentVietnamTimeForDB } from '../utils/timezone.utils';
 
 /**
  * Cleanup Service - Cancel expired payments/bookings, release slots, fix data inconsistencies
+ * Handles all cleanup operations including cron jobs for automatic cleanup
  */
 @Injectable()
 export class CleanupService {
   private readonly logger = new Logger(CleanupService.name);
+  
+  // Payment expiration time in minutes
+  private readonly PAYMENT_EXPIRATION_MINUTES = 5;
 
   constructor(
     @InjectModel(Transaction.name) private readonly transactionModel: Model<Transaction>,
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
     private readonly eventEmitter: EventEmitter2,
+    private readonly timezoneService: TimezoneService,
     @Inject(forwardRef(() => PaymentHandlerService))
     private readonly paymentHandlerService: PaymentHandlerService,
   ) {}
@@ -109,6 +120,50 @@ export class CleanupService {
     });
   }
 
+  /**
+   * Cancel hold booking (PENDING booking without payment)
+   * Validates that booking is a valid hold booking before cancelling
+   * Used by public endpoint /bookings/:bookingId/cancel-hold
+   */
+  async cancelHoldBooking(
+    bookingId: string,
+    cancellationReason: string = 'Thời gian giữ chỗ đã hết (5 phút)',
+    maxAgeMinutes: number = 10
+  ): Promise<void> {
+    if (!Types.ObjectId.isValid(bookingId)) {
+      throw new Error(`Invalid booking ID: ${bookingId}`);
+    }
+
+    const booking = await this.bookingModel.findById(bookingId);
+    if (!booking) {
+      throw new Error(`Booking ${bookingId} not found`);
+    }
+
+    // Verify this is a hold booking that can be cancelled
+    const isHoldBooking = 
+      booking.status === BookingStatus.PENDING &&
+      booking.paymentStatus === 'unpaid' &&
+      !booking.transaction &&
+      booking.metadata?.paymentMethod === PaymentMethod.BANK_TRANSFER &&
+      booking.metadata?.isSlotHold === true;
+
+    if (!isHoldBooking) {
+      throw new Error(
+        'This booking cannot be cancelled via this endpoint. Only PENDING bookings without payment (slot holds) can be cancelled.'
+      );
+    }
+
+    // Verify booking is not too old (prevent abuse)
+    const bookingAge = Date.now() - new Date(booking.createdAt).getTime();
+    const maxAge = maxAgeMinutes * 60 * 1000;
+    if (bookingAge > maxAge) {
+      throw new Error(`Booking is too old to cancel via this endpoint (max ${maxAgeMinutes} minutes)`);
+    }
+
+    // Cancel booking and release slots
+    await this.cancelBookingAndReleaseSlots(bookingId, cancellationReason);
+  }
+
   /** Cancel booking and release schedule slots */
   async cancelBookingAndReleaseSlots(
     bookingId: string,
@@ -161,7 +216,7 @@ export class CleanupService {
       this.eventEmitter.emit('booking.cancelled', {
         bookingId,
         userId: booking.user.toString(),
-        fieldId: booking.field.toString(),
+        fieldId: booking.field?.toString() || null,
         reason: cancellationReason,
       });
 
@@ -228,5 +283,250 @@ export class CleanupService {
       cancelledAt: new Date(),
     });
   }
+
+  /**
+   * Unified cron job: Cleanup expired bookings and payments every 5 minutes
+   * Handles both:
+   * 1. Expired payments (non-BANK_TRANSFER) with PENDING transactions
+   * 2. BANK_TRANSFER bookings without payment proof (no transaction created)
+   */
+  @Cron(CronExpression.EVERY_5_MINUTES, {
+    name: 'cleanup-expired-bookings-and-payments',
+  })
+  async cleanupExpiredBookingsAndPayments(): Promise<void> {
+    try {
+      this.logger.log('🔍 [Cron Job] Starting expired bookings and payments cleanup...');
+      
+      const nowVN = getCurrentVietnamTimeForDB();
+      let totalCancelled = 0;
+      let totalErrors = 0;
+
+      // ============================================================
+      // Part 1: Cleanup expired payments (non-BANK_TRANSFER)
+      // ============================================================
+      const expiredPayments = await this.transactionModel.find({
+        status: TransactionStatus.PENDING,
+        type: TransactionType.PAYMENT,
+        method: { $ne: PaymentMethod.BANK_TRANSFER }, // Exclude BANK_TRANSFER
+      })
+        .populate('booking')
+        .populate('user', 'email fullName');
+
+      const validExpiredPayments = expiredPayments.filter((payment: any) => {
+        const booking = payment.booking;
+        if (!booking) return false;
+
+        const bookingCreatedAtVN = new Date((booking as any).createdAt);
+        const timeSinceBookingMs = nowVN.getTime() - bookingCreatedAtVN.getTime();
+        const timeSinceBookingMinutes = timeSinceBookingMs / 1000 / 60;
+        
+        const hasDataInconsistency = (booking as any).status === 'confirmed';
+        const isExpired = timeSinceBookingMinutes >= this.PAYMENT_EXPIRATION_MINUTES || hasDataInconsistency;
+        
+        if (hasDataInconsistency) {
+          this.logger.warn(
+            `[Cleanup] ⚠️ DATA INCONSISTENCY: Payment ${payment._id} is PENDING but booking ${(booking as any)._id} is CONFIRMED`
+          );
+        }
+        
+        return isExpired;
+      });
+
+      for (const payment of validExpiredPayments) {
+        try {
+          const booking = (payment as any).booking;
+          const hasDataInconsistency = booking?.status === 'confirmed';
+          await this.cancelExpiredPaymentAndBooking(payment, hasDataInconsistency);
+          totalCancelled++;
+        } catch (error) {
+          totalErrors++;
+          this.logger.error(`Failed to cancel payment ${payment._id}:`, error.message);
+        }
+      }
+
+      // ============================================================
+      // Part 2: Cleanup BANK_TRANSFER bookings without payment proof
+      // ============================================================
+      const bookingsWithoutPayment = await this.bookingModel.find({
+        status: BookingStatus.PENDING,
+        paymentStatus: 'unpaid',
+        transaction: { $exists: false },
+        'metadata.paymentMethod': PaymentMethod.BANK_TRANSFER,
+        'metadata.isSlotHold': true,
+      })
+        .populate('user', 'email fullName password isVerified')
+        .populate('field', 'name');
+
+      const expiredBookings = bookingsWithoutPayment.filter((booking: any) => {
+        if (booking.status === BookingStatus.CANCELLED) return false;
+
+        const bookingCreatedAtVN = new Date(booking.createdAt);
+        const timeSinceBookingMs = nowVN.getTime() - bookingCreatedAtVN.getTime();
+        const timeSinceBookingMinutes = timeSinceBookingMs / 1000 / 60;
+        
+        return timeSinceBookingMinutes >= this.PAYMENT_EXPIRATION_MINUTES;
+      });
+
+      for (const booking of expiredBookings) {
+        try {
+          const bookingId = (booking._id as any).toString();
+          const user = booking.user as any;
+          const isGuestBooking = !user?.password || !user?.isVerified;
+          
+          const cancellationReason = isGuestBooking
+            ? 'Guest booking: Payment proof not submitted within 5 minutes - booking automatically cancelled and slots released'
+            : 'Payment proof not submitted within 5 minutes - booking automatically cancelled';
+          
+          await this.cancelBookingAndReleaseSlots(bookingId, cancellationReason);
+          totalCancelled++;
+
+          this.eventEmitter.emit('bank.transfer.booking.cancelled', {
+            bookingId,
+            userId: user?._id?.toString() || booking.user,
+            fieldId: (booking.field as any)?._id?.toString() || booking.field,
+            amount: booking.bookingAmount + booking.platformFee,
+            createdAt: booking.createdAt,
+            cancelledAt: nowVN,
+            reason: cancellationReason,
+            isGuestBooking,
+          });
+        } catch (error) {
+          totalErrors++;
+          this.logger.error(`Failed to cancel booking ${booking._id}:`, error.message);
+        }
+      }
+
+      if (totalCancelled > 0 || totalErrors > 0) {
+        this.logger.log(
+          `✅ [Cron Job] Cleanup completed: ${totalCancelled} cancelled, ${totalErrors} failed`
+        );
+      } else {
+        this.logger.debug('✅ [Cron Job] No expired bookings or payments found');
+      }
+    } catch (error) {
+      this.logger.error('❌ Error during cleanup:', error);
+    }
+  }
+
+  /**
+   * Check if a payment is about to expire (within 2 minutes)
+   * Used for frontend warnings
+   */
+  async isPaymentExpiringSoon(paymentId: string): Promise<boolean> {
+    const payment = await this.transactionModel.findById(paymentId);
+    
+    if (!payment || payment.status !== TransactionStatus.PENDING) {
+      return false;
+    }
+
+    // ✅ CRITICAL: Use getCurrentVietnamTimeForDB() to match how createdAt is stored
+    // createdAt is saved with offset +8h, so we must use the same logic
+    const nowVN = getCurrentVietnamTimeForDB();
+    const createdAtVN = new Date(payment.createdAt);
+    const minutesElapsed = (nowVN.getTime() - createdAtVN.getTime()) / 1000 / 60;
+    
+    // Return true if payment is 3+ minutes old (2 minutes left)
+    return minutesElapsed >= (this.PAYMENT_EXPIRATION_MINUTES - 2);
+  }
+
+  /**
+   * Get remaining time for a payment in seconds
+   */
+  async getPaymentRemainingTime(paymentId: string): Promise<number> {
+    const payment = await this.transactionModel.findById(paymentId);
+    
+    if (!payment || payment.status !== TransactionStatus.PENDING) {
+      return 0;
+    }
+
+    // ✅ CRITICAL: Use getCurrentVietnamTimeForDB() to match how createdAt is stored
+    // createdAt is saved with offset +8h, so we must use the same logic
+    const nowVN = getCurrentVietnamTimeForDB();
+    const createdAtVN = new Date(payment.createdAt);
+    const elapsedSeconds = (nowVN.getTime() - createdAtVN.getTime()) / 1000;
+    const expirationSeconds = this.PAYMENT_EXPIRATION_MINUTES * 60;
+    
+    const remainingSeconds = Math.max(0, expirationSeconds - elapsedSeconds);
+    return Math.floor(remainingSeconds);
+  }
+
+  /**
+   * Extend payment expiration time
+   * This creates a new "virtual" expiration by updating metadata
+   * Note: The payment createdAt is not changed, but we store extension info
+   */
+  async extendPaymentTime(
+    paymentId: string,
+    additionalMinutes: number = 5
+  ): Promise<void> {
+    const payment = await this.transactionModel.findById(paymentId);
+    
+    if (!payment || payment.status !== TransactionStatus.PENDING) {
+      throw new Error(`Cannot extend transaction ${paymentId}`);
+    }
+
+    // ✅ CRITICAL: Use getCurrentVietnamTimeForDB() to match how createdAt is stored (UTC+8)
+    const nowVN = getCurrentVietnamTimeForDB();
+    const extensions = ((payment as any).metadata?.extensions || 0) + 1;
+    const totalExtendedMinutes = ((payment as any).metadata?.totalExtendedMinutes || 0) + additionalMinutes;
+
+    // Limit maximum extensions to 2 times (10 minutes total)
+    if (extensions > 2) {
+      throw new Error('Maximum payment extensions reached (2 times)');
+    }
+
+    // Calculate extended expiration in Vietnam timezone, then convert to UTC for storage
+    const extendedExpirationVietnam = new Date(nowVN.getTime() + additionalMinutes * 60 * 1000);
+
+    await this.transactionModel.findByIdAndUpdate(paymentId, {
+      metadata: {
+        ...((payment as any).metadata || {}),
+        extensions,
+        totalExtendedMinutes,
+        lastExtendedAt: nowVN,
+        extendedExpirationTime: extendedExpirationVietnam,
+      },
+    });
+
+    this.logger.log(
+      `✅ Extended payment ${paymentId} by ${additionalMinutes} minutes (Extension #${extensions})`
+    );
+
+    // Emit payment.extended event
+    this.eventEmitter.emit('payment.extended', {
+      paymentId,
+      extensions,
+      additionalMinutes,
+      totalExtendedMinutes,
+      extendedAt: nowVN,
+    });
+  }
+
+  /**
+   * Check if payment has been extended and get effective expiration time
+   */
+  async getEffectiveExpirationTime(paymentId: string): Promise<Date | null> {
+    const payment = await this.transactionModel.findById(paymentId);
+    
+    if (!payment || payment.status !== TransactionStatus.PENDING) {
+      return null;
+    }
+
+    const metadata = (payment as any).metadata || {};
+    
+    // If payment has been extended, use extended expiration time (stored in UTC+8)
+    if (metadata.extendedExpirationTime) {
+      return new Date(metadata.extendedExpirationTime);
+    }
+
+    // Otherwise, use original expiration (createdAt + 5 minutes in UTC+8 timezone)
+    const createdAtVN = new Date(payment.createdAt);
+    const originalExpirationUTC8 = new Date(createdAtVN);
+    originalExpirationUTC8.setMinutes(
+      originalExpirationUTC8.getMinutes() + this.PAYMENT_EXPIRATION_MINUTES
+    );
+    return originalExpirationUTC8;
+  }
+
 }
 

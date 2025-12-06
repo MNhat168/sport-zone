@@ -8,7 +8,8 @@ import { InjectModel, getModelToken } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Booking } from '../../src/modules/bookings/entities/booking.entity';
 import { Schedule } from '../../src/modules/schedules/entities/schedule.entity';
-import { Transaction, TransactionType } from '../../src/modules/transactions/entities/transaction.entity';
+import { Transaction } from '../../src/modules/transactions/entities/transaction.entity';
+import { TransactionType } from '../../src/common/enums/transaction.enum';
 import { Types } from 'mongoose';
 
 const amenitiesLibrary = require('./amenities-library.json');

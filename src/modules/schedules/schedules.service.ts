@@ -430,11 +430,12 @@ export class SchedulesService {
         startDate: Date,
         endDate: Date,
     ): Promise<{ modifiedCount: number }> {
+// ✅ CRITICAL: Use UTC methods to normalize date
 const start = new Date(startDate);
-start.setHours(0, 0, 0, 0);
+start.setUTCHours(0, 0, 0, 0);
 
 const end = new Date(endDate);
-end.setHours(23, 59, 59, 999);
+end.setUTCHours(23, 59, 59, 999);
 
         if (new Date(startDate) > new Date(endDate)) {
             throw new BadRequestException('Start date must be before end date');
@@ -472,11 +473,12 @@ end.setHours(23, 59, 59, 999);
     }
 
     async UnsetHoliday(startDate: Date, endDate: Date): Promise<{ modifiedCount: number }> {
+// ✅ CRITICAL: Use UTC methods to normalize date
 const start = new Date(startDate);
-start.setHours(0, 0, 0, 0);
+start.setUTCHours(0, 0, 0, 0);
 
 const end = new Date(endDate);
-end.setHours(23, 59, 59, 999);
+end.setUTCHours(23, 59, 59, 999);
 
         const result = await this.scheduleModel.updateMany(
             { date: { $gte: start, $lte: end } },

@@ -1,7 +1,6 @@
-import { Controller, Get, Post, Body, Query, Param, Req, BadRequestException, NotFoundException, Delete, Patch, HttpCode, Res } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBody } from '@nestjs/swagger';
+import { Controller, Get, Post, Body, Query, Param, Req, BadRequestException, NotFoundException, Delete, Patch, HttpCode, Res, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { TransactionsService } from './transactions.service';
-import { PaymentCleanupService } from './payment-cleanup.service';
 import { VNPayService } from './vnpay.service';
 import { sortObject } from './utils/vnpay.utils';
 import * as crypto from 'crypto';
@@ -9,7 +8,8 @@ import * as qs from 'qs';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { TransactionStatus, TransactionType } from './entities/transaction.entity';
+import { AuthGuard } from '@nestjs/passport';
+import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum';
 import { 
     CreateVNPayUrlDto, 
     QueryTransactionDto, 
@@ -18,6 +18,10 @@ import {
     VNPayVerificationResultDto
 } from './dto/vnpay.dto';
 import { PayOSService } from './payos.service';
+import { CreateCoachVerificationDto } from './dto/coach-verification.dto';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import { CoachProfile } from '../coaches/entities/coach-profile.entity';
 import {
     CreatePayOSUrlDto,
     PayOSCallbackDto,
@@ -29,20 +33,22 @@ import {
 import { Inject, forwardRef } from '@nestjs/common';
 import { FieldOwnerService } from '../field-owner/field-owner.service';
 import { Response } from 'express';
+import { CleanupService } from '../../service/cleanup.service';
 
 @ApiTags('Transactions')
 @Controller('transactions')
 export class TransactionsController {
 
-    constructor(
+  constructor(
         private readonly transactionsService: TransactionsService,
-        private readonly paymentCleanupService: PaymentCleanupService,
+        private readonly cleanupService: CleanupService,
         private readonly vnpayService: VNPayService,
         private readonly payosService: PayOSService,
         private readonly configService: ConfigService,
         private readonly eventEmitter: EventEmitter2,
         @Inject(forwardRef(() => FieldOwnerService))
         private readonly fieldOwnerService: FieldOwnerService,
+        @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
     ) { }
 
     /**
@@ -113,6 +119,43 @@ export class TransactionsController {
             orderId,
             amount: parsedAmount,
         };
+    }
+
+    /**
+     * Tạo transaction xác thực tài khoản ngân hàng cho coach (10k)
+     */
+    @Post('coach-verification')
+    @UseGuards(AuthGuard('jwt'))
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Coach - tạo transaction xác thực tài khoản ngân hàng (10k)' })
+    @ApiResponse({ status: 201, description: 'Tạo transaction thành công' })
+    async createCoachVerification(
+      @Req() req: Request & { user?: any },
+      @Body() dto: CreateCoachVerificationDto,
+    ) {
+      const coachUserId = (req as any).user?.userId || (req as any).user?._id;
+      if (!coachUserId) throw new BadRequestException('Missing user');
+
+      const profile = await this.coachProfileModel.findOne({ user: new Types.ObjectId(coachUserId) }).lean();
+      if (!profile) throw new NotFoundException('Coach profile not found');
+
+      const tx = await this.transactionsService.createCoachBankVerificationTransaction({
+        coachUserId: String(coachUserId),
+        coachProfileId: String(profile._id),
+        bankAccountNumber: dto.bankAccountNumber,
+        bankName: dto.bankName,
+        method: dto.method,
+        amount: dto.amount,
+      });
+
+      // Trả về transactionId để FE gọi create-vnpay-url / tạo link thanh toán
+      return {
+        transactionId: (tx._id as any).toString(),
+        amount: tx.amount,
+        method: tx.method,
+        metadata: tx.metadata,
+        note: 'Dùng transactionId này để tạo link thanh toán (VD: GET /transactions/create-vnpay-url?amount=10000&orderId=<transactionId>)'
+      };
     }
 
     /**
@@ -840,7 +883,7 @@ export class TransactionsController {
         @Body('reason') reason?: string
     ) {
         try {
-            await this.paymentCleanupService.cancelPaymentManually(
+            await this.cleanupService.cancelPaymentManually(
                 paymentId,
                 reason || 'User cancelled payment'
             );
@@ -882,9 +925,9 @@ export class TransactionsController {
         }
     })
     async getPaymentRemainingTime(@Param('paymentId') paymentId: string) {
-        const remainingSeconds = await this.paymentCleanupService.getPaymentRemainingTime(paymentId);
-        const isExpiringSoon = await this.paymentCleanupService.isPaymentExpiringSoon(paymentId);
-        const expiresAt = await this.paymentCleanupService.getEffectiveExpirationTime(paymentId);
+        const remainingSeconds = await this.cleanupService.getPaymentRemainingTime(paymentId);
+        const isExpiringSoon = await this.cleanupService.isPaymentExpiringSoon(paymentId);
+        const expiresAt = await this.cleanupService.getEffectiveExpirationTime(paymentId);
 
         return {
             paymentId,
@@ -944,9 +987,9 @@ export class TransactionsController {
                 ? additionalMinutes 
                 : 5;
 
-            await this.paymentCleanupService.extendPaymentTime(paymentId, minutes);
+            await this.cleanupService.extendPaymentTime(paymentId, minutes);
             
-            const newExpiresAt = await this.paymentCleanupService.getEffectiveExpirationTime(paymentId);
+            const newExpiresAt = await this.cleanupService.getEffectiveExpirationTime(paymentId);
 
             return {
                 success: true,

@@ -3,17 +3,7 @@ import { Types } from 'mongoose';
 import { SportType } from 'src/common/enums/sport-type.enum';
 import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
 import { HydratedDocument } from 'mongoose';
-export enum BookingType {
-  FIELD = 'field',
-  COACH = 'coach',
-}
-
-export enum BookingStatus {
-  PENDING = 'pending',
-  CONFIRMED = 'confirmed',
-  CANCELLED = 'cancelled',
-  COMPLETED = 'completed',
-}
+import { BookingType, BookingStatus } from '@common/enums/booking.enum';
 
 
 
@@ -23,8 +13,9 @@ export class Booking extends BaseEntity {
   user: Types.ObjectId;
 
   // Pure Lazy Creation: Remove schedule reference, use fieldId + date instead
-  @Prop({ type: Types.ObjectId, ref: 'Field', required: true })
-  field: Types.ObjectId;
+  // Field is optional for coach bookings (can be null)
+  @Prop({ type: Types.ObjectId, ref: 'Field', required: false })
+  field?: Types.ObjectId;
 
   // Add date field for tracing and easier queries (replaces schedule dependency)
   @Prop({ required: true, type: Date })
@@ -39,7 +30,8 @@ export class Booking extends BaseEntity {
   @Prop({
     type: String,
     enum: ['pending', 'accepted', 'declined'],
-    default: 'pending',
+    // ✅ Removed default: 'pending' - only set for coach bookings (type: 'coach')
+    // This prevents field bookings from having coachStatus
   })
   coachStatus?: string;
 
@@ -65,6 +57,15 @@ export class Booking extends BaseEntity {
     default: BookingStatus.PENDING,
   })
   status: BookingStatus;
+
+  /**
+   * New, explicit status dimensions (Stage 1: fields only, no behavior change)
+   */
+  @Prop({ type: String, enum: ['unpaid', 'paid', 'refunded'], required: false })
+  paymentStatus?: 'unpaid' | 'paid' | 'refunded';
+
+  @Prop({ type: String, enum: ['pending', 'approved', 'rejected'], required: false })
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
 
   // New price structure: bookingAmount + platformFee = totalAmount
   @Prop({ required: true, min: 0 })
@@ -112,6 +113,16 @@ export class Booking extends BaseEntity {
     appliedMultiplier: number;
     priceBreakdown?: string;
   };
+
+  // Metadata for tracking booking state (slot hold, payment method, etc.)
+  @Prop({ type: Object })
+  metadata?: {
+    paymentMethod?: number;
+    isSlotHold?: boolean;
+    slotsReleased?: boolean;
+    slotsReleasedAt?: Date;
+    [key: string]: any;
+  };
 }
 
 export type BookingDocument = HydratedDocument<Booking>;
@@ -137,6 +148,13 @@ BookingSchema.pre('save', function (next) {
       this.totalPrice = this.bookingAmount + this.platformFee;
     }
   }
+  
+  // ✅ Cleanup: Only coach bookings should have coachStatus
+  // Remove coachStatus from field bookings (type: BookingType.FIELD)
+  if (this.type === BookingType.FIELD && this.coachStatus !== undefined) {
+    this.coachStatus = undefined;
+  }
+  
   next();
 });
 

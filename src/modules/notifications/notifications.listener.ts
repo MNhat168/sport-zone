@@ -24,6 +24,112 @@ export class NotificationListener {
     private readonly emailService: EmailService,
   ) { }
 
+  // Handle booking created event (for CASH payments that are confirmed immediately)
+  @OnEvent('booking.created')
+  async handleBookingCreated(payload: {
+    bookingId: string;
+    userId: string;
+    fieldId: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+  }) {
+    try {
+      const bookingIdStr = typeof payload.bookingId === 'string'
+        ? payload.bookingId
+        : String(payload.bookingId);
+      
+      if (!Types.ObjectId.isValid(bookingIdStr)) {
+        this.logger.error(`[Booking Created] Invalid bookingId: ${bookingIdStr}`);
+        return;
+      }
+
+      const booking = await this.bookingModel.findById(bookingIdStr).lean();
+      if (!booking) {
+        this.logger.warn(`[Booking Created] Booking ${bookingIdStr} not found`);
+        return;
+      }
+
+      // Only create notification for confirmed bookings (CASH payments)
+      if (booking.status !== 'confirmed') {
+        return;
+      }
+
+      const field = await this.fieldModel.findById(payload.fieldId).lean();
+      if (!field) {
+        this.logger.warn(`[Booking Created] Field ${payload.fieldId} not found`);
+        return;
+      }
+
+      // Resolve owner userId
+      let ownerUserId: string | undefined;
+      const ownerRef: any = (field as any).owner;
+      if (ownerRef) {
+        const profile = await this.fieldOwnerProfileModel.findById(ownerRef).lean();
+        if (profile?.user) {
+          ownerUserId = (profile.user as any).toString();
+        } else {
+          ownerUserId = (ownerRef as any).toString?.() || String(ownerRef);
+        }
+      }
+
+      if (!ownerUserId || !Types.ObjectId.isValid(ownerUserId)) {
+        this.logger.warn(`[Booking Created] Invalid ownerUserId for field ${payload.fieldId}`);
+        return;
+      }
+
+      const customerUser = await this.userModel.findById(payload.userId).select('fullName email phone').lean();
+      if (!customerUser) {
+        this.logger.warn(`[Booking Created] Customer user ${payload.userId} not found`);
+        return;
+      }
+
+      // Format booking date - payload.date is always a string
+      let bookingDate: string;
+      try {
+        if (payload.date.includes('T') || payload.date.includes('-')) {
+          // ISO date string or date string, convert to Date then format
+          const dateObj = new Date(payload.date);
+          if (!isNaN(dateObj.getTime())) {
+            bookingDate = dateObj.toLocaleDateString('vi-VN');
+          } else {
+            bookingDate = payload.date; // Fallback to original string
+          }
+        } else {
+          // Already formatted date string
+          bookingDate = payload.date;
+        }
+      } catch {
+        // Fallback to original string if parsing fails
+        bookingDate = payload.date;
+      }
+      
+      const totalPriceFormatted = ((booking as any).totalPrice || 0).toLocaleString('vi-VN') + '₫';
+      const notificationMessage = `Bạn có đặt sân mới tại ${(field as any).name} vào ${bookingDate} từ ${payload.startTime} đến ${payload.endTime}. Khách hàng: ${customerUser.fullName}. Tổng tiền: ${totalPriceFormatted}`;
+
+      await this.notificationsService.create({
+        recipient: new Types.ObjectId(ownerUserId),
+        type: NotificationType.BOOKING_CONFIRMED,
+        title: 'Đặt sân mới',
+        message: notificationMessage,
+        metadata: {
+          bookingId: bookingIdStr,
+          fieldId: payload.fieldId,
+          fieldName: (field as any).name,
+          customerName: customerUser.fullName,
+          customerEmail: customerUser.email,
+          date: bookingDate,
+          startTime: payload.startTime,
+          endTime: payload.endTime,
+          totalPrice: (booking as any).totalPrice || 0,
+          paymentMethod: (booking as any).paymentMethod || 'cash',
+        },
+      }).catch(err => this.logger.warn('Failed to create owner notification for booking.created', err));
+    } catch (error) {
+      this.logger.error('[Booking Created] Error creating notification', error);
+    }
+  }
+
   @OnEvent('booking.coach.accept')
   async handleBookingAccepted(payload: {
     bookingId: string;
@@ -211,6 +317,7 @@ export class NotificationListener {
               const customerUser = await this.userModel.findById(booking.user).select('fullName email phone').lean();
               const ownerEmail = ownerUser?.email;
               if (ownerEmail && customerUser) {
+                // Gửi email thông báo cho field owner
                 await this.emailService.sendFieldOwnerBookingNotification({
                   to: ownerEmail,
                   field: { name: (field as any).name, address: (field as any)?.location?.address || '' },
@@ -228,7 +335,34 @@ export class NotificationListener {
                   },
                   preheader: 'Thanh toán thành công - Thông báo đặt sân',
                   paymentMethod: payload.method,
-                });
+                }).catch(err => this.logger.warn('Failed to send owner email', err));
+
+                // Tạo notification cho field owner
+                const bookingDate = booking.date instanceof Date 
+                  ? booking.date.toLocaleDateString('vi-VN') 
+                  : (typeof booking.date === 'string' ? booking.date : new Date(booking.date).toLocaleDateString('vi-VN'));
+                
+                const totalPriceFormatted = (booking.totalPrice || 0).toLocaleString('vi-VN') + '₫';
+                const notificationMessage = `Bạn có đặt sân mới tại ${(field as any).name} vào ${bookingDate} từ ${booking.startTime} đến ${booking.endTime}. Khách hàng: ${customerUser.fullName}. Tổng tiền: ${totalPriceFormatted}`;
+
+                await this.notificationsService.create({
+                  recipient: new Types.ObjectId(ownerUserId),
+                  type: NotificationType.BOOKING_CONFIRMED,
+                  title: 'Đặt sân mới',
+                  message: notificationMessage,
+                  metadata: {
+                    bookingId: bookingIdStr,
+                    fieldId: (field as any)._id?.toString() || (field as any).id?.toString(),
+                    fieldName: (field as any).name,
+                    customerName: customerUser.fullName,
+                    customerEmail: customerUser.email,
+                    date: bookingDate,
+                    startTime: booking.startTime,
+                    endTime: booking.endTime,
+                    totalPrice: booking.totalPrice || 0,
+                    paymentMethod: payload.method,
+                  },
+                }).catch(err => this.logger.warn('Failed to create owner notification', err));
               }
             }
           }

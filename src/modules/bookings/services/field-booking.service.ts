@@ -2,7 +2,8 @@ import { Injectable, NotFoundException, BadRequestException, Logger, InternalSer
 import { InjectModel, InjectConnection } from '@nestjs/mongoose';
 import { Model, Types, Connection, ClientSession } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Booking, BookingStatus, BookingType } from '../entities/booking.entity';
+import { Booking } from '../entities/booking.entity';
+import { BookingStatus, BookingType } from '@common/enums/booking.enum';
 import { Schedule } from '../../schedules/entities/schedule.entity';
 import { Field } from '../../fields/entities/field.entity';
 import { FieldOwnerProfile } from '../../field-owner/entities/field-owner-profile.entity';
@@ -11,7 +12,10 @@ import { TransactionsService } from '../../transactions/transactions.service';
 import { EmailService } from '../../email/email.service';
 import { PaymentMethod } from '@common/enums/payment-method.enum';
 import { CreateFieldBookingLazyDto } from '../dto/create-field-booking-lazy.dto';
+import { CreateFieldBookingV2Dto } from '../dto/create-field-booking-v2.dto';
 import { AvailabilityService } from './availability.service';
+import { BookingEmailService } from './booking-email.service';
+import { UserRole } from '@common/enums/user.enum';
 
 /**
  * Field Booking Service
@@ -32,6 +36,7 @@ export class FieldBookingService {
     private readonly transactionsService: TransactionsService,
     private readonly emailService: EmailService,
     private readonly availabilityService: AvailabilityService,
+    private readonly bookingEmailService: BookingEmailService,
   ) {}
 
   /**
@@ -45,8 +50,11 @@ export class FieldBookingService {
   ): Promise<Booking> {
     const session: ClientSession = await this.connection.startSession();
 
+    // Store values outside transaction for email sending
+    let booking: Booking;
+
     try {
-      return await session.withTransaction(async () => {
+      booking = await session.withTransaction(async () => {
         // Validate field
         const field = await this.fieldModel.findById(bookingData.fieldId).session(session);
         if (!field || !field.isActive) {
@@ -139,6 +147,10 @@ export class FieldBookingService {
           ? BookingStatus.PENDING
           : BookingStatus.CONFIRMED;
 
+        // New explicit statuses per refactor plan (Phase 2)
+        const initialPaymentStatus: 'unpaid' | 'paid' | 'refunded' = 'unpaid';
+        const initialApprovalStatus: 'pending' | 'approved' | 'rejected' | undefined = bookingData.note ? 'pending' : undefined;
+
         // Create Booking with snapshot data
         const booking = new this.bookingModel({
           user: new Types.ObjectId(userId),
@@ -149,6 +161,8 @@ export class FieldBookingService {
           endTime: bookingData.endTime,
           numSlots,
           status: bookingStatus,
+          paymentStatus: initialPaymentStatus,
+          approvalStatus: initialApprovalStatus,
           bookingAmount: bookingAmount,
           platformFee: platformFee,
           totalPrice: totalPrice, // For backward compatibility
@@ -168,12 +182,24 @@ export class FieldBookingService {
         // This ensures payment is rolled back if booking fails
         // Use totalAmount (bookingAmount + platformFee) for payment amount
         const totalAmount = bookingAmount + platformFee;
+
+        // ✅ CRITICAL: Generate PayOS orderCode if using PayOS payment method
+        // This allows webhook/return URL to find the transaction later
+        let externalTransactionId: string | undefined;
+        if (bookingData.paymentMethod === PaymentMethod.PAYOS) {
+          // Import generatePayOSOrderCode at top of file if not already imported
+          const { generatePayOSOrderCode } = await import('../../transactions/utils/payos.utils');
+          externalTransactionId = generatePayOSOrderCode().toString();
+          this.logger.log(`Generated PayOS orderCode: ${externalTransactionId} for booking ${booking._id}`);
+        }
+
         const payment = await this.transactionsService.createPayment({
           bookingId: (booking._id as Types.ObjectId).toString(),
           userId: userId,
           amount: totalAmount,
           method: bookingData.paymentMethod ?? PaymentMethod.CASH,
-          paymentNote: bookingData.paymentNote
+          paymentNote: bookingData.paymentNote,
+          externalTransactionId, // ✅ Pass PayOS orderCode
         }, session);
 
         // Update booking with transaction reference
@@ -208,7 +234,7 @@ export class FieldBookingService {
           throw new BadRequestException('Slot was booked by another user. Please refresh and try again.');
         }
 
-        // Emit event for notifications
+        // Emit event for notifications (non-blocking, outside transaction)
         this.eventEmitter.emit('booking.created', {
           bookingId: booking._id,
           userId,
@@ -218,8 +244,8 @@ export class FieldBookingService {
           endTime: bookingData.endTime
         });
 
-        // Send email notification to field owner and customer
-        await this.sendBookingEmails(booking, field, userId, bookingData, pricingInfo, amenitiesFee);
+        // ❌ Email sending moved OUTSIDE transaction to prevent timeout
+        // Will be sent after transaction commits successfully
 
         return booking;
       }, {
@@ -247,6 +273,19 @@ export class FieldBookingService {
     } finally {
       await session.endSession();
     }
+
+    // ✅ Send emails AFTER transaction commits successfully (non-blocking)
+    // This prevents email delays from causing transaction timeouts
+    const shouldSendNow = (bookingData.paymentMethod ?? PaymentMethod.CASH) === PaymentMethod.CASH;
+    if (shouldSendNow) {
+      // Unified confirmation emails via single handler
+      const methodLabel = typeof bookingData.paymentMethod === 'number'
+        ? PaymentMethod[bookingData.paymentMethod]
+        : bookingData.paymentMethod;
+      await this.bookingEmailService.sendConfirmationEmails((booking._id as Types.ObjectId).toString(), methodLabel);
+    }
+
+    return booking;
   }
 
   /**
@@ -341,101 +380,257 @@ export class FieldBookingService {
   }
 
   /**
-   * Send booking confirmation emails
+   * Create field booking without payment (for bank transfer slot hold)
+   * Creates booking and holds slots, but does NOT create payment transaction
+   * Payment will be created later when user submits payment proof
    */
-  private async sendBookingEmails(
-    booking: any,
-    field: any,
-    userId: string,
-    bookingData: CreateFieldBookingLazyDto,
-    pricingInfo: any,
-    amenitiesFee: number
-  ): Promise<void> {
+  async createFieldBookingWithoutPayment(
+    userId: string | null,
+    bookingData: CreateFieldBookingLazyDto | CreateFieldBookingV2Dto
+  ): Promise<Booking> {
+    const session: ClientSession = await this.connection.startSession();
+    let booking: Booking;
+    let finalUserId: string;
+
     try {
-      // Get field owner profile and user email
-      const ownerProfileId = ((field as any).owner && (field as any).owner.toString) 
-        ? (field as any).owner.toString() 
-        : (field as any).owner;
-      
-      let fieldOwnerProfile = await this.fieldOwnerProfileModel
-        .findById(ownerProfileId)
-        .lean()
-        .exec();
-
-      // Fallback: some data may store field.owner as userId instead of FieldOwnerProfileId
-      if (!fieldOwnerProfile) {
-        fieldOwnerProfile = await this.fieldOwnerProfileModel
-          .findOne({ user: new Types.ObjectId(ownerProfileId) })
-          .lean()
-          .exec();
-      }
-
-      let ownerEmail: string | undefined;
-      let ownerUserId: string | undefined;
-      if (fieldOwnerProfile?.user) {
-        ownerUserId = (fieldOwnerProfile.user as any).toString();
+      // Step 0: Resolve userId - create guest user if needed
+      if (!userId) {
+        // Guest booking - validate guest info
+        const guestData = bookingData as any;
+        if (!guestData.guestEmail) {
+          throw new BadRequestException('Email is required for guest bookings');
+        }
+        
+        // Create or find guest user (outside transaction first to check existence)
+        const guestUser = await this.createOrFindGuestUser(
+          guestData.guestEmail,
+          guestData.guestName,
+          guestData.guestPhone
+        );
+        finalUserId = (guestUser._id as Types.ObjectId).toString();
+        this.logger.log(`Using guest user ID: ${finalUserId} for email: ${guestData.guestEmail}`);
       } else {
-        // If profile not found, assume ownerProfileId is actually userId
-        ownerUserId = ownerProfileId;
+        finalUserId = userId;
       }
 
-      if (ownerUserId && Types.ObjectId.isValid(ownerUserId)) {
-        const ownerUser = await this.userModel
-          .findById(ownerUserId)
-          .select('email fullName phone')
-          .lean()
-          .exec();
-        ownerEmail = ownerUser?.email;
-      }
-
-      // Get customer user info
-      const customerUser = await this.userModel
-        .findById(userId)
-        .select('fullName email phone')
-        .lean()
-        .exec();
-
-      // Send email immediately only for CASH payments; otherwise wait for payment success event
-      const shouldSendNow = (bookingData.paymentMethod ?? PaymentMethod.CASH) === PaymentMethod.CASH;
-      if (shouldSendNow && customerUser) {
-        const toVnd = (amount: number) => amount.toLocaleString('vi-VN') + '₫';
-        const emailPayload = {
-          field: { name: field.name, address: (field as any)?.location?.address || '' },
-          customer: { fullName: customerUser.fullName, phone: (customerUser as any).phone, email: customerUser.email },
-          booking: {
-            date: new Date(bookingData.date).toLocaleDateString('vi-VN'),
-            startTime: bookingData.startTime,
-            endTime: bookingData.endTime,
-            services: [],
-          },
-          pricing: {
-            services: [],
-            fieldPriceFormatted: toVnd(pricingInfo.totalPrice),
-            totalFormatted: toVnd(pricingInfo.totalPrice + amenitiesFee),
-          },
-          paymentMethod: bookingData.paymentMethod,
-        };
-
-        // Send email to field owner
-        if (ownerEmail) {
-          await this.emailService.sendFieldOwnerBookingNotification({
-            ...emailPayload,
-            to: ownerEmail,
-            preheader: 'Thông báo đặt sân mới',
-          });
+      booking = await session.withTransaction(async () => {
+        // If guest user was created outside transaction, ensure it exists in this session
+        if (!userId && (bookingData as any).guestEmail) {
+          const guestUserInSession = await this.userModel.findById(finalUserId).session(session);
+          if (!guestUserInSession) {
+            // Re-create guest user within transaction
+            const guestData = bookingData as any;
+            const guestUser = await this.createOrFindGuestUser(
+              guestData.guestEmail,
+              guestData.guestName,
+              guestData.guestPhone,
+              session
+            );
+            finalUserId = (guestUser._id as Types.ObjectId).toString();
+          }
         }
 
-        // Send email to customer
-        if (customerUser.email) {
-          await this.emailService.sendCustomerBookingConfirmation({
-            ...emailPayload,
-            to: customerUser.email,
-            preheader: 'Xác nhận đặt sân thành công',
-          });
+        // Validate field
+        const field = await this.fieldModel.findById(bookingData.fieldId).session(session);
+        if (!field || !field.isActive) {
+          throw new NotFoundException('Field not found or inactive');
         }
+
+        // Parse booking date
+        const bookingDate = new Date(bookingData.date);
+
+        // Validate time slots
+        this.availabilityService.validateTimeSlots(bookingData.startTime, bookingData.endTime, field, bookingDate);
+        
+        // Calculate slots and pricing
+        const numSlots = this.availabilityService.calculateNumSlots(bookingData.startTime, bookingData.endTime, field.slotDuration);
+        const pricingInfo = this.availabilityService.calculatePricing(bookingData.startTime, bookingData.endTime, field, bookingDate);
+
+        // ✅ SECURITY: Atomic upsert with version initialization (Pure Lazy Creation)
+        const scheduleUpdate = await this.scheduleModel.findOneAndUpdate(
+          {
+            field: new Types.ObjectId(bookingData.fieldId),
+            date: bookingDate
+          },
+          {
+            $setOnInsert: {
+              field: new Types.ObjectId(bookingData.fieldId),
+              date: bookingDate,
+              bookedSlots: [],
+              isHoliday: false
+            },
+            $inc: { version: 1 }
+          },
+          {
+            upsert: true,
+            new: true,
+            session
+          }
+        ).exec();
+
+        // Validate slot availability and not holiday
+        if (scheduleUpdate.isHoliday) {
+          throw new BadRequestException(`Cannot book on holiday: ${scheduleUpdate.holidayReason}`);
+        }
+
+        // ✅ CRITICAL SECURITY: Re-check conflicts with LATEST data from transaction
+        const hasConflict = this.availabilityService.checkSlotConflict(
+          bookingData.startTime,
+          bookingData.endTime,
+          scheduleUpdate.bookedSlots
+        );
+
+        if (hasConflict) {
+          throw new BadRequestException('Selected time slots are not available');
+        }
+
+        // Calculate amenities fee if provided
+        let amenitiesFee = 0;
+        if (bookingData.selectedAmenities && bookingData.selectedAmenities.length > 0) {
+          // TODO: Calculate amenities fee from Amenity model
+          amenitiesFee = 0; // Placeholder
+        }
+
+        // Calculate booking amount and platform fee
+        const bookingAmount = pricingInfo.totalPrice + amenitiesFee;
+        const platformFeeRate = 0.05; // 5% platform fee
+        const platformFee = Math.round(bookingAmount * platformFeeRate);
+        const totalPrice = bookingAmount + platformFee;
+
+        // For bank transfer without payment: Always PENDING, unpaid
+        const bookingStatus = BookingStatus.PENDING;
+        const initialPaymentStatus: 'unpaid' = 'unpaid';
+        const initialApprovalStatus: 'pending' | 'approved' | 'rejected' | undefined = bookingData.note ? 'pending' : undefined;
+
+        // Create Booking with snapshot data (NO payment transaction)
+        const createdBooking = new this.bookingModel({
+          user: new Types.ObjectId(finalUserId),
+          field: new Types.ObjectId(bookingData.fieldId),
+          date: bookingDate,
+          type: BookingType.FIELD,
+          startTime: bookingData.startTime,
+          endTime: bookingData.endTime,
+          numSlots,
+          status: bookingStatus,
+          paymentStatus: initialPaymentStatus,
+          approvalStatus: initialApprovalStatus,
+          bookingAmount: bookingAmount,
+          platformFee: platformFee,
+          totalPrice: totalPrice,
+          amenitiesFee,
+          selectedAmenities: bookingData.selectedAmenities?.map(id => new Types.ObjectId(id)) || [],
+          note: bookingData.note,
+          pricingSnapshot: {
+            basePrice: field.basePrice,
+            appliedMultiplier: pricingInfo.multiplier,
+            priceBreakdown: pricingInfo.breakdown
+          },
+          // ✅ Mark as bank transfer hold booking
+          metadata: {
+            paymentMethod: PaymentMethod.BANK_TRANSFER,
+            isSlotHold: true,
+            slotsReleased: false
+          }
+        });
+
+        await createdBooking.save({ session });
+
+        // ✅ CRITICAL SECURITY: Atomic update with optimistic locking
+        // Book slots in schedule (hold them)
+        const scheduleUpdateResult = await this.scheduleModel.findOneAndUpdate(
+          {
+            _id: scheduleUpdate._id,
+            version: scheduleUpdate.version
+          },
+          {
+            $push: {
+              bookedSlots: {
+                startTime: bookingData.startTime,
+                endTime: bookingData.endTime
+              }
+            },
+            $inc: { version: 1 }
+          },
+          { 
+            session,
+            new: true
+          }
+        ).exec();
+
+        if (!scheduleUpdateResult) {
+          throw new BadRequestException('Slot was booked by another user. Please refresh and try again.');
+        }
+
+        // Emit event for notifications
+        this.eventEmitter.emit('booking.created', {
+          bookingId: createdBooking._id,
+          userId: finalUserId,
+          fieldId: bookingData.fieldId,
+          date: bookingData.date,
+          startTime: bookingData.startTime,
+          endTime: bookingData.endTime
+        });
+
+        return createdBooking;
+      }, {
+        readConcern: { level: 'snapshot' },
+        writeConcern: { w: 'majority', j: true },
+        maxCommitTimeMS: 15000
+      });
+
+    } catch (error) {
+      this.logger.error('Error creating field booking without payment', error);
+      
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
       }
-    } catch (mailErr) {
-      this.logger.warn('Failed to send booking emails', mailErr as any);
+      
+      if (error.message?.includes('Slot was booked')) {
+        throw new BadRequestException('Slot was booked by another user. Please refresh availability and try again.');
+      }
+      
+      throw new InternalServerErrorException('Failed to create booking. Please try again.');
+    } finally {
+      await session.endSession();
     }
+
+    return booking;
   }
+
+  /**
+   * Create or find guest user for anonymous bookings
+   * Guest users are temporary users created from email/phone for booking purposes
+   */
+  private async createOrFindGuestUser(
+    guestEmail: string,
+    guestName?: string,
+    guestPhone?: string,
+    session?: ClientSession
+  ): Promise<User> {
+    if (!guestEmail) {
+      throw new BadRequestException('Email is required for guest bookings');
+    }
+
+    const existingUser = await this.userModel.findOne({ email: guestEmail }).session(session || null);
+    if (existingUser) {
+      this.logger.log(`Found existing user for guest email: ${guestEmail}`);
+      return existingUser;
+    }
+
+    const guestUser = new this.userModel({
+      fullName: guestName || guestEmail.split('@')[0],
+      email: guestEmail,
+      phone: guestPhone || undefined,
+      role: UserRole.USER,
+      isVerified: false,
+      isActive: true,
+    });
+
+    await guestUser.save({ session });
+    this.logger.log(`Created guest user for email: ${guestEmail}`);
+    return guestUser;
+  }
+
+  // Note: Email sending is now handled by BookingEmailService after transaction commits
+  // This prevents email delays from causing transaction timeouts
 }

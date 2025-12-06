@@ -19,8 +19,9 @@ export class PriceSchedulerService {
   async applyScheduledPriceUpdates() {
     this.logger.log('Starting scheduled price updates application...');
 
+    // ✅ CRITICAL: Use UTC methods to normalize date
     const today = getCurrentVietnamTime();
-    today.setHours(0, 0, 0, 0); // 00:00:00 hôm nay (Vietnam timezone)
+    today.setUTCHours(0, 0, 0, 0);
 
     // Tìm các Field có pendingPriceUpdates đến hạn (effectiveDate <= today và applied=false)
     const fields = await this.fieldModel.find({

@@ -1,15 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { BaseEntity, configureBaseEntitySchema } from 'src/common/entities/base.entity';
+import { UserRole } from '@common/enums/user.enum';
 
 export type UserDocument = HydratedDocument<User>;
-
-export enum UserRole {
-  USER = 'user',
-  COACH = 'coach',
-  FIELD_OWNER = 'field_owner',
-  ADMIN = 'admin',
-}
 
 @Schema()
 export class User extends BaseEntity {

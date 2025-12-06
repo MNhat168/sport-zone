@@ -3,12 +3,7 @@ import { Types } from 'mongoose';
 import { BaseEntity } from 'src/common/entities/base.entity';
 import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
 import { FacilityInfo, FacilityInfoSchema } from './facility-info.entity';
-
-export enum RegistrationStatus {
-  PENDING = 'pending',
-  APPROVED = 'approved',
-  REJECTED = 'rejected',
-}
+import { RegistrationStatus } from '@common/enums/field-owner-registration.enum';
 
 @Schema()
 export class FieldOwnerRegistrationRequest extends BaseEntity {

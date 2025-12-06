@@ -1,6 +1,6 @@
 import { IsOptional, IsString, IsEnum, IsNumber, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
-import { UserRole } from '../entities/user.entity';
+import { UserRole } from '@common/enums/user.enum';
 
 export class GetAllUsersDto {
   @IsOptional()

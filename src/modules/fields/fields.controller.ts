@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { Types } from 'mongoose';
 import { FieldsService } from './fields.service';
 import { FieldsDto } from './dtos/fields.dto';
+import { BankAccountResponseDto } from '../field-owner/dtos/bank-account.dto';
 
 @ApiTags('Fields')
 @Controller('fields')
@@ -141,6 +142,20 @@ export class FieldsController {
       throw new BadRequestException(`Invalid field ID format: "${fieldId}". Field ID must be a valid MongoDB ObjectId.`);
     }
     return this.fieldsService.getFieldAmenities(fieldId);
+  }
+
+  @Get(':id/bank-account')
+  @ApiOperation({ summary: 'Get field owner default verified bank account' })
+  @ApiParam({ name: 'id', description: 'Field ID' })
+  @ApiResponse({ status: 200, description: 'Bank account retrieved successfully', type: BankAccountResponseDto })
+  @ApiResponse({ status: 400, description: 'Invalid field ID format' })
+  @ApiResponse({ status: 404, description: 'Field not found or no verified bank account' })
+  async getFieldBankAccount(@Param('id') id: string): Promise<BankAccountResponseDto> {
+    // Validate ObjectId format to prevent CastError
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException(`Invalid field ID format: "${id}". Field ID must be a valid MongoDB ObjectId.`);
+    }
+    return this.fieldsService.getFieldOwnerBankAccount(id);
   }
 }
 
