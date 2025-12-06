@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { User, UserSchema } from './entities/user.entity';
+import { Field, FieldSchema } from '../fields/entities/field.entity';
 import { UserRepository } from './repositories/user.repository';
 import { USER_REPOSITORY } from './interface/users.interface';
 import { ServiceModule } from '../../service/service.module';
@@ -12,7 +13,8 @@ import { JwtModule } from '@nestjs/jwt';
 @Module({
   imports: [
     MongooseModule.forFeature([
-      { name: User.name, schema: UserSchema }
+      { name: User.name, schema: UserSchema },
+      { name: Field.name, schema: FieldSchema }
     ]),
     ServiceModule,
     JwtModule.register({}),
