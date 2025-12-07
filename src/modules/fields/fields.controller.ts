@@ -18,9 +18,6 @@ export class FieldsController {
     @Query('location') location?: string,
     @Query('sportType') sportType?: string,
     @Query('sportTypes') sportTypes?: string | string[],
-    @Query('latitude') latitude?: number,
-    @Query('longitude') longitude?: number,
-    @Query('radius') radius?: number,
     @Query('sortBy') sortBy?: string,
     @Query('sortOrder') sortOrder?: 'asc' | 'desc',
   ): Promise<FieldsDto[]> {
@@ -37,9 +34,6 @@ export class FieldsController {
       location,
       sportType,
       sportTypes: sportTypesArray,
-      latitude,
-      longitude,
-      radius,
       sortBy,
       sortOrder,
     });
