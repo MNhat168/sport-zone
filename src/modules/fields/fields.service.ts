@@ -665,6 +665,10 @@ export class FieldsService {
         sportType: string;
         images: string[];
         isActive: boolean;
+        operatingHours: any[];
+        totalReviews: number;
+        description: string;
+        amenities: any[];
     }>> {
         try {
             const radiusInMeters = radius * 1000; // Convert km to meters
@@ -703,7 +707,7 @@ export class FieldsService {
             // Use projection to only fetch needed fields for better performance
             const fields = await this.fieldModel
                 .find(filter)
-                .select('_id name location basePrice rating sportType images isActive')
+                .select('_id name location basePrice rating sportType images isActive operatingHours totalReviews description amenities')
                 .limit(limit)
                 .lean();
 
@@ -755,7 +759,11 @@ export class FieldsService {
                         price: price,
                         sportType: field.sportType,
                         images: validImages,
-                        isActive: field.isActive !== false
+                        isActive: field.isActive !== false,
+                        operatingHours: field.operatingHours || [],
+                        totalReviews: field.totalReviews || 0,
+                        description: field.description || '',
+                        amenities: field.amenities || []
                     };
                 })
                 .filter((field): field is NonNullable<typeof field> => field !== null);
