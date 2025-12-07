@@ -60,9 +60,6 @@ export class FieldsService {
         location?: string; 
         sportType?: string;
         sportTypes?: string[];
-        latitude?: number;
-        longitude?: number;
-        radius?: number; // in kilometers
         sortBy?: string;
         sortOrder?: 'asc' | 'desc';
     }): Promise<FieldsDto[]> {
@@ -82,20 +79,6 @@ export class FieldsService {
         }
         
         if (query?.location) filter['location.address'] = { $regex: query.location, $options: 'i' };
-
-        // Location-based search with radius
-        if (query?.latitude && query?.longitude && query?.radius) {
-            const radiusInMeters = query.radius * 1000; // Convert km to meters
-            filter['location.geo'] = {
-                $near: {
-                    $geometry: {
-                        type: 'Point',
-                        coordinates: [query.longitude, query.latitude]
-                    },
-                    $maxDistance: radiusInMeters
-                }
-            };
-        }
 
         // Build sort options
         let sortOptions: any = {};
