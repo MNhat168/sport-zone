@@ -30,13 +30,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private readonly chatService: ChatService,
     private readonly jwtService: JwtService,
-  ) {}
+  ) { }
 
   async handleConnection(client: Socket) {
     try {
-      const token = client.handshake.auth.token || 
-                   client.handshake.headers.authorization?.split(' ')[1];
-      
+      const token = client.handshake.auth.token ||
+        client.handshake.headers.authorization?.split(' ')[1];
+
       if (!token) {
         client.disconnect();
         return;
@@ -93,6 +93,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       content: string;
       type?: string;
       attachments?: string[];
+      clientId?: string;
     },
   ) {
     const userId = this.socketUserMap.get(client.id);
@@ -110,17 +111,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Get chat room info
       const chatRoom = await this.chatService.getChatRoomMessages(data.chatRoomId, userId);
-      
+
       // Emit message to chat room
       this.server.to(`chat:${data.chatRoomId}`).emit('new_message', {
         chatRoomId: data.chatRoomId,
         message,
         chatRoom,
+        clientId: data.clientId,
       });
 
       // Notify recipient if they're online
-      const recipientId = 
-        chatRoom.user._id.toString() === userId 
+      const recipientId =
+        chatRoom.user._id.toString() === userId
           ? chatRoom.fieldOwner._id.toString()
           : chatRoom.user._id.toString();
 
@@ -130,6 +132,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           chatRoomId: data.chatRoomId,
           message,
           sender: message.sender.toString(),
+          clientId: data.clientId,
         });
       }
 
@@ -168,7 +171,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     try {
       await this.chatService.markMessagesAsRead(data.chatRoomId, userId);
-      
+
       // Notify other participant
       this.server.to(`chat:${data.chatRoomId}`).emit('messages_read', {
         chatRoomId: data.chatRoomId,
