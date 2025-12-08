@@ -94,6 +94,12 @@ export class BookingsController {
     description: 'Ngày kết thúc (YYYY-MM-DD)',
     example: '2025-10-31'
   })
+  @ApiQuery({
+    name: 'courtId',
+    description: 'Court ID (bắt buộc nếu field có nhiều court)',
+    required: false,
+    example: '657f1f77bcf86cd799439011'
+  })
   @ApiResponse({
     status: 200,
     description: 'Lịch khả dụng được tạo thành công'

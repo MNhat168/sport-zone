@@ -25,6 +25,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import envConfig from './config/env.config';
 
 import { ChatModule } from '@modules/chat/chat.module';
+import { CourtsModule } from './modules/courts/courts.module';
 @Module({
   imports: [
         LessonTypesModule, 
@@ -68,7 +69,8 @@ import { ChatModule } from '@modules/chat/chat.module';
     CoachesModule,
     AmenitiesModule,
     NotificationsModule,
-    ChatModule
+    ChatModule,
+    CourtsModule
   ],
   controllers: [AppController],
   providers: [

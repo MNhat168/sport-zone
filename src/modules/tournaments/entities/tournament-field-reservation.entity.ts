@@ -11,6 +11,9 @@ export class TournamentFieldReservation extends BaseEntity {
   @Prop({ type: Types.ObjectId, ref: 'Field', required: true })
   field: Types.ObjectId;
 
+  @Prop({ type: Types.ObjectId, ref: 'Court', required: false })
+  court?: Types.ObjectId;
+
   @Prop({ required: true, type: Date })
   date: Date;
 
@@ -42,4 +45,5 @@ configureBaseEntitySchema(TournamentFieldReservationSchema);
 
 TournamentFieldReservationSchema.index({ tournament: 1 });
 TournamentFieldReservationSchema.index({ field: 1, date: 1 });
+TournamentFieldReservationSchema.index({ court: 1, date: 1 });
 TournamentFieldReservationSchema.index({ status: 1, expiresAt: 1 });

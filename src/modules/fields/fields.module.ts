@@ -26,12 +26,15 @@ import { Transaction, TransactionSchema } from '../transactions/entities/transac
 import { TransactionsModule } from '../transactions/transactions.module';
 import { EmailModule } from '../email/email.module';
 // Removed separate PendingPriceUpdate collection; use embedded pendingPriceUpdates in Field
+import { Court, CourtSchema } from '../courts/entities/court.entity';
+import { CourtsModule } from '../courts/courts.module';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
     MongooseModule.forFeature([
       { name: Field.name, schema: FieldSchema },
+      { name: Court.name, schema: CourtSchema },
       { name: FieldOwnerProfile.name, schema: FieldOwnerProfileSchema },
       { name: FieldOwnerRegistrationRequest.name, schema: FieldOwnerRegistrationRequestSchema },
       { name: BankAccount.name, schema: BankAccountSchema },
@@ -44,6 +47,7 @@ import { EmailModule } from '../email/email.module';
     forwardRef(() => ServiceModule),
     forwardRef(() => TransactionsModule),
     EmailModule,
+    CourtsModule,
   ],
   controllers: [FieldsController],
   providers: [FieldsService, PriceSchedulerService],

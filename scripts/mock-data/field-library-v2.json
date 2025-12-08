@@ -1,0 +1,53 @@
+[
+    {
+        "_id": { "$oid": "69183045487331b608b96aff" },
+        "owner": { "$oid": "692c2212c530f9c7be46b077" },
+        "name": "Sân Thể Thao Test walllet",
+        "sportType": "tennis",
+        "description": "Sân test để kiểm thử luồng tạo sân. Sân chuẩn 5 người, bề mặt cỏ nhân tạo.",
+        "images": [
+            "https://lingora.s3.ap-southeast-2.amazonaws.com/images/74948a20-c1f7-11f0-9d40-73f05387f9a0.jpg?t=1763192901106",
+            "https://lingora.s3.ap-southeast-2.amazonaws.com/images/74959b90-c1f7-11f0-9d40-73f05387f9a0.jpg?t=1763192901102",
+            "https://lingora.s3.ap-southeast-2.amazonaws.com/images/7495c2a0-c1f7-11f0-9d40-73f05387f9a0.jpg?t=1763192901103",
+            "https://lingora.s3.ap-southeast-2.amazonaws.com/images/7495c2a1-c1f7-11f0-9d40-73f05387f9a0.jpg?t=1763192901110",
+            "https://lingora.s3.ap-southeast-2.amazonaws.com/images/7495c2a2-c1f7-11f0-9d40-73f05387f9a0.jpg?t=1763192901104"
+        ],
+        "operatingHours": [
+            { "day": "monday", "start": "06:00", "end": "22:00", "duration": 60 },
+            { "day": "tuesday", "start": "06:00", "end": "22:00", "duration": 60 },
+            { "day": "wednesday", "start": "06:00", "end": "22:00", "duration": 60 },
+            { "day": "thursday", "start": "06:00", "end": "22:00", "duration": 60 },
+            { "day": "friday", "start": "06:00", "end": "22:00", "duration": 60 },
+            { "day": "saturday", "start": "06:00", "end": "22:00", "duration": 60 },
+            { "day": "sunday", "start": "06:00", "end": "22:00", "duration": 60 }
+        ],
+        "slotDuration": 60,
+        "minSlots": 1,
+        "maxSlots": 4,
+        "priceRanges": [
+            { "day": "monday", "start": "06:00", "end": "17:00", "multiplier": 1 },
+            { "day": "monday", "start": "17:00", "end": "22:00", "multiplier": 1.5 },
+            { "day": "tuesday", "start": "06:00", "end": "22:00", "multiplier": 1 },
+            { "day": "wednesday", "start": "06:00", "end": "22:00", "multiplier": 1 },
+            { "day": "thursday", "start": "06:00", "end": "22:00", "multiplier": 1 },
+            { "day": "friday", "start": "06:00", "end": "22:00", "multiplier": 1 },
+            { "day": "saturday", "start": "06:00", "end": "22:00", "multiplier": 1 },
+            { "day": "sunday", "start": "06:00", "end": "22:00", "multiplier": 1 }
+        ],
+        "basePrice": 1000,
+        "isActive": true,
+        "rating": 0,
+        "totalReviews": 0,
+        "location": {
+            "address": "Đường Trung Lương 12, Hòa Xuân Ward, Đà Nẵng, 50507, Vietnam",
+            "geo": {
+                "type": "Point",
+                "coordinates": [108.234601020813, 16.02222082988433]
+            }
+        },
+        "amenities": [],
+        "pendingPriceUpdates": [],
+        "createdAt": { "$date": "2025-11-15T14:48:21.132Z" },
+        "updatedAt": { "$date": "2025-11-15T14:48:21.132Z" }
+    }
+]

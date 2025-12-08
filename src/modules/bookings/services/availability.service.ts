@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Schedule } from '../../schedules/entities/schedule.entity';
 import { Field } from '../../fields/entities/field.entity';
+import { Court } from '../../courts/entities/court.entity';
 import { Booking } from '../entities/booking.entity';
 import { BookingStatus } from '@common/enums/booking.enum';
 import { FieldAvailabilityQueryDto } from '../dto/create-field-booking-lazy.dto';
@@ -26,6 +27,9 @@ export interface DailyAvailability {
   isHoliday: boolean;
   holidayReason?: string;
   slots: AvailabilitySlot[];
+  courtId?: string;
+  courtName?: string;
+  courtNumber?: number;
 }
 
 /**
@@ -39,6 +43,7 @@ export class AvailabilityService {
   constructor(
     @InjectModel(Schedule.name) private readonly scheduleModel: Model<Schedule>,
     @InjectModel(Field.name) private readonly fieldModel: Model<Field>,
+    @InjectModel(Court.name) private readonly courtModel: Model<Court>,
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
   ) {}
 
@@ -71,10 +76,37 @@ export class AvailabilityService {
         throw new BadRequestException('Date range cannot exceed 30 days');
       }
 
-      // Query existing Schedules in range (may be empty for Pure Lazy)
+      // Resolve target court (require when multiple courts)
+      const courts = await this.courtModel
+        .find({ field: new Types.ObjectId(fieldId), isActive: true })
+        .exec();
+      const courtsWithIds = courts as (Court & { _id: Types.ObjectId })[];
+
+      if (!courts || courts.length === 0) {
+        throw new BadRequestException('No active courts found for this field');
+      }
+
+      // Explicitly type courts with ObjectId to satisfy TS strictness
+      let targetCourt: (Court & { _id: Types.ObjectId });
+      if (query.courtId) {
+        const foundCourt = courtsWithIds.find(c => c._id.toString() === query.courtId);
+        if (!foundCourt) {
+          throw new BadRequestException('Court not found or inactive for this field');
+        }
+        targetCourt = foundCourt as Court & { _id: Types.ObjectId };
+      } else if (courts.length === 1) {
+        targetCourt = courtsWithIds[0];
+      } else {
+        throw new BadRequestException('Field has multiple courts, please provide courtId');
+      }
+
+      const targetCourtId = targetCourt._id.toString();
+
+      // Query existing Schedules in range (may be empty for Pure Lazy) for the target court
       const schedules = await this.scheduleModel
         .find({
           field: new Types.ObjectId(fieldId),
+          court: targetCourt._id,
           date: { $gte: startDate, $lte: endDate }
         })
         .exec();
@@ -94,18 +126,33 @@ export class AvailabilityService {
         const schedule = scheduleMap.get(dateKey);
 
         // Generate virtual slots from Field config
-        const virtualSlots = this.generateVirtualSlots(field, currentDate);
+        const pricingOverride = targetCourt?.pricingOverride;
+        const virtualSlots = this.generateVirtualSlots(field, currentDate, pricingOverride);
         
         // Apply schedule constraints if exists
         const availableSlots = schedule 
-          ? await this.applyScheduleConstraints(virtualSlots, schedule, field, currentDate)
-          : await this.getAvailabilityWithBookings(virtualSlots, field, currentDate);
+          ? await this.applyScheduleConstraints(
+              virtualSlots,
+              schedule,
+              field,
+              currentDate,
+              targetCourtId
+            )
+          : await this.getAvailabilityWithBookings(
+              virtualSlots,
+              field,
+              currentDate,
+              targetCourtId
+            );
 
         result.push({
           date: dateKey,
           isHoliday: schedule?.isHoliday || false,
           holidayReason: schedule?.holidayReason,
-          slots: availableSlots
+          slots: availableSlots,
+          courtId: targetCourtId,
+          courtName: targetCourt.name,
+          courtNumber: targetCourt.courtNumber
         });
       }
 
@@ -123,7 +170,11 @@ export class AvailabilityService {
   /**
    * Generate virtual slots from Field configuration
    */
-  generateVirtualSlots(field: Field, date?: Date): Omit<AvailabilitySlot, 'available'>[] {
+  generateVirtualSlots(
+    field: Field,
+    date?: Date,
+    pricingOverride?: { basePrice?: number; priceRanges?: { day: string; start: string; end: string; multiplier: number }[] }
+  ): Omit<AvailabilitySlot, 'available'>[] {
     const slots: Omit<AvailabilitySlot, 'available'>[] = [];
     
     // Get day of week for the date (default to monday if no date provided)
@@ -150,7 +201,7 @@ export class AvailabilityService {
       const startTime = this.minutesToTimeString(currentMinutes);
       const endTime = this.minutesToTimeString(slotEndMinutes);
       
-      const pricing = this.calculateSlotPricing(startTime, endTime, field, date);
+      const pricing = this.calculateSlotPricing(startTime, endTime, field, date, pricingOverride);
       
       slots.push({
         startTime,
@@ -171,14 +222,19 @@ export class AvailabilityService {
     virtualSlots: Omit<AvailabilitySlot, 'available'>[], 
     schedule: Schedule, 
     field: Field,
-    date: Date
+    date: Date,
+    courtId?: string
   ): Promise<AvailabilitySlot[]> {
     if (schedule.isHoliday) {
       return virtualSlots.map(slot => ({ ...slot, available: false }));
     }
 
     // Get actual bookings for this date
-    const actualBookings = await this.getExistingBookingsForDate((field as any)._id.toString(), date);
+    const actualBookings = await this.getExistingBookingsForDate(
+      (field as any)._id.toString(),
+      date,
+      courtId
+    );
     
     // Combine schedule bookedSlots with actual booking records
     const allBookedSlots = [
@@ -201,10 +257,15 @@ export class AvailabilityService {
   async getAvailabilityWithBookings(
     virtualSlots: Omit<AvailabilitySlot, 'available'>[], 
     field: Field,
-    date: Date
+    date: Date,
+    courtId?: string
   ): Promise<AvailabilitySlot[]> {
     // Get actual bookings for this date
-    const actualBookings = await this.getExistingBookingsForDate((field as any)._id.toString(), date);
+    const actualBookings = await this.getExistingBookingsForDate(
+      (field as any)._id.toString(),
+      date,
+      courtId
+    );
     
     // Convert bookings to slot format
     const bookedSlots = actualBookings.map(booking => ({
@@ -221,7 +282,7 @@ export class AvailabilityService {
   /**
    * Get existing bookings for a specific field and date
    */
-  async getExistingBookingsForDate(fieldId: string, date: Date): Promise<Booking[]> {
+  async getExistingBookingsForDate(fieldId: string, date: Date, courtId?: string): Promise<Booking[]> {
     try {
       // ✅ CRITICAL: Normalize date using UTC methods to avoid server timezone issues
       // setHours() uses LOCAL timezone → wrong on Singapore server (UTC+8)
@@ -233,14 +294,20 @@ const endOfDay = new Date(date);
 endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
 
       // Query Booking collection for confirmed and pending bookings
-      const bookings = await this.bookingModel.find({
+      const query: any = {
         field: new Types.ObjectId(fieldId),
         date: {
           $gte: startOfDay,
           $lte: endOfDay
         },
         status: { $in: [BookingStatus.CONFIRMED, BookingStatus.PENDING] }
-      }).exec();
+      };
+
+      if (courtId) {
+        query.court = new Types.ObjectId(courtId);
+      }
+
+      const bookings = await this.bookingModel.find(query).exec();
       
       return bookings;
     } catch (error) {
@@ -272,7 +339,13 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
   /**
    * Calculate pricing for a single slot
    */
-  calculateSlotPricing(startTime: string, endTime: string, field: Field, date?: Date): { 
+  calculateSlotPricing(
+    startTime: string,
+    endTime: string,
+    field: Field,
+    date?: Date,
+    pricingOverride?: { basePrice?: number; priceRanges?: { day: string; start: string; end: string; multiplier: number }[] }
+  ): { 
     price: number; 
     multiplier: number; 
     breakdown: string 
@@ -281,7 +354,11 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
     const dayOfWeek = date ? this.getDayOfWeek(date) : 'monday';
     
     // Find applicable price range for the specific day
-    const applicableRange = field.priceRanges.find(range => {
+    const priceRanges = pricingOverride?.priceRanges && pricingOverride.priceRanges.length > 0
+      ? pricingOverride.priceRanges
+      : field.priceRanges;
+
+    const applicableRange = priceRanges.find(range => {
       if (range.day !== dayOfWeek) return false;
       
       const rangeStart = this.timeStringToMinutes(range.start);
@@ -292,7 +369,8 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
     });
 
     const multiplier = applicableRange?.multiplier || 1;
-    const price = field.basePrice * multiplier;
+    const basePrice = pricingOverride?.basePrice ?? field.basePrice;
+    const price = basePrice * multiplier;
 
     return {
       price,
@@ -315,7 +393,13 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
   /**
    * Calculate pricing for booking
    */
-  calculatePricing(startTime: string, endTime: string, field: Field, date?: Date): { 
+  calculatePricing(
+    startTime: string,
+    endTime: string,
+    field: Field,
+    date?: Date,
+    pricingOverride?: { basePrice?: number; priceRanges?: { day: string; start: string; end: string; multiplier: number }[] }
+  ): { 
     totalPrice: number; 
     multiplier: number; 
     breakdown: string 
@@ -331,7 +415,7 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
       const slotStart = this.minutesToTimeString(currentMinutes);
       const slotEnd = this.minutesToTimeString(slotEndMinutes);
       
-      const slotPricing = this.calculateSlotPricing(slotStart, slotEnd, field, date);
+      const slotPricing = this.calculateSlotPricing(slotStart, slotEnd, field, date, pricingOverride);
       totalPrice += slotPricing.price;
 
       if (breakdown) breakdown += ', ';
@@ -340,7 +424,8 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
 
     // Calculate average multiplier
     const numSlots = Math.ceil((endMinutes - startMinutes) / field.slotDuration);
-    const avgMultiplier = totalPrice / (field.basePrice * numSlots);
+    const basePrice = pricingOverride?.basePrice ?? field.basePrice;
+    const avgMultiplier = basePrice > 0 ? totalPrice / (basePrice * numSlots) : 0;
 
     return {
       totalPrice,
