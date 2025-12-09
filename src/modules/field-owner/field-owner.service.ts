@@ -1592,6 +1592,10 @@ export class FieldOwnerService {
     dto: CreateBankAccountDto,
   ): Promise<BankAccountResponseDto> {
     try {
+      if (!dto.verificationDocument) {
+        throw new BadRequestException('Vui lòng cung cấp ảnh/QR tài khoản ngân hàng để rút tiền');
+      }
+
       // Check for duplicate bank account
       const existingAccount = await this.bankAccountModel.findOne({
         fieldOwner: new Types.ObjectId(profileId),
