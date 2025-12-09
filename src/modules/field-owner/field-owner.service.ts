@@ -557,7 +557,7 @@ export class FieldOwnerService {
           };
 
           // Create courts
-          const courtPromises = [];
+           const courtPromises: Promise<any>[] = [];
           for (let i = 1; i <= numberOfCourts; i++) {
             const courtName = `${fieldName} - Court ${i}`;
             courtPromises.push(
