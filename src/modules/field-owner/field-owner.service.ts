@@ -57,6 +57,7 @@ import { FieldsService } from '../fields/fields.service';
 import { CreatePayOSUrlDto } from '../transactions/dto/payos.dto';
 import { generatePayOSOrderCode } from '../transactions/utils/payos.utils';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
+import { Court } from '../courts/entities/court.entity';
 
 @Injectable()
 export class FieldOwnerService {
@@ -71,6 +72,7 @@ export class FieldOwnerService {
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Transaction.name) private readonly transactionModel: Model<Transaction>,
+    @InjectModel(Court.name) private readonly courtModel: Model<Court>,
     private readonly priceFormatService: PriceFormatService,
     private readonly awsS3Service: AwsS3Service,
     private readonly payosService: PayOSService,
@@ -540,6 +542,43 @@ export class FieldOwnerService {
       });
 
       const savedField = await newField.save();
+
+      // Create courts if numberOfCourts is specified and > 0
+      const numberOfCourts = createFieldDto.numberOfCourts ?? 1;
+      if (numberOfCourts > 0) {
+        try {
+          const fieldId = (savedField._id as Types.ObjectId).toString();
+          const fieldName = savedField.name;
+          
+          // Prepare pricing override from field's basePrice and priceRanges
+          const pricingOverride = {
+            basePrice: savedField.basePrice,
+            priceRanges: savedField.priceRanges || [],
+          };
+
+          // Create courts
+          const courtPromises = [];
+          for (let i = 1; i <= numberOfCourts; i++) {
+            const courtName = `${fieldName} - Court ${i}`;
+            courtPromises.push(
+              this.courtModel.create({
+                field: savedField._id,
+                name: courtName,
+                courtNumber: i,
+                pricingOverride,
+                isActive: true,
+              })
+            );
+          }
+
+          await Promise.all(courtPromises);
+          this.logger.log(`Successfully created ${numberOfCourts} court(s) for field ${fieldId}`);
+        } catch (courtError) {
+          // Log error but don't fail the field creation
+          this.logger.error(`Failed to create courts for field ${savedField._id}:`, courtError);
+          // Field is already created, so we continue
+        }
+      }
 
       return {
         id: (savedField._id as Types.ObjectId).toString(),
@@ -1553,6 +1592,10 @@ export class FieldOwnerService {
     dto: CreateBankAccountDto,
   ): Promise<BankAccountResponseDto> {
     try {
+      if (!dto.verificationDocument) {
+        throw new BadRequestException('Vui lòng cung cấp ảnh/QR tài khoản ngân hàng để rút tiền');
+      }
+
       // Check for duplicate bank account
       const existingAccount = await this.bankAccountModel.findOne({
         fieldOwner: new Types.ObjectId(profileId),

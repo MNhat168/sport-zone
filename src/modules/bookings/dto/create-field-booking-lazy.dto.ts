@@ -20,6 +20,17 @@ export class CreateFieldBookingLazyDto {
   fieldId: string;
 
   /**
+   * ID của court trong sân
+   * @example "657f1f77bcf86cd799439011"
+   */
+  @ApiProperty({
+    example: '657f1f77bcf86cd799439011',
+    description: 'ID của court thuộc sân'
+  })
+  @IsString()
+  courtId: string;
+
+  /**
    * Ngày đặt sân (YYYY-MM-DD)
    * @example "2025-10-15"
    */
@@ -114,6 +125,18 @@ export class FieldAvailabilityQueryDto {
   })
   @IsDateString()
   startDate: string;
+
+  /**
+   * Court cần kiểm tra (tùy chọn, bắt buộc nếu field có nhiều court)
+   * @example "657f1f77bcf86cd799439011"
+   */
+  @ApiPropertyOptional({
+    example: '657f1f77bcf86cd799439011',
+    description: 'Court ID. Nếu field có nhiều court, cần truyền courtId'
+  })
+  @IsOptional()
+  @IsString()
+  courtId?: string;
 
   /**
    * Ngày kết thúc query (YYYY-MM-DD)

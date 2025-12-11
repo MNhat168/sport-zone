@@ -547,6 +547,10 @@ export class AdminService {
                     select: 'name sportType address',
                 })
                 .populate({
+                    path: 'court',
+                    select: 'name courtNumber',
+                })
+                .populate({
                     path: 'requestedCoach',
                     select: 'fullName',
                 })

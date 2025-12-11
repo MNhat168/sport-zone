@@ -12,6 +12,7 @@ import { Transaction, TransactionSchema } from '../transactions/entities/transac
 import { User, UserSchema } from '@modules/users/entities/user.entity';
 import { TransactionsModule } from '@modules/transactions/transactions.module';
 import { EmailModule } from '@modules/email/email.module';
+import { Court, CourtSchema } from '../courts/entities/court.entity';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { EmailModule } from '@modules/email/email.module';
       { name: Tournament.name, schema: TournamentSchema },
       { name: TournamentFieldReservation.name, schema: TournamentFieldReservationSchema },
       { name: Field.name, schema: FieldSchema },
+      { name: Court.name, schema: CourtSchema },
       { name: Transaction.name, schema: TransactionSchema },
       { name: User.name, schema: UserSchema },
     ]),

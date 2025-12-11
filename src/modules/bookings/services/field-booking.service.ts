@@ -6,6 +6,7 @@ import { Booking } from '../entities/booking.entity';
 import { BookingStatus, BookingType } from '@common/enums/booking.enum';
 import { Schedule } from '../../schedules/entities/schedule.entity';
 import { Field } from '../../fields/entities/field.entity';
+import { Court } from '../../courts/entities/court.entity';
 import { FieldOwnerProfile } from '../../field-owner/entities/field-owner-profile.entity';
 import { User } from '../../users/entities/user.entity';
 import { TransactionsService } from '../../transactions/transactions.service';
@@ -29,6 +30,7 @@ export class FieldBookingService {
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
     @InjectModel(Schedule.name) private readonly scheduleModel: Model<Schedule>,
     @InjectModel(Field.name) private readonly fieldModel: Model<Field>,
+    @InjectModel(Court.name) private readonly courtModel: Model<Court>,
     @InjectModel(FieldOwnerProfile.name) private readonly fieldOwnerProfileModel: Model<FieldOwnerProfile>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectConnection() private readonly connection: Connection,
@@ -60,6 +62,10 @@ export class FieldBookingService {
         if (!field || !field.isActive) {
           throw new NotFoundException('Field not found or inactive');
         }
+        const fieldId = (field._id as Types.ObjectId).toString();
+
+        // Validate court belongs to field
+        const court = await this.validateCourt(bookingData.courtId, fieldId, session);
 
         // Parse booking date
         const bookingDate = new Date(bookingData.date);
@@ -69,17 +75,25 @@ export class FieldBookingService {
         
         // Calculate slots and pricing
         const numSlots = this.availabilityService.calculateNumSlots(bookingData.startTime, bookingData.endTime, field.slotDuration);
-        const pricingInfo = this.availabilityService.calculatePricing(bookingData.startTime, bookingData.endTime, field, bookingDate);
+        const pricingInfo = this.availabilityService.calculatePricing(
+          bookingData.startTime,
+          bookingData.endTime,
+          field,
+          bookingDate,
+          court.pricingOverride
+        );
 
         // ✅ SECURITY: Atomic upsert with version initialization (Pure Lazy Creation)
         const scheduleUpdate = await this.scheduleModel.findOneAndUpdate(
           {
             field: new Types.ObjectId(bookingData.fieldId),
+            court: court._id,
             date: bookingDate
           },
           {
             $setOnInsert: {
               field: new Types.ObjectId(bookingData.fieldId),
+              court: court._id,
               date: bookingDate,
               bookedSlots: [],
               isHoliday: false
@@ -155,6 +169,7 @@ export class FieldBookingService {
         const booking = new this.bookingModel({
           user: new Types.ObjectId(userId),
           field: new Types.ObjectId(bookingData.fieldId),
+          court: court._id,
           date: bookingDate,
           type: BookingType.FIELD,
           startTime: bookingData.startTime,
@@ -239,6 +254,7 @@ export class FieldBookingService {
           bookingId: booking._id,
           userId,
           fieldId: bookingData.fieldId,
+          courtId: bookingData.courtId,
           date: bookingData.date,
           startTime: bookingData.startTime,
           endTime: bookingData.endTime
@@ -435,6 +451,10 @@ export class FieldBookingService {
         if (!field || !field.isActive) {
           throw new NotFoundException('Field not found or inactive');
         }
+        const fieldId = (field._id as Types.ObjectId).toString();
+
+        // Validate court belongs to field
+        const court = await this.validateCourt(bookingData.courtId, fieldId, session);
 
         // Parse booking date
         const bookingDate = new Date(bookingData.date);
@@ -444,17 +464,25 @@ export class FieldBookingService {
         
         // Calculate slots and pricing
         const numSlots = this.availabilityService.calculateNumSlots(bookingData.startTime, bookingData.endTime, field.slotDuration);
-        const pricingInfo = this.availabilityService.calculatePricing(bookingData.startTime, bookingData.endTime, field, bookingDate);
+        const pricingInfo = this.availabilityService.calculatePricing(
+          bookingData.startTime,
+          bookingData.endTime,
+          field,
+          bookingDate,
+          court.pricingOverride
+        );
 
         // ✅ SECURITY: Atomic upsert with version initialization (Pure Lazy Creation)
         const scheduleUpdate = await this.scheduleModel.findOneAndUpdate(
           {
             field: new Types.ObjectId(bookingData.fieldId),
+            court: court._id,
             date: bookingDate
           },
           {
             $setOnInsert: {
               field: new Types.ObjectId(bookingData.fieldId),
+              court: court._id,
               date: bookingDate,
               bookedSlots: [],
               isHoliday: false
@@ -506,6 +534,7 @@ export class FieldBookingService {
         const createdBooking = new this.bookingModel({
           user: new Types.ObjectId(finalUserId),
           field: new Types.ObjectId(bookingData.fieldId),
+          court: court._id,
           date: bookingDate,
           type: BookingType.FIELD,
           startTime: bookingData.startTime,
@@ -566,6 +595,7 @@ export class FieldBookingService {
           bookingId: createdBooking._id,
           userId: finalUserId,
           fieldId: bookingData.fieldId,
+          courtId: bookingData.courtId,
           date: bookingData.date,
           startTime: bookingData.startTime,
           endTime: bookingData.endTime
@@ -629,6 +659,26 @@ export class FieldBookingService {
     await guestUser.save({ session });
     this.logger.log(`Created guest user for email: ${guestEmail}`);
     return guestUser;
+  }
+
+  /**
+   * Validate court existence, activity, and field ownership
+   */
+  private async validateCourt(courtId: string, fieldId: string, session: ClientSession): Promise<Court> {
+    if (!Types.ObjectId.isValid(courtId)) {
+      throw new BadRequestException('Invalid court ID format');
+    }
+
+    const court = await this.courtModel.findById(courtId).session(session);
+    if (!court || !court.isActive) {
+      throw new NotFoundException('Court not found or inactive');
+    }
+
+    if (court.field.toString() !== fieldId.toString()) {
+      throw new BadRequestException('Court does not belong to the specified field');
+    }
+
+    return court;
   }
 
   // Note: Email sending is now handled by BookingEmailService after transaction commits

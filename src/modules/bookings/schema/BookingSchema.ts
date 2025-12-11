@@ -24,6 +24,10 @@ BookingSchema.pre('save', async function (this: HydratedDocument<Booking>, next)
         return next(new Error('Field is required for field bookings'));
     }
 
+    if (this.type === 'field' && !this.court) {
+        return next(new Error('Court is required for field bookings'));
+    }
+
     const field = await this.model('Field').findById(this.field) as HydratedDocument<any> & { slotDuration: number; minSlots: number; maxSlots: number };
     if (!field) {
         return next(new Error('Field not found'));
@@ -41,3 +45,5 @@ BookingSchema.pre('save', async function (this: HydratedDocument<Booking>, next)
 
     next();
 });
+
+BookingSchema.index({ court: 1, date: 1, status: 1 });

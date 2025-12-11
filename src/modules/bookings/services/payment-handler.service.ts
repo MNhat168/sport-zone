@@ -304,6 +304,7 @@ const isCoach = !!current && (current as any).type === BookingType.COACH;
         bookingId: event.bookingId,
         userId: event.userId,
         fieldId: updateResult.field?.toString() || null,
+        courtId: (updateResult as any).court?.toString?.() || null,
         date: updateResult.date,
       });
 

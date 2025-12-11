@@ -12,11 +12,13 @@ import { Schedule, ScheduleSchema } from '../schedules/entities/schedule.entity'
 import { User, UserSchema } from '../users/entities/user.entity';
 import { Amenity, AmenitySchema } from '../amenities/entities/amenities.entity';
 import { Transaction, TransactionSchema } from '../transactions/entities/transaction.entity';
+import { Court, CourtSchema } from '../courts/entities/court.entity';
 import { ServiceModule } from '../../service/service.module';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { EmailModule } from '../email/email.module';
 import { FieldsModule } from '../fields/fields.module';
 import { EkycModule } from '../ekyc/ekyc.module';
+import { CourtsModule } from '../courts/courts.module';
 
 @Module({
   imports: [
@@ -31,12 +33,14 @@ import { EkycModule } from '../ekyc/ekyc.module';
       { name: User.name, schema: UserSchema },
       { name: Amenity.name, schema: AmenitySchema },
       { name: Transaction.name, schema: TransactionSchema },
+      { name: Court.name, schema: CourtSchema },
     ]),
     forwardRef(() => FieldsModule),
     forwardRef(() => TransactionsModule),
     forwardRef(() => ServiceModule),
     EmailModule,
     EkycModule,
+    CourtsModule,
   ],
   controllers: [FieldOwnerController],
   providers: [FieldOwnerService],

@@ -19,6 +19,17 @@ export class CreateFieldBookingV2Dto {
   fieldId: string;
 
   /**
+   * ID của court trong sân
+   * @example "657f1f77bcf86cd799439011"
+   */
+  @ApiProperty({
+    example: '657f1f77bcf86cd799439011',
+    description: 'ID của court thuộc sân'
+  })
+  @IsString()
+  courtId: string;
+
+  /**
    * Ngày đặt sân (YYYY-MM-DD)
    * @example "2025-10-15"
    */

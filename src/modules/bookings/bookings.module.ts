@@ -10,6 +10,7 @@ import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entit
 import { User, UserSchema } from '../users/entities/user.entity';
 import { CoachProfile, CoachProfileSchema } from '../coaches/entities/coach-profile.entity';
 import { Transaction, TransactionSchema } from '../transactions/entities/transaction.entity';
+import { Court, CourtSchema } from '../courts/entities/court.entity';
 
 // Services and Controllers
 import { BookingsService } from './bookings.service';
@@ -45,6 +46,7 @@ import { BookingEmailService } from './services/booking-email.service';
       { name: Booking.name, schema: BookingSchema },
       { name: Schedule.name, schema: ScheduleSchema },
       { name: Field.name, schema: FieldSchema },
+      { name: Court.name, schema: CourtSchema },
       { name: FieldOwnerProfile.name, schema: FieldOwnerProfileSchema },
       { name: User.name, schema: UserSchema },
       { name: CoachProfile.name, schema: CoachProfileSchema },

@@ -255,6 +255,20 @@ export class CreateFieldDto {
     @ValidateNested({ each: true })
     @Type(() => FieldAmenityDto)
     amenities?: FieldAmenityDto[];
+
+    @ApiPropertyOptional({ 
+        example: 1, 
+        description: 'Số lượng court sẽ được tạo tự động khi tạo sân (0-10, mặc định: 1)', 
+        minimum: 0, 
+        maximum: 10,
+        default: 1
+    })
+    @IsOptional()
+    @IsNumber()
+    @Min(0)
+    @Max(10)
+    @Type(() => Number)
+    numberOfCourts?: number;
 }
 
 /**
