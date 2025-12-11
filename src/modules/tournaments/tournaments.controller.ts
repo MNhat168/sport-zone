@@ -1,12 +1,12 @@
-import { 
-  Controller, 
-  Get, 
-  Post, 
-  Body, 
-  Param, 
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
   Query,
   UseGuards,
-  Request, 
+  Request,
   Logger,
   BadRequestException,
   NotFoundException,
@@ -23,8 +23,8 @@ export class TournamentController {
   payosService: any;
   transactionsService: any;
   eventEmitter: any;
-  
-  constructor(private readonly tournamentService: TournamentService) {}
+
+  constructor(private readonly tournamentService: TournamentService) { }
 
   @Post()
   @UseGuards(JwtAccessTokenGuard)
@@ -52,6 +52,22 @@ export class TournamentController {
     return this.tournamentService.findAll(filters);
   }
 
+  @Get('available-courts') // New endpoint
+// In tournaments.controller.ts
+@Get('available-courts')
+findAvailableCourts(
+    @Query('sportType') sportType: string,
+    @Query('location') location: string,
+    @Query('date') date: string,
+) {
+    // Add validation
+    if (!sportType || !location || !date) {
+        throw new BadRequestException('Missing required parameters: sportType, location, date');
+    }
+    
+    return this.tournamentService.findAvailableCourts(sportType, location, date);
+}
+
   @Get('available-fields')
   findAvailableFields(
     @Query('sportType') sportType: string,
@@ -67,76 +83,76 @@ export class TournamentController {
   }
 
   @Get(':id/payment-return')
-@ApiOperation({ summary: 'Handle tournament payment return from PayOS' })
-async handleTournamentPaymentReturn(
+  @ApiOperation({ summary: 'Handle tournament payment return from PayOS' })
+  async handleTournamentPaymentReturn(
     @Param('id') tournamentId: string,
     @Query() query: any,
     @Req() req: Request
-) {
+  ) {
     try {
-        const { orderCode, status } = query;
-        
-        if (!orderCode) {
-            throw new BadRequestException('Missing order code');
-        }
+      const { orderCode, status } = query;
 
-        // Query PayOS for transaction status
-        const payosTransaction = await this.payosService.queryTransaction(Number(orderCode));
+      if (!orderCode) {
+        throw new BadRequestException('Missing order code');
+      }
 
-        // Find local transaction
-        const transaction = await this.transactionsService.getPaymentByExternalId(String(orderCode));
+      // Query PayOS for transaction status
+      const payosTransaction = await this.payosService.queryTransaction(Number(orderCode));
 
-        if (!transaction) {
-            throw new NotFoundException('Transaction not found');
-        }
+      // Find local transaction
+      const transaction = await this.transactionsService.getPaymentByExternalId(String(orderCode));
 
-        // Determine status
-        let paymentStatus: 'succeeded' | 'failed' | 'pending';
-        
-        if (payosTransaction.status === 'PAID') {
-            paymentStatus = 'succeeded';
-        } else if (payosTransaction.status === 'CANCELLED' || payosTransaction.status === 'EXPIRED') {
-            paymentStatus = 'failed';
-        } else {
-            paymentStatus = 'pending';
-        }
+      if (!transaction) {
+        throw new NotFoundException('Transaction not found');
+      }
 
-        // Emit payment event based on status
-        if (paymentStatus === 'succeeded') {
-            this.eventEmitter.emit('payment.success', {
-                paymentId: transaction._id.toString(),
-                tournamentId: tournamentId,
-                userId: transaction.user.toString(),
-                amount: transaction.amount,
-                method: transaction.method,
-                transactionId: payosTransaction.reference,
-            });
-        } else if (paymentStatus === 'failed') {
-            this.eventEmitter.emit('payment.failed', {
-                paymentId: transaction._id.toString(),
-                tournamentId: tournamentId,
-                userId: transaction.user.toString(),
-                amount: transaction.amount,
-                method: transaction.method,
-                transactionId: payosTransaction.reference,
-                reason: payosTransaction.status === 'CANCELLED' 
-                    ? 'Transaction cancelled' 
-                    : 'Transaction expired',
-            });
-        }
+      // Determine status
+      let paymentStatus: 'succeeded' | 'failed' | 'pending';
 
-        return {
-            success: paymentStatus === 'succeeded',
-            paymentStatus,
-            tournamentId,
-            message: paymentStatus === 'succeeded' 
-                ? 'Payment successful! You are now registered.' 
-                : 'Payment failed',
-        };
+      if (payosTransaction.status === 'PAID') {
+        paymentStatus = 'succeeded';
+      } else if (payosTransaction.status === 'CANCELLED' || payosTransaction.status === 'EXPIRED') {
+        paymentStatus = 'failed';
+      } else {
+        paymentStatus = 'pending';
+      }
+
+      // Emit payment event based on status
+      if (paymentStatus === 'succeeded') {
+        this.eventEmitter.emit('payment.success', {
+          paymentId: transaction._id.toString(),
+          tournamentId: tournamentId,
+          userId: transaction.user.toString(),
+          amount: transaction.amount,
+          method: transaction.method,
+          transactionId: payosTransaction.reference,
+        });
+      } else if (paymentStatus === 'failed') {
+        this.eventEmitter.emit('payment.failed', {
+          paymentId: transaction._id.toString(),
+          tournamentId: tournamentId,
+          userId: transaction.user.toString(),
+          amount: transaction.amount,
+          method: transaction.method,
+          transactionId: payosTransaction.reference,
+          reason: payosTransaction.status === 'CANCELLED'
+            ? 'Transaction cancelled'
+            : 'Transaction expired',
+        });
+      }
+
+      return {
+        success: paymentStatus === 'succeeded',
+        paymentStatus,
+        tournamentId,
+        message: paymentStatus === 'succeeded'
+          ? 'Payment successful! You are now registered.'
+          : 'Payment failed',
+      };
 
     } catch (error) {
-        this.logger.error('Error handling tournament payment return:', error);
-        throw new BadRequestException('Error verifying payment');
+      this.logger.error('Error handling tournament payment return:', error);
+      throw new BadRequestException('Error verifying payment');
     }
-}
+  }
 }

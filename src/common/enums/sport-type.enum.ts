@@ -150,8 +150,11 @@ export interface SportRules {
   maxTeams: number;
   minParticipants: number;
   maxParticipants: number;
+  // Keep both field and court properties for backward compatibility
   minFieldsRequired: number;
   maxFieldsRequired: number;
+  minCourtsRequired: number; // Add this
+  maxCourtsRequired: number; // Add this
   typicalDuration: number;
   description: string;
   displayName: string;
@@ -170,6 +173,8 @@ export const SPORT_RULES_MAP: Record<SportType, SportRules> = {
     maxParticipants: 176,
     minFieldsRequired: 1,
     maxFieldsRequired: 2,
+    minCourtsRequired: 1, // Same as fields for football
+    maxCourtsRequired: 2, // Same as fields for football
     typicalDuration: 2,
     description: 'Football tournament with flexible team sizes',
     displayName: 'Football',
@@ -186,6 +191,8 @@ export const SPORT_RULES_MAP: Record<SportType, SportRules> = {
     maxParticipants: 64,
     minFieldsRequired: 1,
     maxFieldsRequired: 8,
+    minCourtsRequired: 1, // Could be different
+    maxCourtsRequired: 8, // Same as fields
     typicalDuration: 4,
     description: 'Tennis tournament',
     displayName: 'Tennis',
@@ -202,6 +209,8 @@ export const SPORT_RULES_MAP: Record<SportType, SportRules> = {
     maxParticipants: 64,
     minFieldsRequired: 2,
     maxFieldsRequired: 8,
+    minCourtsRequired: 2, // Same as fields
+    maxCourtsRequired: 8, // Same as fields
     typicalDuration: 4,
     description: 'Badminton tournament',
     displayName: 'Badminton',
@@ -218,6 +227,8 @@ export const SPORT_RULES_MAP: Record<SportType, SportRules> = {
     maxParticipants: 64,
     minFieldsRequired: 2,
     maxFieldsRequired: 6,
+    minCourtsRequired: 2, // Same as fields
+    maxCourtsRequired: 6, // Same as fields
     typicalDuration: 3,
     description: 'Pickleball tournament',
     displayName: 'Pickleball',
@@ -234,6 +245,8 @@ export const SPORT_RULES_MAP: Record<SportType, SportRules> = {
     maxParticipants: 80,
     minFieldsRequired: 1,
     maxFieldsRequired: 3,
+    minCourtsRequired: 1, // Same as fields
+    maxCourtsRequired: 3, // Same as fields
     typicalDuration: 3,
     description: 'Basketball tournament with 5 players per team',
     displayName: 'Basketball',
@@ -250,6 +263,8 @@ export const SPORT_RULES_MAP: Record<SportType, SportRules> = {
     maxParticipants: 96,
     minFieldsRequired: 1,
     maxFieldsRequired: 4,
+    minCourtsRequired: 1, // Same as fields
+    maxCourtsRequired: 4, // Same as fields
     typicalDuration: 3,
     description: 'Volleyball tournament with 6 players per team',
     displayName: 'Volleyball',
@@ -266,6 +281,8 @@ export const SPORT_RULES_MAP: Record<SportType, SportRules> = {
     maxParticipants: 200,
     minFieldsRequired: 1,
     maxFieldsRequired: 2,
+    minCourtsRequired: 1, // Same as fields (lanes)
+    maxCourtsRequired: 2, // Same as fields (lanes)
     typicalDuration: 2,
     description: 'Individual swimming competition',
     displayName: 'Swimming',
@@ -282,6 +299,8 @@ export const SPORT_RULES_MAP: Record<SportType, SportRules> = {
     maxParticipants: 120,
     minFieldsRequired: 1,
     maxFieldsRequired: 1,
+    minCourtsRequired: 1, // Same as fields
+    maxCourtsRequired: 1, // Same as fields
     typicalDuration: 2,
     description: 'Fitness competition or workshop',
     displayName: 'Gym/Fitness',
