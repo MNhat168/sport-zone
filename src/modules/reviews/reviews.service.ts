@@ -324,10 +324,26 @@ export class ReviewsService {
       throw new BadRequestException('Invalid fieldId');
     }
 
+    // Try to match reviews where `field` is stored as an ObjectId or as a string.
+    // This makes the recompute robust if older reviews were saved with a string id.
     const agg = await this.reviewModel.aggregate([
-      { $match: { field: objectId, type: ReviewType.FIELD } },
+      {
+        $match: {
+          type: ReviewType.FIELD,
+          $or: [{ field: objectId }, { field: fieldId }],
+        },
+      },
       { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } },
     ]).exec();
+
+    // Debug/logging to help investigate cases where aggregation returns no rows
+    // (remove or lower log level in production if desired)
+    try {
+      // eslint-disable-next-line no-console
+      console.debug('recomputeFieldStats agg for', fieldId, JSON.stringify(agg));
+    } catch (e) {
+      // ignore logging errors
+    }
 
     const result = agg && agg.length > 0 ? agg[0] : null;
     const totalReviews = result?.count ? Number(result.count) : 0;
