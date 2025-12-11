@@ -91,6 +91,31 @@ export class ChatService {
     return populatedChat;
   }
 
+  // Modified to accept room creation if it doesn't exist
+  async sendMessageWithAutoCreate(
+    userId: string,
+    fieldOwnerId: string,
+    content: string,
+    type: MessageType = MessageType.TEXT,
+    fieldId?: string,
+    attachments?: string[],
+  ): Promise<{ message: Message; chatRoom: ChatRoom }> {
+
+    // First, get or create chat room
+    const chatRoom = await this.createOrGetChatRoom(userId, fieldOwnerId, fieldId);
+
+    // Send the message
+    const message = await this.sendMessage(
+      (chatRoom._id as Types.ObjectId).toString(),
+      userId,
+      content,
+      type,
+      attachments
+    );
+
+    return { message, chatRoom };
+  }
+
   async sendMessage(
     chatRoomId: string,
     senderId: string,
@@ -143,6 +168,46 @@ export class ChatService {
       .sort({ lastMessageAt: -1 })
       .exec();
   }
+
+// In chat.service.ts, update getChatRoomsForFieldOwner:
+async getChatRoomsForFieldOwner(fieldOwnerUserId: string): Promise<ChatRoom[]> {
+    // First, find the field owner profile linked to this user
+    const fieldOwnerProfile = await this.fieldOwnerProfileModel.findOne({
+        user: new Types.ObjectId(fieldOwnerUserId)
+    });
+
+    if (!fieldOwnerProfile) {
+        // If no profile found, try to find by ID directly
+        // Check if the ID is already a field owner profile ID
+        const existingProfile = await this.fieldOwnerProfileModel.findById(fieldOwnerUserId);
+        if (existingProfile) {
+            // Use it directly
+            return this.chatModel
+                .find({
+                    fieldOwner: existingProfile._id,
+                    status: ChatStatus.ACTIVE,
+                })
+                .populate('user', 'fullName avatarUrl phone')
+                .populate('fieldOwner', 'facilityName contactPhone')
+                .populate('field', 'name images sportType')
+                .sort({ lastMessageAt: -1 })
+                .exec();
+        }
+        throw new NotFoundException('Field owner profile not found');
+    }
+
+    // Use the field owner profile ID to find chat rooms
+    return this.chatModel
+        .find({
+            fieldOwner: fieldOwnerProfile._id,
+            status: ChatStatus.ACTIVE,
+        })
+        .populate('user', 'fullName avatarUrl phone')
+        .populate('fieldOwner', 'facilityName contactPhone')
+        .populate('field', 'name images sportType')
+        .sort({ lastMessageAt: -1 })
+        .exec();
+}
 
   async getChatRoomMessages(chatRoomId: string, userId: string): Promise<ChatRoom> {
     // Validate IDs
