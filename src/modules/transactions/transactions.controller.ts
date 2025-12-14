@@ -1,8 +1,6 @@
 import { Controller, Get, Post, Body, Query, Param, Req, BadRequestException, NotFoundException, Delete, Patch, HttpCode, Res, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { TransactionsService } from './transactions.service';
-import { VNPayService } from './vnpay.service';
-import { sortObject } from './utils/vnpay.utils';
 import * as crypto from 'crypto';
 import * as qs from 'qs';
 import { ConfigService } from '@nestjs/config';
@@ -10,13 +8,6 @@ import { Request } from 'express';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthGuard } from '@nestjs/passport';
 import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum';
-import { 
-    CreateVNPayUrlDto, 
-    QueryTransactionDto, 
-    RefundTransactionDto,
-    VNPayIPNResponseDto,
-    VNPayVerificationResultDto
-} from './dto/vnpay.dto';
 import { PayOSService } from './payos.service';
 import { CreateCoachVerificationDto } from './dto/coach-verification.dto';
 import { InjectModel } from '@nestjs/mongoose';
@@ -42,7 +33,6 @@ export class TransactionsController {
   constructor(
         private readonly transactionsService: TransactionsService,
         private readonly cleanupService: CleanupService,
-        private readonly vnpayService: VNPayService,
         private readonly payosService: PayOSService,
         private readonly configService: ConfigService,
         private readonly eventEmitter: EventEmitter2,
@@ -50,76 +40,6 @@ export class TransactionsController {
         private readonly fieldOwnerService: FieldOwnerService,
         @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
     ) { }
-
-    /**
-     * Create VNPay payment URL
-     * Improved version using VNPayService
-     */
-    @Get('create-vnpay-url')
-    @ApiOperation({
-        summary: 'Tạo URL thanh toán VNPay',
-        description: 'Generate VNPay payment URL for booking. Uses official VNPay implementation.'
-    })
-    @ApiQuery({ name: 'amount', description: 'Số tiền thanh toán (VND)', example: '200000' })
-    @ApiQuery({ name: 'orderId', description: 'Booking ID hoặc Payment ID', example: '6904dd2a6289f3cf36b1dbe3' })
-    @ApiQuery({ name: 'bankCode', description: 'Bank code for direct payment (optional)', required: false, example: 'NCB' })
-    @ApiQuery({ name: 'locale', description: 'Language (vn/en)', required: false, example: 'vn' })
-    @ApiQuery({ name: 'returnUrl', description: 'URL redirect sau khi thanh toán (optional)', required: false })
-    @ApiResponse({ status: 200, description: 'Payment URL được tạo thành công' })
-    @ApiResponse({ status: 400, description: 'Invalid amount or orderId' })
-    createVNPayUrl(
-        @Query('amount') amount: string,
-        @Query('orderId') orderId: string,
-        @Query('bankCode') bankCode: string | undefined,
-        @Query('locale') locale: string | undefined,
-        @Query('returnUrl') returnUrl: string | undefined,
-        @Req() req: Request,
-    ) {
-        // Validate input
-        const parsedAmount = Number(amount);
-        if (!orderId || !amount || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
-            throw new BadRequestException('Invalid amount or orderId');
-        }
-
-        if (parsedAmount < 1000) {
-            throw new BadRequestException('Minimum payment amount is 1,000 VND');
-        }
-
-        // Extract client IP address
-        const forwarded = req.headers['x-forwarded-for'];
-        let ipAddr: string = (typeof req.ip === 'string' && req.ip.length > 0)
-            ? req.ip
-            : (req.socket && typeof req.socket.remoteAddress === 'string' ? req.socket.remoteAddress : '0.0.0.0');
-        if (Array.isArray(forwarded)) {
-            if (forwarded.length > 0 && typeof forwarded[0] === 'string') {
-                ipAddr = forwarded[0];
-            }
-        } else if (typeof forwarded === 'string' && forwarded.length > 0) {
-            ipAddr = forwarded;
-        }
-
-        // Remove IPv6 prefix if present
-        if (ipAddr.startsWith('::ffff:')) {
-            ipAddr = ipAddr.substring(7);
-        }
-
-        // Create payment URL using VNPayService
-        const dto: CreateVNPayUrlDto = {
-            amount: parsedAmount,
-            orderId,
-            bankCode,
-            locale,
-            returnUrl,
-        };
-
-        const paymentUrl = this.vnpayService.createPaymentUrl(dto, ipAddr);
-
-        return { 
-            paymentUrl,
-            orderId,
-            amount: parsedAmount,
-        };
-    }
 
     /**
      * Tạo transaction xác thực tài khoản ngân hàng cho coach (10k)
