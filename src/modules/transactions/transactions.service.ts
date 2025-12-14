@@ -109,105 +109,130 @@ export class TransactionsService {
     }
   }
 
-  /**
-   * Cập nhật trạng thái transaction với PayOS data
-   */
-  // In transactions.service.ts - updatePaymentStatus method
-  // In transactions.service.ts - updatePaymentStatus method
-  async updatePaymentStatus(
+    async updatePaymentStatus(
     transactionId: string,
     status: TransactionStatus,
     receiptUrl?: string,
     gatewayData?: {
-      payosOrderCode?: number;
-      payosReference?: string;
-      payosAccountNumber?: string;
-      payosTransactionDateTime?: string;
+        payosOrderCode?: number;
+        payosReference?: string;
+        payosAccountNumber?: string;
+        payosTransactionDateTime?: string;
     }
-  ): Promise<Transaction> {
-    // ✅ FIX: Get existing transaction first to preserve metadata
+): Promise<Transaction> {
+    // ✅ CRITICAL: Read existing transaction first to preserve metadata
+    // Use findOneAndUpdate with $set on metadata fields to ensure atomic merge
     const existingTransaction = await this.transactionModel.findById(transactionId);
+    
     if (!existingTransaction) {
-      throw new NotFoundException(`Transaction with ID ${transactionId} not found`);
+        throw new NotFoundException(`Transaction with ID ${transactionId} not found`);
     }
 
-    // Get existing metadata (with proper fallback)
+    // ✅ Log existing metadata for debugging
+    this.logger.debug(`[updatePaymentStatus] Existing metadata before update: ${JSON.stringify(existingTransaction.metadata)}`);
+
+    // ✅ Preserve existing metadata and merge with new PayOS data
     const existingMetadata = existingTransaction.metadata || {};
-    console.log('Existing metadata:', existingMetadata);
-    const updateData: any = {
-      status,
-      // ... other updates
-      metadata: {
-        ...existingMetadata,  // Preserve existing metadata
-        ...gatewayData,       // Add PayOS data
-      }
+    
+    // ✅ Log existing metadata for debugging
+    this.logger.debug(`[updatePaymentStatus] Existing metadata keys: ${Object.keys(existingMetadata).join(', ')}`);
+
+    // 1. Build atomic update operations
+    const updateOperations: any = {
+        $set: {
+            status,
+        }
     };
 
-    // ✅ FIX: Preserve ALL existing metadata and only add PayOS fields
+    // ✅ CRITICAL: Use dot notation to update individual metadata fields
+    // This ensures MongoDB merges the fields instead of replacing the entire object
+    // First, ensure metadata object exists
+    if (!existingTransaction.metadata) {
+        updateOperations.$set.metadata = {};
+    }
+
+    // ✅ Merge PayOS gateway data into metadata using dot notation
+    // This preserves all existing metadata fields
     if (gatewayData) {
-      // Update externalTransactionId if needed
-      if (gatewayData.payosOrderCode && !existingTransaction.externalTransactionId) {
-        updateData.externalTransactionId = String(gatewayData.payosOrderCode);
-      }
-
-      // Add PayOS metadata WITHOUT overriding existing metadata
-      const newMetadata = { ...existingMetadata };
-
-      if (gatewayData.payosReference) {
-        newMetadata.payosReference = gatewayData.payosReference;
-      }
-      if (gatewayData.payosAccountNumber) {
-        newMetadata.payosAccountNumber = gatewayData.payosAccountNumber;
-      }
-      if (gatewayData.payosTransactionDateTime) {
-        newMetadata.payosTransactionDateTime = gatewayData.payosTransactionDateTime;
-      }
-
-      // Only update if we actually added PayOS data
-      if (Object.keys(newMetadata).length > Object.keys(existingMetadata).length) {
-        updateData.metadata = newMetadata;
-      }
+        if (gatewayData.payosOrderCode) {
+            updateOperations.$set['metadata.payosOrderCode'] = gatewayData.payosOrderCode;
+        }
+        if (gatewayData.payosReference) {
+            updateOperations.$set['metadata.payosReference'] = gatewayData.payosReference;
+        }
+        if (gatewayData.payosAccountNumber) {
+            updateOperations.$set['metadata.payosAccountNumber'] = gatewayData.payosAccountNumber;
+        }
+        if (gatewayData.payosTransactionDateTime) {
+            updateOperations.$set['metadata.payosTransactionDateTime'] = gatewayData.payosTransactionDateTime;
+        }
     }
 
-    // Update timestamps based on status
+    // ✅ Log what will be updated
+    const payosFields = gatewayData ? Object.keys(gatewayData).filter(k => gatewayData[k]) : [];
+    this.logger.debug(`[updatePaymentStatus] Will update PayOS fields: ${payosFields.join(', ')}`);
+    this.logger.debug(`[updatePaymentStatus] Existing metadata will be preserved: ${Object.keys(existingMetadata).join(', ')}`);
+
+    // Set externalTransactionId if PayOS order code provided
+    if (gatewayData?.payosOrderCode) {
+        updateOperations.$set.externalTransactionId = String(gatewayData.payosOrderCode);
+    }
+
+    // 2. Update timestamps based on status
     if (status === TransactionStatus.SUCCEEDED) {
-      updateData.completedAt = new Date();
+        updateOperations.$set.completedAt = new Date();
+        // Preserve existing notes if any
+        const existingNotes = existingTransaction.notes || '';
+        updateOperations.$set.notes = existingNotes 
+            ? `${existingNotes}\nTransaction completed successfully`
+            : 'Transaction completed successfully';
     } else if (status === TransactionStatus.FAILED) {
-      updateData.failedAt = new Date();
+        updateOperations.$set.failedAt = new Date();
+        const existingNotes = existingTransaction.notes || '';
+        updateOperations.$set.notes = existingNotes 
+            ? `${existingNotes}\nTransaction failed`
+            : 'Transaction failed';
     } else if (status === TransactionStatus.PROCESSING) {
-      updateData.processedAt = new Date();
+        updateOperations.$set.processedAt = new Date();
     }
 
-    // Update notes - append to existing notes instead of replacing
-    const existingNotes = existingTransaction.notes || '';
-    if (status === TransactionStatus.SUCCEEDED) {
-      updateData.notes = existingNotes.includes('Transaction completed successfully')
-        ? existingNotes
-        : `${existingNotes}\nPayment completed successfully via PayOS`;
-    } else if (status === TransactionStatus.FAILED) {
-      updateData.notes = `${existingNotes}\nPayment failed`;
-    } else {
-      updateData.notes = existingNotes; // Keep existing notes for other statuses
-    }
-
-
-    console.log('Existing metadata before update:', existingMetadata);
-    console.log('Gateway data to merge:', gatewayData);
-    console.log('New metadata after merge:', updateData.metadata);
-
-    const transaction = await this.transactionModel.findByIdAndUpdate(
-      transactionId,
-      updateData,
-      { new: true }
+    // 3. ✅ CRITICAL: Use findOneAndUpdate with atomic operations
+    // This ensures metadata is properly merged and preserved
+    const transaction = await this.transactionModel.findOneAndUpdate(
+        { 
+            _id: transactionId,
+        },
+        updateOperations,
+        { 
+            new: true,
+            runValidators: true
+        }
     ).populate('booking').populate('user');
 
     if (!transaction) {
-      throw new NotFoundException(`Transaction with ID ${transactionId} not found after update`);
+        throw new NotFoundException(`Transaction with ID ${transactionId} not found after update`);
     }
 
-    this.logger.log(`Updated transaction ${transactionId} status to ${status}, preserving metadata`);
+    // ✅ Verify metadata was preserved
+    const preservedKeys = Object.keys(existingMetadata);
+    const finalKeys = Object.keys(transaction.metadata || {});
+    const missingKeys = preservedKeys.filter(key => !finalKeys.includes(key));
+    
+    if (missingKeys.length > 0) {
+        this.logger.error(`[updatePaymentStatus] ❌ CRITICAL: Metadata keys were lost: ${missingKeys.join(', ')}`);
+        this.logger.error(`[updatePaymentStatus] Expected keys: ${preservedKeys.join(', ')}, Final keys: ${finalKeys.join(', ')}`);
+        this.logger.error(`[updatePaymentStatus] Existing metadata was: ${JSON.stringify(existingMetadata)}`);
+        this.logger.error(`[updatePaymentStatus] Final metadata is: ${JSON.stringify(transaction.metadata)}`);
+    } else {
+        this.logger.debug(`[updatePaymentStatus] ✅ All metadata keys preserved: ${preservedKeys.join(', ')}`);
+    }
+
+    this.logger.log(`Updated transaction ${transactionId} status to ${status} via Atomic $set Update`);
+    this.logger.debug(`Transaction metadata after update: ${JSON.stringify(transaction.metadata)}`);
+    
     return transaction;
-  }
+}
+
   /**
    * Lấy transaction theo booking ID
    */
@@ -554,6 +579,40 @@ export class TransactionsService {
       limit,
       offset,
     };
+  }
+
+  /**
+   * Update transaction metadata atomically (tránh race condition)
+   * Dùng cho việc đánh dấu email sent, hoặc update thông tin khác mà không ảnh hưởng PayOS data
+   */
+  async updateTransactionMetadata(
+    transactionId: string, 
+    metadataUpdates: Record<string, any>,
+    additionalFields?: Record<string, any>
+  ): Promise<Transaction | null> {
+    const updateData: any = {};
+    
+    // Update metadata fields using dot notation
+    Object.keys(metadataUpdates).forEach(key => {
+      updateData[`metadata.${key}`] = metadataUpdates[key];
+    });
+    
+    // Add any additional top-level fields
+    if (additionalFields) {
+      Object.assign(updateData, additionalFields);
+    }
+    
+    const transaction = await this.transactionModel.findByIdAndUpdate(
+      transactionId,
+      { $set: updateData },
+      { new: true }
+    ).populate('booking').populate('user', 'fullName email');
+    
+    if (transaction) {
+      this.logger.log(`Updated transaction ${transactionId} metadata atomically`);
+    }
+    
+    return transaction;
   }
 
   /**

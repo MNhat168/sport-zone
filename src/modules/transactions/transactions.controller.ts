@@ -907,6 +907,11 @@ export class TransactionsController {
                 }
             );
 
+            // ✅ Extract tournamentId from transaction metadata if present
+            const tournamentId = updated.metadata?.tournamentId 
+                ? String(updated.metadata.tournamentId)
+                : undefined;
+
             // Emit payment.failed event if transaction was cancelled or expired
             // This triggers cleanup (cancel booking and release slots) via CleanupService
             if (newStatus === TransactionStatus.FAILED) {
@@ -933,6 +938,7 @@ export class TransactionsController {
                 this.eventEmitter.emit('payment.failed', {
                     paymentId: String(updated._id),
                     bookingId: bookingIdStr,
+                    tournamentId: tournamentId, // ✅ Include tournamentId if present
                     userId: userIdStr,
                     amount: updated.amount,
                     method: updated.method,
@@ -941,6 +947,9 @@ export class TransactionsController {
                 });
 
                 console.log(`[PayOS Webhook] ❌ Payment failed (${payosStatus}), emitted payment.failed event`);
+                if (tournamentId) {
+                    console.log(`[PayOS Webhook] Tournament ID included in failed event: ${tournamentId}`);
+                }
             }
 
             // ✅ CRITICAL: Verify transaction was actually updated to SUCCEEDED before emitting event
@@ -972,6 +981,11 @@ export class TransactionsController {
                 
                 console.log(`[PayOS Webhook] ✅ Transaction ${updated._id} verified as SUCCEEDED, emitting event`);
                 
+                // ✅ Extract tournamentId from verified transaction metadata
+                const verifiedTournamentId = verifiedTransaction.metadata?.tournamentId 
+                    ? String(verifiedTransaction.metadata.tournamentId)
+                    : tournamentId; // Fallback to previously extracted tournamentId
+                
                 const bookingIdStr = updated.booking
                     ? (typeof updated.booking === 'string'
                         ? updated.booking
@@ -988,15 +1002,23 @@ export class TransactionsController {
                             : String(updated.user))
                     : undefined;
 
-                // Only emit event after transaction is verified as SUCCEEDED
+                // ✅ Only emit event after transaction is verified as SUCCEEDED
+                // Include tournamentId in event payload if present
                 this.eventEmitter.emit('payment.success', {
                     paymentId: String(updated._id),
                     bookingId: bookingIdStr,
+                    tournamentId: verifiedTournamentId, // ✅ Include tournamentId from metadata
                     userId: userIdStr,
                     amount: updated.amount,
                     method: updated.method,
                     transactionId: webhookData.reference,
                 });
+
+                if (verifiedTournamentId) {
+                    console.log(`[PayOS Webhook] ✅ Tournament ID included in success event: ${verifiedTournamentId}`);
+                } else {
+                    console.log(`[PayOS Webhook] ℹ️ No tournament ID found in transaction metadata`);
+                }
             }
 
             console.log(`[PayOS Webhook] ✅ Transaction updated: ${newStatus}`);
@@ -1017,7 +1039,7 @@ export class TransactionsController {
     /**
      * PayOS Return URL Handler
      * Called when user returns from PayOS payment page
-     * ✅ CRITICAL: Updates transaction status and emits payment events (similar to webhook)
+     * ✅ ENHANCED: Updates transaction status and emits payment events with idempotency check
      */
     @Get('payos/return')
     @ApiOperation({
@@ -1065,27 +1087,39 @@ export class TransactionsController {
             // Map PayOS status to our TransactionStatus enum
             let newStatus: TransactionStatus;
             let paymentStatus: 'succeeded' | 'failed' | 'pending' | 'cancelled';
+            let shouldEmitFailedEvent = false;
+            let shouldEmitSuccessEvent = false;
             
             if (payosTransaction.status === 'PAID') {
                 newStatus = TransactionStatus.SUCCEEDED;
                 paymentStatus = 'succeeded';
-            } else if (payosTransaction.status === 'CANCELLED' || payosTransaction.status === 'EXPIRED') {
+                shouldEmitSuccessEvent = true;
+            } else if (payosTransaction.status === 'CANCELLED') {
+                newStatus = TransactionStatus.CANCELLED;
+                paymentStatus = 'cancelled';
+                shouldEmitFailedEvent = true;
+            } else if (payosTransaction.status === 'EXPIRED') {
                 newStatus = TransactionStatus.FAILED;
                 paymentStatus = 'failed';
+                shouldEmitFailedEvent = true;
             } else if (payosTransaction.status === 'PENDING' || payosTransaction.status === 'PROCESSING') {
                 newStatus = TransactionStatus.PROCESSING;
                 paymentStatus = 'pending';
             } else {
                 newStatus = TransactionStatus.FAILED;
-                paymentStatus = 'cancelled';
+                paymentStatus = 'failed';
+                shouldEmitFailedEvent = true;
             }
 
-            // ✅ CRITICAL: Only update if status has changed and transaction is not already finalized
-            if (transaction.status !== TransactionStatus.SUCCEEDED && transaction.status !== TransactionStatus.FAILED) {
-                console.log(`[PayOS Return] Updating transaction ${transaction._id} from ${transaction.status} to ${newStatus}`);
+            console.log(`[PayOS Return] Current transaction status: ${transaction.status}, New status: ${newStatus}`);
+
+            // ✅ ENHANCED IDEMPOTENCY CHECK: Only update if status has actually changed
+            let updated = transaction;
+            if (transaction.status !== newStatus) {
+                console.log(`[PayOS Return] Status changed from ${transaction.status} to ${newStatus}. Updating...`);
                 
-                // Update transaction status (similar to webhook)
-                const updated = await this.transactionsService.updatePaymentStatus(
+                // Update transaction status with atomic $set operation
+                updated = await this.transactionsService.updatePaymentStatus(
                     (transaction._id as any).toString(),
                     newStatus,
                     undefined,
@@ -1097,8 +1131,8 @@ export class TransactionsController {
                     }
                 );
 
-                // Emit payment.failed event if transaction was cancelled or expired
-                if (newStatus === TransactionStatus.FAILED) {
+                // ✅ CRITICAL: Emit events ONLY when status actually changes
+                if (shouldEmitFailedEvent) {
                     const bookingIdStr = updated.booking 
                         ? (typeof updated.booking === 'string' 
                             ? updated.booking 
@@ -1117,7 +1151,7 @@ export class TransactionsController {
 
                     const reason = payosTransaction.status === 'CANCELLED' 
                         ? 'PayOS transaction cancelled' 
-                        : 'PayOS transaction expired';
+                        : 'PayOS transaction expired or failed';
 
                     this.eventEmitter.emit('payment.failed', {
                         paymentId: String(updated._id),
@@ -1133,61 +1167,47 @@ export class TransactionsController {
                 }
 
                 // ✅ CRITICAL: Emit payment.success event if payment succeeded
-                if (newStatus === TransactionStatus.SUCCEEDED) {
-                    // Double-check transaction status to ensure it's actually succeeded
-                    const verifiedTransaction = await this.transactionsService.getPaymentById(
-                        (updated._id as any).toString()
-                    );
+                if (shouldEmitSuccessEvent) {
+                    console.log(`[PayOS Return] ✅ Transaction ${updated._id} succeeded, emitting payment.success event`);
                     
-                    if (!verifiedTransaction) {
-                        console.error(`[PayOS Return] ❌ Transaction ${updated._id} not found after update`);
-                    } else if (verifiedTransaction.status !== TransactionStatus.SUCCEEDED) {
-                        console.error(
-                            `[PayOS Return] ❌ Transaction ${updated._id} status mismatch: ` +
-                            `expected SUCCEEDED, got ${verifiedTransaction.status}`
-                        );
-                    } else {
-                        console.log(`[PayOS Return] ✅ Transaction ${updated._id} verified as SUCCEEDED, emitting event`);
-                        
-                        const bookingIdStr = updated.booking
-                            ? (typeof updated.booking === 'string'
-                                ? updated.booking
-                                : (updated.booking as any)?._id
-                                    ? String((updated.booking as any)._id)
-                                    : String(updated.booking))
-                            : undefined;
+                    const bookingIdStr = updated.booking
+                        ? (typeof updated.booking === 'string'
+                            ? updated.booking
+                            : (updated.booking as any)?._id
+                                ? String((updated.booking as any)._id)
+                                : String(updated.booking))
+                        : undefined;
 
-                        const userIdStr = updated.user
-                            ? (typeof updated.user === 'string'
-                                ? updated.user
-                                : (updated.user as any)?._id
-                                    ? String((updated.user as any)._id)
-                                    : String(updated.user))
-                            : undefined;
+                    const userIdStr = updated.user
+                        ? (typeof updated.user === 'string'
+                            ? updated.user
+                            : (updated.user as any)?._id
+                                ? String((updated.user as any)._id)
+                                : String(updated.user))
+                        : undefined;
 
-                        // Emit payment.success event to trigger booking confirmation
-                        this.eventEmitter.emit('payment.success', {
-                            paymentId: String(updated._id),
-                            bookingId: bookingIdStr,
-                            userId: userIdStr,
-                            amount: updated.amount,
-                            method: updated.method,
-                            transactionId: payosTransaction.reference,
-                        });
+                    // Emit payment.success event to trigger booking confirmation
+                    this.eventEmitter.emit('payment.success', {
+                        paymentId: String(updated._id),
+                        bookingId: bookingIdStr,
+                        userId: userIdStr,
+                        amount: updated.amount,
+                        method: updated.method,
+                        transactionId: payosTransaction.reference,
+                    });
 
-                        console.log(`[PayOS Return] ✅ Payment success event emitted for booking ${bookingIdStr}`);
-                    }
+                    console.log(`[PayOS Return] ✅ Payment success event emitted for booking ${bookingIdStr}`);
                 }
             } else {
-                console.log(`[PayOS Return] ℹ️ Transaction ${transaction._id} already processed: ${transaction.status}`);
+                console.log(`[PayOS Return] ℹ️ Transaction ${transaction._id} is already ${transaction.status}. Skipping update to prevent race condition.`);
             }
 
-            const bookingId = transaction.booking
-                ? (typeof transaction.booking === 'string'
-                    ? transaction.booking
-                    : (transaction.booking as any)?._id
-                        ? String((transaction.booking as any)._id)
-                        : String(transaction.booking))
+            const bookingId = updated.booking
+                ? (typeof updated.booking === 'string'
+                    ? updated.booking
+                    : (updated.booking as any)?._id
+                        ? String((updated.booking as any)._id)
+                        : String(updated.booking))
                 : '';
 
             return {
@@ -1254,9 +1274,10 @@ export class TransactionsController {
         return await this.payosService.cancelTransaction(orderCodeNum, dto?.cancellationReason);
     }
 
-    /**
+        /**
  * Tournament-specific PayOS return URL
  * Handles return from tournament payment and redirects to tournament page
+ * ✅ ENHANCED: Added idempotency check to prevent race conditions with webhook
  */
 @Get('payos/tournament-return/:tournamentId')
 @ApiOperation({
@@ -1275,121 +1296,191 @@ async handleTournamentPaymentReturn(
         const orderCode = query.orderCode ? Number(query.orderCode) : null;
         const status = query.status;
         
+        // Get frontend URL from config
         const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
         
         if (!orderCode) {
+            // Redirect to tournament page with error
             return res.redirect(`${frontendUrl}/tournaments/${tournamentId}?payment=error&reason=missing_order_code`);
         }
 
-        console.log(`[Tournament Payment Return] Processing return for orderCode: ${orderCode}, tournament param: ${tournamentId}`);
+        console.log(`[Tournament Payment Return] Processing return for orderCode: ${orderCode}, tournament: ${tournamentId}`);
 
         // Query transaction from PayOS
         const payosTransaction = await this.payosService.queryTransaction(orderCode);
 
-        // Find local transaction by externalTransactionId
-        const transaction = await this.transactionModel.findOne({
-            externalTransactionId: String(orderCode)
-        });
+        // Find local transaction
+        const transaction = await this.transactionsService.getPaymentByExternalId(String(orderCode));
 
         if (!transaction) {
-            console.warn(`[Tournament Payment Return] Transaction not found for orderCode: ${orderCode}`);
-            return res.redirect(`${frontendUrl}/tournaments/${tournamentId}?payment=error&reason=transaction_not_found`);
+            console.log(`[Tournament Return URL] Transaction not found for orderCode ${orderCode}`);
+            return res.redirect(`${this.configService.get('FRONTEND_URL')}/tournament/${tournamentId}?payment=error&reason=transaction_not_found`);
         }
 
-        // ✅ CRITICAL: Get tournament ID from transaction metadata (NOT from URL param)
-        const transactionTournamentId = transaction.metadata?.tournamentId 
-            ? (typeof transaction.metadata.tournamentId === 'object' 
-                ? (transaction.metadata.tournamentId as any).toString() 
-                : String(transaction.metadata.tournamentId))
-            : null;
-
-        console.log(`[Tournament Payment Return] Transaction tournament ID: ${transactionTournamentId}, URL tournament ID: ${tournamentId}`);
-
-        // Determine status
+        // Map PayOS status to our TransactionStatus enum
         let newStatus: TransactionStatus;
-        let paymentStatus: 'success' | 'failed' | 'pending' | 'cancelled';
-        
-        if (payosTransaction.status === 'PAID') {
-            newStatus = TransactionStatus.SUCCEEDED;
-            paymentStatus = 'success';
-        } else if (payosTransaction.status === 'CANCELLED' || payosTransaction.status === 'EXPIRED') {
-            newStatus = TransactionStatus.FAILED;
-            paymentStatus = 'failed';
-        } else if (payosTransaction.status === 'PENDING' || payosTransaction.status === 'PROCESSING') {
-            newStatus = TransactionStatus.PROCESSING;
-            paymentStatus = 'pending';
-        } else {
-            newStatus = TransactionStatus.FAILED;
-            paymentStatus = 'cancelled';
+        let paymentStatus: 'succeeded' | 'failed' | 'pending' | 'cancelled';
+        let shouldEmitEvent = false;
+
+        switch (payosTransaction.status) {
+            case 'PAID':
+                newStatus = TransactionStatus.SUCCEEDED;
+                paymentStatus = 'succeeded';
+                shouldEmitEvent = true;
+                break;
+            case 'PENDING':
+                newStatus = TransactionStatus.PENDING;
+                paymentStatus = 'pending';
+                break;
+            case 'PROCESSING':
+                newStatus = TransactionStatus.PROCESSING;
+                paymentStatus = 'pending';
+                break;
+            case 'CANCELLED':
+                newStatus = TransactionStatus.CANCELLED;
+                paymentStatus = 'cancelled';
+                break;
+            default:
+                newStatus = TransactionStatus.FAILED;
+                paymentStatus = 'failed';
+                break;
         }
 
-        // ✅ Preserve existing metadata when updating
-        const existingMetadata = transaction.metadata || {};
-        const payosMetadata = {
-            payosReference: payosTransaction.reference,
-            payosAccountNumber: payosTransaction.accountNumber,
-            payosTransactionDateTime: payosTransaction.transactionDateTime,
-        };
+        // ✅ Update transaction status if not already finalized
+        // updatePaymentStatus now preserves existing metadata automatically
+        if (transaction.status !== TransactionStatus.SUCCEEDED && transaction.status !== TransactionStatus.FAILED) {
+            console.log(`[Tournament Payment Return] Updating transaction ${transaction._id} from ${transaction.status} to ${newStatus}`);
+            
+            const updated = await this.transactionsService.updatePaymentStatus(
+                (transaction._id as any).toString(),
+                newStatus,
+                undefined,
+                {
+                    payosOrderCode: payosTransaction.orderCode,
+                    payosReference: payosTransaction.reference,
+                    payosAccountNumber: payosTransaction.accountNumber,
+                    payosTransactionDateTime: payosTransaction.transactionDateTime,
+                }
+            );
 
-        // Merge existing metadata with PayOS data
-        const mergedMetadata = {
-            ...existingMetadata,
-            ...payosMetadata,
-        };
-
-        // Update transaction while preserving metadata
-        await this.transactionModel.findByIdAndUpdate(
-            transaction._id,
-            {
-                status: newStatus,
-                metadata: mergedMetadata,  // ✅ Preserve tournamentId
-                completedAt: newStatus === TransactionStatus.SUCCEEDED ? new Date() : undefined,
-                failedAt: newStatus === TransactionStatus.FAILED ? new Date() : undefined,
-            },
-            { new: true }
-        );
-
-        // Emit payment events using the CORRECT tournament ID
-        const tournamentIdToUse = transactionTournamentId || tournamentId;
-        
-        if (newStatus === TransactionStatus.SUCCEEDED) {
-            this.eventEmitter.emit('payment.success', {
-                paymentId: (transaction._id as Types.ObjectId).toString(),
-                tournamentId: tournamentIdToUse,  // ✅ Use metadata tournamentId
-                userId: transaction.user.toString(),
-                amount: transaction.amount,
-                method: transaction.method,
-                transactionId: payosTransaction.reference || String(orderCode),
+            console.log(`[Tournament Payment Return] ✅ Transaction updated, metadata preserved:`, {
+                hasTournamentId: !!updated.metadata?.tournamentId,
+                metadataKeys: Object.keys(updated.metadata || {})
             });
-            console.log(`[Tournament Payment Return] ✅ Payment success for tournament: ${tournamentIdToUse}`);
-        } else if (newStatus === TransactionStatus.FAILED) {
-            const reason = payosTransaction.status === 'CANCELLED' 
-                ? 'PayOS transaction cancelled' 
-                : 'PayOS transaction expired';
+
+            // ✅ Extract userId and tournamentId for event emission
+            const userIdStr = updated.user
+                ? (typeof updated.user === 'string'
+                    ? updated.user
+                    : (updated.user as any)?._id
+                        ? String((updated.user as any)._id)
+                        : String(updated.user))
+                : undefined;
+
+            // ✅ Use tournamentId from URL param, fallback to metadata if needed
+            const finalTournamentId = tournamentId || 
+                (updated.metadata?.tournamentId ? String(updated.metadata.tournamentId) : undefined);
+
+            // Emit payment events based on status
+            if (newStatus === TransactionStatus.FAILED) {
+                const bookingIdStr = updated.booking 
+                    ? (typeof updated.booking === 'string' 
+                        ? updated.booking 
+                        : (updated.booking as any)?._id 
+                            ? String((updated.booking as any)._id)
+                            : String(updated.booking))
+                    : undefined;
+
+                const reason = payosTransaction.status === 'CANCELLED' 
+                    ? 'PayOS transaction cancelled' 
+                    : 'PayOS transaction expired';
+
+                this.eventEmitter.emit('payment.failed', {
+                    paymentId: String(updated._id),
+                    tournamentId: finalTournamentId, // ✅ Include tournamentId
+                    userId: userIdStr,
+                    amount: updated.amount,
+                    method: updated.method,
+                    transactionId: payosTransaction.reference || String(payosTransaction.orderCode),
+                    reason,
+                });
+
+                console.log(`[Tournament Payment Return] ❌ Payment failed event emitted for tournament: ${finalTournamentId}`);
+            } else if (newStatus === TransactionStatus.SUCCEEDED) {
+                // ✅ Double-check transaction status before emitting success event
+                const verifiedTransaction = await this.transactionsService.getPaymentById(
+                    (updated._id as any).toString()
+                );
                 
-            this.eventEmitter.emit('payment.failed', {
-                paymentId: (transaction._id as Types.ObjectId).toString(),
-                tournamentId: tournamentIdToUse,  // ✅ Use metadata tournamentId
-                userId: transaction.user.toString(),
-                amount: transaction.amount,
-                method: transaction.method,
-                transactionId: payosTransaction.reference || String(orderCode),
-                reason,
-            });
+                if (verifiedTransaction && verifiedTransaction.status === TransactionStatus.SUCCEEDED) {
+                    const bookingIdStr = updated.booking
+                        ? (typeof updated.booking === 'string'
+                            ? updated.booking
+                            : (updated.booking as any)?._id
+                                ? String((updated.booking as any)._id)
+                                : String(updated.booking))
+                        : undefined;
+
+                    // ✅ Emit payment.success event for tournament with all required fields
+                    this.eventEmitter.emit('payment.success', {
+                        paymentId: String(updated._id),
+                        tournamentId: finalTournamentId, // ✅ Ensure tournamentId is included
+                        userId: userIdStr,
+                        amount: updated.amount,
+                        method: updated.method,
+                        transactionId: payosTransaction.reference,
+                    });
+
+                    console.log(`[Tournament Payment Return] ✅ Payment success event emitted for tournament: ${finalTournamentId}, userId: ${userIdStr}`);
+                } else {
+                    console.warn(`[Tournament Payment Return] ⚠️ Transaction status verification failed, not emitting success event`);
+                }
+            }
+        } else {
+            console.log(`[Tournament Payment Return] ℹ️ Transaction ${transaction._id} already finalized (${transaction.status}), skipping update`);
+            
+            // ✅ Even if transaction is already finalized, emit event if it's SUCCEEDED and event hasn't been processed
+            // This handles cases where webhook processed but return URL is called first
+            if (transaction.status === TransactionStatus.SUCCEEDED && shouldEmitEvent) {
+                const userIdStr = transaction.user
+                    ? (typeof transaction.user === 'string'
+                        ? transaction.user
+                        : (transaction.user as any)?._id
+                            ? String((transaction.user as any)._id)
+                            : String(transaction.user))
+                    : undefined;
+
+                const finalTournamentId = tournamentId || 
+                    (transaction.metadata?.tournamentId ? String(transaction.metadata.tournamentId) : undefined);
+
+                if (finalTournamentId && userIdStr) {
+                    // Check if already processed by looking at metadata
+                    if (!transaction.metadata?.tournamentProcessed) {
+                        this.eventEmitter.emit('payment.success', {
+                            paymentId: String(transaction._id),
+                            tournamentId: finalTournamentId,
+                            userId: userIdStr,
+                            amount: transaction.amount,
+                            method: transaction.method,
+                            transactionId: transaction.externalTransactionId || undefined,
+                        });
+                        console.log(`[Tournament Payment Return] ✅ Emitted success event for already-succeeded transaction`);
+                    } else {
+                        console.log(`[Tournament Payment Return] ℹ️ Transaction already processed (tournamentProcessed flag set)`);
+                    }
+                }
+            }
         }
 
-        // ✅ Always redirect to the tournament from transaction metadata if available
-        const redirectTournamentId = transactionTournamentId || tournamentId;
+        // Redirect to tournament page with payment status
         return res.redirect(
-            `${frontendUrl}/tournaments/${redirectTournamentId}?payment=${paymentStatus}&orderCode=${orderCode}`
+            `${frontendUrl}/tournaments/${tournamentId}?payment=${paymentStatus}&orderCode=${orderCode}`
         );
 
     } catch (error) {
-        console.error('[Tournament Payment Return] Error:', error);
-        const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
-        return res.redirect(
-            `${frontendUrl}/tournaments/${tournamentId}?payment=error&reason=system_error`
-        );
+        console.error(`[Tournament Return URL] Error:`, error);
+        const frontendUrl = this.configService.get('FRONTEND_URL') || 'http://localhost:5173';
+        return res.redirect(`${frontendUrl}/tournament/${tournamentId}?payment=error&reason=server_error`);
     }
 }
 }

@@ -618,17 +618,17 @@ export class BookingsService {
 
     } catch (error) {
       this.logger.error('Error creating coach booking', error);
-      
+
       // Re-throw known exceptions as-is
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
-      
+
       // ✅ SECURITY: Detect optimistic locking failures (version mismatch)
       if (error.message?.includes('Slot was booked')) {
         throw new BadRequestException('Slot was booked by another user. Please refresh availability and try again.');
       }
-      
+
       // Generic error for unexpected issues
       throw new InternalServerErrorException('Failed to create coach booking. Please try again.');
     } finally {
@@ -709,7 +709,7 @@ export class BookingsService {
         if (!bookingData.guestEmail) {
           throw new BadRequestException('Email is required for guest bookings');
         }
-        
+
         // Create or find guest user (outside transaction first to check existence)
         const guestUser = await this.createOrFindGuestUser(
           bookingData.guestEmail,
@@ -1069,7 +1069,7 @@ export class BookingsService {
         if (!bookingData.guestEmail) {
           throw new BadRequestException('Email is required for guest bookings');
         }
-        
+
         // Create or find guest user (outside transaction first to check existence)
         const guestUser = await this.createOrFindGuestUser(
           bookingData.guestEmail,
@@ -1317,7 +1317,7 @@ export class BookingsService {
         if (!guestData.guestEmail) {
           throw new BadRequestException('Email is required for guest bookings');
         }
-        
+
         // Create or find guest user (outside transaction first to check existence)
         const guestUser = await this.createOrFindGuestUser(
           guestData.guestEmail,
@@ -1489,7 +1489,7 @@ export class BookingsService {
             },
             $inc: { version: 1 }
           },
-          { 
+          {
             session,
             new: true
           }
@@ -1520,15 +1520,15 @@ export class BookingsService {
 
     } catch (error) {
       this.logger.error('Error creating coach booking without payment', error);
-      
+
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
-      
+
       if (error.message?.includes('Slot was booked')) {
         throw new BadRequestException('Slot was booked by another user. Please refresh availability and try again.');
       }
-      
+
       throw new InternalServerErrorException('Failed to create booking. Please try again.');
     } finally {
       await session.endSession();
@@ -1990,11 +1990,11 @@ export class BookingsService {
   private async getExistingBookingsForDate(fieldId: string, date: Date) {
     try {
       // Normalize date to start/end of day in Vietnam timezone (UTC+7)
-const startOfDay = new Date(date);
-startOfDay.setHours(0, 0, 0, 0); // Start of local day (Vietnam)
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0); // Start of local day (Vietnam)
 
-const endOfDay = new Date(date);
-endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
 
       // Query Booking collection for confirmed and pending bookings
       const bookings = await this.bookingModel.find({
@@ -2245,7 +2245,7 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
         // Verify that the booking belongs to a field owned by this owner
         const field = booking.field as any;
         const fieldOwnerId = field?.owner?.toString();
-        
+
         if (!fieldOwnerId || fieldOwnerId !== ownerId) {
           throw new BadRequestException('You do not have permission to verify payment proof for this booking');
         }
@@ -2278,7 +2278,7 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
         transaction.paymentProofStatus = action === 'approve' ? 'approved' : 'rejected';
         transaction.paymentProofVerifiedBy = new Types.ObjectId(ownerId);
         transaction.paymentProofVerifiedAt = new Date();
-        
+
         if (action === 'reject' && rejectionReason) {
           transaction.paymentProofRejectionReason = rejectionReason;
         }
@@ -2290,7 +2290,7 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
           // Approve: Update booking to CONFIRMED and paymentStatus to paid
           booking.status = BookingStatus.CONFIRMED;
           booking.paymentStatus = 'paid';
-          
+
           // Update transaction status to succeeded
           transaction.status = TransactionStatus.SUCCEEDED;
           transaction.completedAt = new Date();
@@ -2299,7 +2299,7 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
           // Reject: Keep booking as PENDING, paymentStatus as unpaid
           // Optionally add rejection reason to booking note
           if (rejectionReason) {
-            booking.note = booking.note 
+            booking.note = booking.note
               ? `${booking.note}\n[Payment Proof Rejected: ${rejectionReason}]`
               : `[Payment Proof Rejected: ${rejectionReason}]`;
           }
@@ -2322,7 +2322,7 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
       });
     } catch (error) {
       this.logger.error('Error verifying payment proof', error);
-      
+
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
       }
@@ -2381,7 +2381,7 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
         // Verify that the booking is for this coach
         const requestedCoachId = (booking.requestedCoach as any)?._id?.toString() || (booking.requestedCoach as any)?.toString();
         const coachProfileId = (coachProfile._id as Types.ObjectId).toString();
-        
+
         if (!requestedCoachId || requestedCoachId !== coachProfileId) {
           throw new BadRequestException('You do not have permission to verify payment proof for this booking');
         }
@@ -2414,7 +2414,7 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
         transaction.paymentProofStatus = action === 'approve' ? 'approved' : 'rejected';
         transaction.paymentProofVerifiedBy = new Types.ObjectId(coachUserId);
         transaction.paymentProofVerifiedAt = new Date();
-        
+
         if (action === 'reject' && rejectionReason) {
           transaction.paymentProofRejectionReason = rejectionReason;
         }
@@ -2427,7 +2427,7 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
           booking.status = BookingStatus.CONFIRMED;
           booking.paymentStatus = 'paid';
           booking.coachStatus = 'accepted';
-          
+
           // Update transaction status to succeeded
           transaction.status = TransactionStatus.SUCCEEDED;
           transaction.completedAt = new Date();
@@ -2436,7 +2436,7 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
           // Reject: Keep booking as PENDING, paymentStatus as unpaid
           // Optionally add rejection reason to booking note
           if (rejectionReason) {
-            booking.note = booking.note 
+            booking.note = booking.note
               ? `${booking.note}\n[Payment Proof Rejected: ${rejectionReason}]`
               : `[Payment Proof Rejected: ${rejectionReason}]`;
           }
@@ -2460,7 +2460,7 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
       });
     } catch (error) {
       this.logger.error('Error verifying coach payment proof', error);
-      
+
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
       }
@@ -2573,10 +2573,10 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
       // 2. Requested coach matches this coach profile
       // 3. Have paymentStatus = 'unpaid'
       // 4. Have transaction with pending payment proof
-      const coachProfileId = coachProfile._id instanceof Types.ObjectId 
-        ? coachProfile._id 
+      const coachProfileId = coachProfile._id instanceof Types.ObjectId
+        ? coachProfile._id
         : new Types.ObjectId(coachProfile._id.toString());
-      
+
       const bookings = await this.bookingModel
         .find({
           _id: { $in: bookingIds },
@@ -2644,7 +2644,8 @@ endOfDay.setHours(23, 59, 59, 999); // End of local day (Vietnam)
 
       // Validate bookingId format
       if (!Types.ObjectId.isValid(event.bookingId)) {
-        this.logger.error(`[Payment Success] Invalid booking ID: ${event.bookingId}`);
+        // This might be a tournament payment or other type, so we just ignore it for bookings
+        // instead of logging an error
         return;
       }
 
