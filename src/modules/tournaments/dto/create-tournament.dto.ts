@@ -303,6 +303,77 @@ export class CourtCostCalculationDto {
   hours?: number;
 }
 
+export class UpdateTournamentDto {
+  @ApiPropertyOptional({ description: 'Tournament name' })
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @ApiPropertyOptional({ description: 'Tournament description' })
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional({ description: 'Tournament rules and regulations' })
+  @IsOptional()
+  @IsString()
+  rules?: string;
+
+  @ApiPropertyOptional({ 
+    description: 'Tournament images',
+    type: [String]
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  images?: string[];
+
+  @ApiPropertyOptional({ description: 'Registration fee per participant' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  registrationFee?: number;
+
+  @ApiPropertyOptional({ description: 'Start time (HH:mm)' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+  startTime?: string;
+
+  @ApiPropertyOptional({ description: 'End time (HH:mm)' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+  endTime?: string;
+
+  @ApiPropertyOptional({ 
+    description: 'Selected court IDs',
+    type: [String]
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  selectedCourtIds?: string[];
+
+  @ApiPropertyOptional({ description: 'Number of courts needed' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  courtsNeeded?: number;
+
+  @ApiPropertyOptional({ description: 'Number of teams' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  numberOfTeams?: number;
+
+  @ApiPropertyOptional({ description: 'Team size' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  teamSize?: number;
+}
+
 // Helper methods for court operations
 export class CourtDtoHelpers {
   /**

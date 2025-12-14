@@ -10,7 +10,7 @@ import { Court } from '../courts/entities/court.entity'; // Add Court import
 import { Transaction } from '../transactions/entities/transaction.entity';
 import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum';
 import { User } from '../users/entities/user.entity';
-import { CreateTournamentDto, RegisterTournamentDto } from './dto/create-tournament.dto';
+import { CreateTournamentDto, RegisterTournamentDto, UpdateTournamentDto } from './dto/create-tournament.dto';
 import { SPORT_RULES_MAP, TeamSizeMap, calculateParticipants } from 'src/common/enums/sport-type.enum';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 import { PayOSService } from '@modules/transactions/payos.service';
@@ -1301,5 +1301,151 @@ export class TournamentService {
         }
 
         return teams;
+    }
+
+    async findTournamentsByOrganizer(organizerId: string) {
+        return this.tournamentModel
+            .find({
+                organizer: new Types.ObjectId(organizerId),
+                status: { $ne: TournamentStatus.CANCELLED }
+            })
+            .sort({ createdAt: -1 })
+            .populate('organizer', 'fullName email avatarUrl')
+            .populate({
+                path: 'courts.court',
+                populate: {
+                    path: 'field',
+                    select: 'name location'
+                }
+            })
+            .lean();
+    }
+
+    async updateTournament(id: string, updateDto: UpdateTournamentDto, userId: string) {
+        const tournament = await this.tournamentModel.findById(id);
+
+        if (!tournament) {
+            throw new NotFoundException('Tournament not found');
+        }
+
+        // Check if user is the organizer
+        if (tournament.organizer.toString() !== userId) {
+            throw new BadRequestException('Only tournament organizer can update the tournament');
+        }
+
+        // Check if tournament can be updated (only PENDING or DRAFT status)
+        if (![TournamentStatus.DRAFT, TournamentStatus.PENDING].includes(tournament.status)) {
+            throw new BadRequestException('Cannot update tournament in current status');
+        }
+
+        // Update fields that can be modified
+        const updatableFields = [
+            'name',
+            'description',
+            'rules',
+            'images',
+            'registrationFee',
+            'startTime',
+            'endTime',
+            'selectedCourtIds',
+            'courtsNeeded',
+            'numberOfTeams',
+            'teamSize'
+        ];
+
+        // Only update allowed fields
+        const updateData: any = {};
+        updatableFields.forEach(field => {
+            if (updateDto[field] !== undefined) {
+                updateData[field] = updateDto[field];
+            }
+        });
+
+        // If courts are being updated, recalculate cost
+        if (updateDto.selectedCourtIds && updateDto.selectedCourtIds.length > 0) {
+            // Validate new courts
+            const selectedCourtIds = updateDto.selectedCourtIds || tournament.selectedCourtIds;
+            const courts = await this.courtModel.find({
+                _id: { $in: selectedCourtIds.map(id => new Types.ObjectId(id)) },
+                isActive: true,
+            }).populate('field');
+
+            if (courts.length !== selectedCourtIds.length) {
+                throw new BadRequestException('Some selected courts are not available');
+            }
+
+            // Calculate new court cost
+            const tournamentDate = tournament.tournamentDate;
+            const startTime = updateDto.startTime || tournament.startTime;
+            const endTime = updateDto.endTime || tournament.endTime;
+
+            let totalCourtCost = 0;
+            for (const court of courts) {
+                const cost = this.calculateCourtCost(court, tournamentDate, startTime, endTime);
+                totalCourtCost += cost;
+            }
+
+            updateData.totalCourtCost = totalCourtCost;
+            updateData.totalFieldCost = totalCourtCost; // Keep backward compatibility
+        }
+
+        const updatedTournament = await this.tournamentModel.findByIdAndUpdate(
+            id,
+            { $set: updateData },
+            { new: true }
+        )
+            .populate('organizer')
+            .populate({
+                path: 'courts.court',
+                populate: {
+                    path: 'field',
+                    select: 'name location description images basePrice'
+                }
+            });
+
+        return updatedTournament;
+    }
+
+    async cancelTournament(id: string, userId: string) {
+        const tournament = await this.tournamentModel.findById(id);
+
+        if (!tournament) {
+            throw new NotFoundException('Tournament not found');
+        }
+
+        // Check if user is the organizer
+        if (tournament.organizer.toString() !== userId) {
+            throw new BadRequestException('Only tournament organizer can cancel the tournament');
+        }
+
+        // Only allow cancellation if tournament is in draft or pending status
+        if (![TournamentStatus.DRAFT, TournamentStatus.PENDING].includes(tournament.status)) {
+            throw new BadRequestException('Cannot cancel tournament in current status');
+        }
+
+        // Release court reservations
+        await this.reservationModel.updateMany(
+            { tournament: tournament._id },
+            { status: ReservationStatus.RELEASED }
+        );
+
+        // Refund participants if any
+        for (const participant of tournament.participants) {
+            if (participant.transaction) {
+                await this.transactionModel.findByIdAndUpdate(
+                    participant.transaction,
+                    {
+                        status: TransactionStatus.REFUNDED,
+                        type: TransactionType.REFUND_FULL,
+                    }
+                );
+            }
+        }
+
+        tournament.status = TournamentStatus.CANCELLED;
+        tournament.cancellationReason = 'Cancelled by organizer';
+        await tournament.save();
+
+        return tournament;
     }
 }

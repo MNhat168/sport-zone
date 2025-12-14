@@ -10,10 +10,12 @@ import {
   Logger,
   BadRequestException,
   NotFoundException,
-  Req
+  Req,
+  Put,
+  Delete
 } from '@nestjs/common';
 import { TournamentService } from './tournaments.service';
-import { CreateTournamentDto, RegisterTournamentDto } from './dto/create-tournament.dto';
+import { CreateTournamentDto, RegisterTournamentDto, UpdateTournamentDto } from './dto/create-tournament.dto';
 import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
 import { ApiOperation } from '@nestjs/swagger';
 
@@ -38,6 +40,13 @@ export class TournamentController {
     return this.tournamentService.registerParticipant(registerDto, req.user.userId);
   }
 
+  @Get('my-tournaments')
+  @UseGuards(JwtAccessTokenGuard)
+  getMyTournaments(@Request() req) {
+    const userId = req.user.userId;
+    return this.tournamentService.findTournamentsByOrganizer(userId);
+  }
+
   @Get()
   findAll(
     @Query('sportType') sportType?: string,
@@ -53,20 +62,20 @@ export class TournamentController {
   }
 
   @Get('available-courts') // New endpoint
-// In tournaments.controller.ts
-@Get('available-courts')
-findAvailableCourts(
+  // In tournaments.controller.ts
+  @Get('available-courts')
+  findAvailableCourts(
     @Query('sportType') sportType: string,
     @Query('location') location: string,
     @Query('date') date: string,
-) {
+  ) {
     // Add validation
     if (!sportType || !location || !date) {
-        throw new BadRequestException('Missing required parameters: sportType, location, date');
+      throw new BadRequestException('Missing required parameters: sportType, location, date');
     }
-    
+
     return this.tournamentService.findAvailableCourts(sportType, location, date);
-}
+  }
 
   @Get('available-fields')
   findAvailableFields(
@@ -154,5 +163,24 @@ findAvailableCourts(
       this.logger.error('Error handling tournament payment return:', error);
       throw new BadRequestException('Error verifying payment');
     }
+  }
+
+  @Put(':id')
+  @UseGuards(JwtAccessTokenGuard)
+  async updateTournament(
+    @Param('id') id: string,
+    @Body() updateTournamentDto: UpdateTournamentDto,
+    @Request() req
+  ) {
+    return this.tournamentService.updateTournament(id, updateTournamentDto, req.user.userId);
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAccessTokenGuard)
+  async cancelTournament(
+    @Param('id') id: string,
+    @Request() req
+  ) {
+    return this.tournamentService.cancelTournament(id, req.user.userId);
   }
 }
