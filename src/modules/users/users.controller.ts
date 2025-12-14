@@ -23,7 +23,7 @@ import { GetAllUsersResponseDto } from './dto/get-all-users-response.dto';
 // import { UserProfileDto } from './dtos/user-profile.dto';
 import { UserRepository } from '@modules/users/repositories/user.repository';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
- 
+
 import { User } from './entities/user.entity';
 import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
 import { USER_REPOSITORY } from './interface/users.interface';
@@ -33,26 +33,27 @@ import { UserRole } from '@common/enums/user.enum';
 import { SetFavouriteSportsDto } from './dto/set-favourite-sports.dto';
 import { SetFavouriteCoachesDto } from './dto/set-favourite-coaches.dto';
 import { SetFavouriteFieldsDto } from './dto/set-favourite-fields.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { Roles } from 'src/decorators/roles.decorator';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 @ApiTags('Users')
 @Controller('users')
 @ApiBearerAuth('token')
 export class UsersController {
-    constructor(
-        private readonly usersService: UsersService,
-        // userRepository no longer needed here
-    ) { }
-    @UseGuards(JwtAccessTokenGuard)
-    @Get('get-profile')
-    async getProfile(@Req() req: any): Promise<User> {
-        //console.log('req.user',req.user);
+  constructor(
+    private readonly usersService: UsersService,
+    // userRepository no longer needed here
+  ) { }
+  @UseGuards(JwtAccessTokenGuard)
+  @Get('get-profile')
+  async getProfile(@Req() req: any): Promise<User> {
+    //console.log('req.user',req.user);
     return await this.usersService.findById(req.user.userId);
-    }
+  }
 
-  
 
- 
+
+
   @UseGuards(JwtAccessTokenGuard)
   @Patch('me')
   @UseInterceptors(FileFieldsInterceptor([{ name: 'avatar', maxCount: 1 }]))
@@ -64,6 +65,15 @@ export class UsersController {
   ): Promise<User> {
     const avatarFile = files?.avatar?.[0];
     return this.usersService.update(req.user.userId, user, avatarFile);
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
+  @Post('change-password')
+  async changePassword(
+    @Request() req,
+    @Body() body: ChangePasswordDto,
+  ) {
+    return this.usersService.changePassword(req.user.userId, body);
   }
 
   @UseGuards(AuthGuard('jwt'))
