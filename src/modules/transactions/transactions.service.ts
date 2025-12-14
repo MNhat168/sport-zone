@@ -180,20 +180,19 @@ export class TransactionsService {
       updateData.notes = 'Transaction failed';
     }
 
-    const transaction = await this.transactionModel.findByIdAndUpdate(
-      transactionId,
-      updateData,
-      { new: true }
-    ).populate('booking').populate('user');
+  const transaction = await this.transactionModel.findByIdAndUpdate(
+    transactionId,
+    updateData,
+    { new: true }
+  ).populate('booking').populate('user');
 
-    if (!transaction) {
-      throw new NotFoundException(`Transaction with ID ${transactionId} not found`);
-    }
-
-    this.logger.log(`Updated transaction ${transactionId} status to ${status}`);
-    return transaction;
+  if (!transaction) {
+    throw new NotFoundException(`Transaction with ID ${transactionId} not found`);
   }
 
+  this.logger.log(`Updated transaction ${transactionId} status to ${status}, preserving metadata`);
+  return transaction;
+}
   /**
    * Lấy transaction theo booking ID
    */

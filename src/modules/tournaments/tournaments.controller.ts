@@ -15,9 +15,14 @@ import {
   Delete
 } from '@nestjs/common';
 import { TournamentService } from './tournaments.service';
-import { CreateTournamentDto, RegisterTournamentDto, UpdateTournamentDto } from './dto/create-tournament.dto';
+import { CreateTournamentDto, UpdateTournamentDto } from './dto/create-tournament.dto';
+import { RegisterTournamentDto } from './dto/RegisterTournamentDto';
 import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
 import { ApiOperation } from '@nestjs/swagger';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import { Transaction } from '../transactions/entities/transaction.entity'; // Add this import
+import { TransactionStatus } from '@common/enums/transaction.enum'; // Add this import
 
 @Controller('tournaments')
 export class TournamentController {
@@ -26,7 +31,10 @@ export class TournamentController {
   transactionsService: any;
   eventEmitter: any;
 
-  constructor(private readonly tournamentService: TournamentService) { }
+  constructor(
+    private readonly tournamentService: TournamentService,
+    @InjectModel(Transaction.name) private transactionModel: Model<Transaction> // Add this
+  ) { }
 
   @Post()
   @UseGuards(JwtAccessTokenGuard)
@@ -108,11 +116,20 @@ export class TournamentController {
       // Query PayOS for transaction status
       const payosTransaction = await this.payosService.queryTransaction(Number(orderCode));
 
-      // Find local transaction
-      const transaction = await this.transactionsService.getPaymentByExternalId(String(orderCode));
+      // Find local transaction by externalTransactionId
+      const transaction = await this.transactionModel.findOne({
+        externalTransactionId: String(orderCode)
+      });
 
       if (!transaction) {
         throw new NotFoundException('Transaction not found');
+      }
+
+      // Get tournament ID from transaction metadata (more reliable than URL param)
+      const transactionTournamentId = transaction.metadata?.tournamentId || tournamentId;
+      
+      if (!transactionTournamentId) {
+        throw new BadRequestException('Tournament ID not found in transaction');
       }
 
       // Determine status
@@ -126,11 +143,20 @@ export class TournamentController {
         paymentStatus = 'pending';
       }
 
+      // Update transaction status
+      if (paymentStatus === 'succeeded') {
+        transaction.status = TransactionStatus.SUCCEEDED;
+        transaction.completedAt = new Date();
+      } else if (paymentStatus === 'failed') {
+        transaction.status = TransactionStatus.FAILED;
+      }
+      await transaction.save();
+
       // Emit payment event based on status
       if (paymentStatus === 'succeeded') {
         this.eventEmitter.emit('payment.success', {
-          paymentId: transaction._id.toString(),
-          tournamentId: tournamentId,
+          paymentId: (transaction._id as Types.ObjectId).toString(),
+          tournamentId: transactionTournamentId, // Use from metadata
           userId: transaction.user.toString(),
           amount: transaction.amount,
           method: transaction.method,
@@ -138,8 +164,8 @@ export class TournamentController {
         });
       } else if (paymentStatus === 'failed') {
         this.eventEmitter.emit('payment.failed', {
-          paymentId: transaction._id.toString(),
-          tournamentId: tournamentId,
+          paymentId: (transaction._id as Types.ObjectId).toString(),
+          tournamentId: transactionTournamentId, // Use from metadata
           userId: transaction.user.toString(),
           amount: transaction.amount,
           method: transaction.method,
@@ -153,7 +179,7 @@ export class TournamentController {
       return {
         success: paymentStatus === 'succeeded',
         paymentStatus,
-        tournamentId,
+        tournamentId: transactionTournamentId,
         message: paymentStatus === 'succeeded'
           ? 'Payment successful! You are now registered.'
           : 'Payment failed',

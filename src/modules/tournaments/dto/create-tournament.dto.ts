@@ -158,28 +158,6 @@ export class CreateTournamentDto {
   totalFieldCost?: number;
 }
 
-export class RegisterTournamentDto {
-  @ApiProperty({ description: 'Tournament ID' })
-  @IsString()
-  tournamentId: string;
-
-  @ApiProperty({ description: 'Payment method' })
-  @IsString()
-  paymentMethod: string;
-  
-  @ApiProperty({ description: 'Buyer name' })
-  @IsString()
-  buyerName: string;
-  
-  @ApiProperty({ description: 'Buyer email' })
-  @IsString()
-  buyerEmail: string;
-  
-  @ApiProperty({ description: 'Buyer phone number' })
-  @IsString()
-  buyerPhone: string;
-}
-
 export class ConfirmTournamentDto {
   @ApiProperty({ description: 'Tournament ID' })
   @IsString()
