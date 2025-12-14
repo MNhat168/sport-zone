@@ -11,13 +11,15 @@ import { BookingSchema } from '../bookings/schema/BookingSchema';
 import { Field } from '../fields/entities/field.entity';
 import { FieldSchema } from '../fields/entities/field.entity';
 import { BookingsModule } from '../bookings/bookings.module';
+import { Court, CourtSchema } from '../courts/entities/court.entity';
 
 @Module({
     imports: [
         MongooseModule.forFeature([
             { name: Schedule.name, schema: ScheduleSchema },
             { name: Booking.name, schema: BookingSchema },
-            { name: Field.name, schema: FieldSchema }
+            { name: Field.name, schema: FieldSchema },
+            { name: Court.name, schema: CourtSchema }
         ]),
         BookingsModule,
     ],

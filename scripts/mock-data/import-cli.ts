@@ -11,9 +11,13 @@ import { Schedule } from '../../src/modules/schedules/entities/schedule.entity';
 import { Transaction } from '../../src/modules/transactions/entities/transaction.entity';
 import { TransactionType } from '../../src/common/enums/transaction.enum';
 import { Types } from 'mongoose';
+import { Field } from '../../src/modules/fields/entities/field.entity';
+import { Court } from '../../src/modules/courts/entities/court.entity';
 
 const amenitiesLibrary = require('./amenities-library.json');
 const fieldLibrary = require('./field-library.json');
+const fieldLibraryV2 = require('./field-library-v2.json');
+const courtLibrary = require('./court-library.json');
 const bookingLibrary = require('./bookìng-libary.json');
 const scheduleLibrary = require('./schedule-library.json');
 const transactionLibrary = require('./transaction-libary.json');
@@ -22,6 +26,8 @@ interface ImportOptions {
   amenities?: boolean;
   users?: boolean;
   fields?: boolean;
+  fieldsV2?: boolean;
+  courts?: boolean;
   bookings?: boolean;
   schedules?: boolean;
   transactions?: boolean;
@@ -35,6 +41,8 @@ class CLIImporter {
   private app: any;
   private amenitiesService: AmenitiesService;
   private fieldOwnerService: FieldOwnerService;
+  private fieldModel: Model<Field>;
+  private courtModel: Model<Court>;
   private bookingModel: Model<Booking>;
   private scheduleModel: Model<Schedule>;
   private transactionModel: Model<Transaction>;
@@ -44,6 +52,8 @@ class CLIImporter {
     this.app = await NestFactory.createApplicationContext(AppModule);
     this.amenitiesService = this.app.get(AmenitiesService);
     this.fieldOwnerService = this.app.get(FieldOwnerService);
+    this.fieldModel = this.app.get(getModelToken(Field.name));
+    this.courtModel = this.app.get(getModelToken(Court.name));
     this.bookingModel = this.app.get(getModelToken(Booking.name));
     this.scheduleModel = this.app.get(getModelToken(Schedule.name));
     this.transactionModel = this.app.get(getModelToken(Transaction.name));
@@ -172,6 +182,211 @@ class CLIImporter {
     } catch (error) {
       console.warn(`⚠️  Failed to parse ObjectId: ${id}`);
       return null;
+    }
+  }
+
+  private sanitizeOperatingHours(operatingHours?: Array<any>) {
+    if (!Array.isArray(operatingHours)) return [];
+    return operatingHours.map((oh) => ({
+      day: oh.day,
+      start: oh.start,
+      end: oh.end,
+      duration: oh.duration,
+    }));
+  }
+
+  private sanitizePriceRanges(priceRanges?: Array<any>) {
+    if (!Array.isArray(priceRanges)) return [];
+    return priceRanges.map((pr) => ({
+      day: pr.day,
+      start: pr.start,
+      end: pr.end,
+      multiplier: pr.multiplier,
+    }));
+  }
+
+  async importFieldsV2(options: ImportOptions) {
+    console.log('🏟️  Importing fields (fixed IDs)...');
+
+    try {
+      let importedCount = 0;
+      let updatedCount = 0;
+      let skippedCount = 0;
+      let errorCount = 0;
+
+      for (const fieldData of fieldLibraryV2) {
+        try {
+          const fieldId = this.safeObjectId(fieldData._id);
+          const ownerId = this.safeObjectId(fieldData.owner);
+
+          if (!fieldId || !ownerId) {
+            console.error(`❌ Invalid field or owner ID for field ${fieldData?.name || '<unknown>'}`);
+            errorCount++;
+            continue;
+          }
+
+          const existing = await this.fieldModel.findById(fieldId);
+
+          if (existing) {
+            if (options.updateDuplicates) {
+              await this.fieldModel.findByIdAndDelete(fieldId);
+              console.log(`🔄 Deleted existing field: ${fieldId} (will update)`);
+            } else if (options.skipDuplicates !== false) {
+              console.log(`⏭️  Skipping existing field: ${fieldId}`);
+              skippedCount++;
+              continue;
+            } else {
+              await this.fieldModel.findByIdAndDelete(fieldId);
+              console.log(`🔄 Deleted existing field: ${fieldId} (will update)`);
+            }
+          }
+
+          const fieldDoc = new this.fieldModel({
+            _id: fieldId,
+            owner: ownerId,
+            name: fieldData.name,
+            sportType: fieldData.sportType,
+            description: fieldData.description,
+            images: fieldData.images || [],
+            operatingHours: this.sanitizeOperatingHours(fieldData.operatingHours),
+            slotDuration: fieldData.slotDuration,
+            minSlots: fieldData.minSlots,
+            maxSlots: fieldData.maxSlots,
+            priceRanges: this.sanitizePriceRanges(fieldData.priceRanges),
+            basePrice: fieldData.basePrice,
+            isActive: fieldData.isActive !== false,
+            rating: fieldData.rating ?? 0,
+            totalReviews: fieldData.totalReviews ?? 0,
+            location: fieldData.location,
+            pendingPriceUpdates: Array.isArray(fieldData.pendingPriceUpdates) ? fieldData.pendingPriceUpdates : [],
+            amenities: Array.isArray(fieldData.amenities)
+              ? fieldData.amenities
+                  .map((a: any) => ({
+                    amenity: this.safeObjectId(a.amenity) || a.amenity,
+                    price: a.price ?? 0,
+                  }))
+                  .filter((a: any) => a.amenity)
+              : [],
+            createdAt: fieldData.createdAt?.$date ? new Date(fieldData.createdAt.$date) : undefined,
+            updatedAt: fieldData.updatedAt?.$date ? new Date(fieldData.updatedAt.$date) : undefined,
+          });
+
+          await fieldDoc.save();
+
+          if (existing) {
+            console.log(`🔄 Updated field: ${fieldData.name} (${fieldId})`);
+            updatedCount++;
+          } else {
+            console.log(`✅ Imported field: ${fieldData.name} (${fieldId})`);
+            importedCount++;
+          }
+        } catch (error) {
+          console.error(`❌ Failed to import field ${fieldData?.name || 'unknown'}:`, (error as any)?.message || error);
+          errorCount++;
+        }
+      }
+
+      console.log(`
+📊 Fields (v2) Import Summary:`);
+      console.log(`   ✅ Imported: ${importedCount}`);
+      console.log(`   🔄 Updated: ${updatedCount}`);
+      console.log(`   ⏭️  Skipped: ${skippedCount}`);
+      console.log(`   ❌ Errors: ${errorCount}`);
+      console.log(`   📦 Total: ${fieldLibraryV2.length}`);
+    } catch (error) {
+      console.error('❌ Error importing fields (v2):', error);
+    }
+  }
+
+  async importCourts(options: ImportOptions) {
+    console.log('🎾 Importing courts...');
+
+    try {
+      let importedCount = 0;
+      let updatedCount = 0;
+      let skippedCount = 0;
+      let errorCount = 0;
+
+      for (const courtData of courtLibrary) {
+        try {
+          const courtId = this.safeObjectId(courtData._id);
+          const fieldId = this.safeObjectId(courtData.field);
+
+          if (!courtId || !fieldId) {
+            console.error(`❌ Invalid court or field ID for court ${courtData?.name || '<unknown>'}`);
+            errorCount++;
+            continue;
+          }
+
+          const fieldExists = await this.fieldModel.findById(fieldId);
+          if (!fieldExists) {
+            console.error(`❌ Field not found for court ${courtId}: ${fieldId}`);
+            errorCount++;
+            continue;
+          }
+
+          const existing = await this.courtModel.findById(courtId);
+
+          if (existing) {
+            if (options.updateDuplicates) {
+              await this.courtModel.findByIdAndDelete(courtId);
+              console.log(`🔄 Deleted existing court: ${courtId} (will update)`);
+            } else if (options.skipDuplicates !== false) {
+              console.log(`⏭️  Skipping existing court: ${courtId}`);
+              skippedCount++;
+              continue;
+            } else {
+              await this.courtModel.findByIdAndDelete(courtId);
+              console.log(`🔄 Deleted existing court: ${courtId} (will update)`);
+            }
+          }
+
+          const pricingOverride = courtData.pricingOverride
+            ? {
+                ...(courtData.pricingOverride.basePrice !== undefined
+                  ? { basePrice: courtData.pricingOverride.basePrice }
+                  : {}),
+                ...(this.sanitizePriceRanges(courtData.pricingOverride.priceRanges).length
+                  ? { priceRanges: this.sanitizePriceRanges(courtData.pricingOverride.priceRanges) }
+                  : {}),
+              }
+            : undefined;
+
+          const courtDoc = new this.courtModel({
+            _id: courtId,
+            field: fieldId,
+            name: courtData.name,
+            courtNumber: courtData.courtNumber,
+            isActive: courtData.isActive !== false,
+            ...(pricingOverride ? { pricingOverride } : {}),
+            createdAt: courtData.createdAt?.$date ? new Date(courtData.createdAt.$date) : undefined,
+            updatedAt: courtData.updatedAt?.$date ? new Date(courtData.updatedAt.$date) : undefined,
+          });
+
+          await courtDoc.save();
+
+          if (existing) {
+            console.log(`🔄 Updated court: ${courtData.name} (${courtId})`);
+            updatedCount++;
+          } else {
+            console.log(`✅ Imported court: ${courtData.name} (${courtId})`);
+            importedCount++;
+          }
+        } catch (error) {
+          console.error(`❌ Failed to import court ${courtData?.name || 'unknown'}:`, (error as any)?.message || error);
+          errorCount++;
+        }
+      }
+
+      console.log(`
+📊 Courts Import Summary:`);
+      console.log(`   ✅ Imported: ${importedCount}`);
+      console.log(`   🔄 Updated: ${updatedCount}`);
+      console.log(`   ⏭️  Skipped: ${skippedCount}`);
+      console.log(`   ❌ Errors: ${errorCount}`);
+      console.log(`   📦 Total: ${courtLibrary.length}`);
+    } catch (error) {
+      console.error('❌ Error importing courts:', error);
     }
   }
 
@@ -528,7 +743,9 @@ class CLIImporter {
       console.log('📋 Options:');
       console.log(`   Amenities: ${options.amenities ? '✅' : '❌'}`);
       console.log(`   Users: ${options.users ? '✅' : '❌'}`);
-      console.log(`   Fields: ${options.fields ? '✅' : '❌'}`);
+      console.log(`   Fields (legacy): ${options.fields ? '✅' : '❌'}`);
+      console.log(`   Fields (v2 - fixed IDs): ${options.fieldsV2 ? '✅' : '❌'}`);
+      console.log(`   Courts: ${options.courts ? '✅' : '❌'}`);
       console.log(`   Bookings: ${options.bookings ? '✅' : '❌'}`);
       console.log(`   Schedules: ${options.schedules ? '✅' : '❌'}`);
       console.log(`   Transactions: ${options.transactions ? '✅' : '❌'}`);
@@ -548,6 +765,14 @@ class CLIImporter {
 
       if (options.fields) {
         await this.importFields(options);
+      }
+
+      if (options.fieldsV2) {
+        await this.importFieldsV2(options);
+      }
+
+      if (options.courts) {
+        await this.importCourts(options);
       }
 
       if (options.bookings) {
@@ -595,6 +820,12 @@ function parseArgs(): ImportOptions {
       case '--fields':
         options.fields = true;
         break;
+      case '--fields-v2':
+        options.fieldsV2 = true;
+        break;
+      case '--courts':
+        options.courts = true;
+        break;
       case '--bookings':
         options.bookings = true;
         break;
@@ -622,6 +853,8 @@ function parseArgs(): ImportOptions {
         options.amenities = true;
         options.users = true;
         options.fields = true;
+        options.fieldsV2 = true;
+        options.courts = true;
         options.bookings = true;
         options.schedules = true;
         options.transactions = true;
@@ -631,7 +864,7 @@ function parseArgs(): ImportOptions {
   });
 
   // Default to amenities if no specific options provided
-  if (!options.amenities && !options.users && !options.fields && !options.bookings && !options.schedules && !options.transactions && !options.reviews) {
+  if (!options.amenities && !options.users && !options.fields && !options.fieldsV2 && !options.courts && !options.bookings && !options.schedules && !options.transactions && !options.reviews) {
     options.amenities = true;
   }
 
@@ -648,7 +881,9 @@ Usage: npm run import:mock [options]
 Options:
   --amenities              Import amenities data
   --users                  Import users data
-  --fields                 Import fields data
+  --fields                 Import fields data (legacy, generated IDs)
+  --fields-v2              Import fields data (fixed IDs for cross-ref)
+  --courts                 Import courts data (requires fields-v2/all)
   --bookings               Import bookings data
   --schedules              Import schedules data
   --transactions           Import transactions data

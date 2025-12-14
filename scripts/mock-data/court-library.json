@@ -1,0 +1,57 @@
+[
+    {
+        "_id": { "$oid": "69183045487331b608b96c10" },
+        "field": { "$oid": "69183045487331b608b96aff" },
+        "name": "Sân 1 - Test wallet",
+        "courtNumber": 1,
+        "isActive": true,
+        "pricingOverride": {
+            "basePrice": 1000,
+            "priceRanges": [
+                { "day": "monday", "start": "17:00", "end": "22:00", "multiplier": 1.5 },
+                { "day": "saturday", "start": "06:00", "end": "22:00", "multiplier": 1.2 },
+                { "day": "sunday", "start": "06:00", "end": "22:00", "multiplier": 1.2 }
+            ]
+        },
+        "createdAt": { "$date": "2025-11-15T14:48:21.132Z" },
+        "updatedAt": { "$date": "2025-11-15T14:48:21.132Z" }
+    },
+    {
+        "_id": { "$oid": "69183045487331b608b96c11" },
+        "field": { "$oid": "69183045487331b608b96aff" },
+        "name": "Sân 2 - Đèn LED",
+        "courtNumber": 2,
+        "isActive": true,
+        "pricingOverride": {
+            "basePrice": 1200,
+            "priceRanges": [
+                { "day": "monday", "start": "06:00", "end": "17:00", "multiplier": 1 },
+                { "day": "monday", "start": "17:00", "end": "22:00", "multiplier": 1.6 },
+                { "day": "tuesday", "start": "06:00", "end": "22:00", "multiplier": 1.05 },
+                { "day": "friday", "start": "17:00", "end": "22:00", "multiplier": 1.35 }
+            ]
+        },
+        "createdAt": { "$date": "2025-11-15T14:48:21.132Z" },
+        "updatedAt": { "$date": "2025-11-15T14:48:21.132Z" }
+    },
+    {
+        "_id": { "$oid": "69183045487331b608b96c12" },
+        "field": { "$oid": "69183045487331b608b96aff" },
+        "name": "Sân 3 - Sáng sớm",
+        "courtNumber": 3,
+        "isActive": true,
+        "pricingOverride": {
+            "basePrice": 900,
+            "priceRanges": [
+                { "day": "monday", "start": "06:00", "end": "09:00", "multiplier": 0.9 },
+                { "day": "tuesday", "start": "06:00", "end": "09:00", "multiplier": 0.9 },
+                { "day": "wednesday", "start": "06:00", "end": "09:00", "multiplier": 0.9 },
+                { "day": "thursday", "start": "06:00", "end": "09:00", "multiplier": 0.9 },
+                { "day": "friday", "start": "06:00", "end": "09:00", "multiplier": 0.9 }
+            ]
+        },
+        "createdAt": { "$date": "2025-11-15T14:48:21.132Z" },
+        "updatedAt": { "$date": "2025-11-15T14:48:21.132Z" }
+    }
+]
+

@@ -27,6 +27,10 @@ export class Booking extends BaseEntity {
   @Prop({ type: Types.ObjectId, ref: 'CoachProfile' })
   requestedCoach?: Types.ObjectId;
 
+  // Specific court for field bookings (required for field bookings, optional for coach bookings)
+  @Prop({ type: Types.ObjectId, ref: 'Court', required: false })
+  court?: Types.ObjectId;
+
   @Prop({
     type: String,
     enum: ['pending', 'accepted', 'declined'],
@@ -160,5 +164,6 @@ BookingSchema.pre('save', function (next) {
 
 // Add compound index for efficient field + date queries
 BookingSchema.index({ field: 1, date: 1 });
+BookingSchema.index({ court: 1, date: 1, status: 1 });
 BookingSchema.index({ user: 1, status: 1 });
 

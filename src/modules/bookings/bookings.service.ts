@@ -5,6 +5,7 @@ import { Booking } from './entities/booking.entity';
 import { BookingStatus, BookingType } from '@common/enums/booking.enum';
 import { Schedule } from '../schedules/entities/schedule.entity';
 import { Field } from '../fields/entities/field.entity';
+import { Court } from '../courts/entities/court.entity';
 import { FieldOwnerProfile } from '../field-owner/entities/field-owner-profile.entity';
 import { User } from '../users/entities/user.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -55,6 +56,9 @@ export interface DailyAvailability {
   isHoliday: boolean;
   holidayReason?: string;
   slots: AvailabilitySlot[];
+  courtId?: string;
+  courtName?: string;
+  courtNumber?: number;
 }
 
 @Injectable()
@@ -68,6 +72,7 @@ export class BookingsService {
     @InjectModel(Schedule.name) private readonly scheduleModel: Model<Schedule>,
     @InjectModel(Field.name) private readonly fieldModel: Model<Field>,
     @InjectModel(FieldOwnerProfile.name) private readonly fieldOwnerProfileModel: Model<FieldOwnerProfile>,
+    @InjectModel(Court.name) private readonly courtModel: Model<Court>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Transaction.name) private readonly transactionModel: Model<Transaction>,
     @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
@@ -127,6 +132,26 @@ export class BookingsService {
     await guestUser.save({ session });
     this.logger.log(`Created guest user for email: ${guestEmail}`);
     return guestUser;
+  }
+
+  /**
+   * Validate court existence, activity, and field ownership
+   */
+  private async validateCourt(courtId: string, fieldId: string, session?: ClientSession): Promise<Court> {
+    if (!Types.ObjectId.isValid(courtId)) {
+      throw new BadRequestException('Invalid court ID format');
+    }
+
+    const court = await this.courtModel.findById(courtId).session(session || null);
+    if (!court || !court.isActive) {
+      throw new NotFoundException('Court not found or inactive');
+    }
+
+    if (court.field.toString() !== fieldId.toString()) {
+      throw new BadRequestException('Court does not belong to the specified field');
+    }
+
+    return court;
   }
 
   /**
@@ -681,6 +706,7 @@ export class BookingsService {
     // Store values outside transaction for email sending
     let booking: Booking;
     let field: any;
+    let court: any;
     let pricingInfo: any;
     let amenitiesFee: number = 0;
     let paymentProofImageUrl: string;
@@ -736,6 +762,9 @@ export class BookingsService {
           throw new NotFoundException('Field not found or inactive');
         }
 
+        // Validate court belongs to field
+        court = await this.validateCourt(bookingData.courtId, bookingData.fieldId, session);
+
         // Parse booking date
         const bookingDate = new Date(bookingData.date);
 
@@ -744,17 +773,25 @@ export class BookingsService {
 
         // Calculate slots and pricing
         const numSlots = this.availabilityService.calculateNumSlots(bookingData.startTime, bookingData.endTime, field.slotDuration);
-        pricingInfo = this.availabilityService.calculatePricing(bookingData.startTime, bookingData.endTime, field, bookingDate);
+        pricingInfo = this.availabilityService.calculatePricing(
+          bookingData.startTime,
+          bookingData.endTime,
+          field,
+          bookingDate,
+          court.pricingOverride
+        );
 
         // ✅ SECURITY: Atomic upsert with version initialization (Pure Lazy Creation)
         const scheduleUpdate = await this.scheduleModel.findOneAndUpdate(
           {
             field: new Types.ObjectId(bookingData.fieldId),
+            court: court._id,
             date: bookingDate
           },
           {
             $setOnInsert: {
               field: new Types.ObjectId(bookingData.fieldId),
+              court: court._id,
               date: bookingDate,
               bookedSlots: [],
               isHoliday: false
@@ -807,6 +844,7 @@ export class BookingsService {
         const createdBooking = new this.bookingModel({
           user: new Types.ObjectId(finalUserId),
           field: new Types.ObjectId(bookingData.fieldId),
+          court: court._id,
           date: bookingDate,
           type: BookingType.FIELD,
           startTime: bookingData.startTime,
@@ -1825,6 +1863,18 @@ export class BookingsService {
     booking.status = BookingStatus.CANCELLED;
     booking.cancellationReason = data.cancellationReason;
     await booking.save();
+
+    // Emit notification with court info
+    this.eventEmitter.emit('booking.cancelled', {
+      bookingId: booking._id,
+      userId: booking.user,
+      fieldId: booking.field,
+      courtId: (booking as any).court,
+      date: booking.date,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      reason: data.cancellationReason
+    });
     return booking;
   }
 
@@ -1849,6 +1899,19 @@ export class BookingsService {
     coachBooking.cancellationReason = data.cancellationReason;
     await fieldBooking.save();
     await coachBooking.save();
+
+    // Emit notification with court info (for field booking)
+    this.eventEmitter.emit('booking.cancelled', {
+      bookingId: fieldBooking._id,
+      userId: fieldBooking.user,
+      fieldId: fieldBooking.field,
+      courtId: (fieldBooking as any).court,
+      date: fieldBooking.date,
+      startTime: fieldBooking.startTime,
+      endTime: fieldBooking.endTime,
+      reason: data.cancellationReason
+    });
+
     return { fieldBooking, coachBooking };
   }
 
