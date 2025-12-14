@@ -265,7 +265,7 @@ export class TournamentService {
             status: TransactionStatus.PENDING,
             notes: `Tournament registration: ${tournament.name}`,
             metadata: {
-                 tournamentId: (tournament._id as Types.ObjectId).toString(),
+                tournamentId: (tournament._id as Types.ObjectId).toString(),
                 tournamentName: tournament.name,
                 sportType: tournament.sportType,
                 category: tournament.category,
@@ -1421,5 +1421,46 @@ export class TournamentService {
         await tournament.save();
 
         return tournament;
+    }
+
+    // In tournaments.service.ts - add this method
+    // In tournaments.service.ts
+    async confirmTournamentPaymentWithMetadata(
+        transactionId: string,
+        gatewayData: any
+    ): Promise<Transaction> {
+        const transaction = await this.transactionModel.findById(transactionId);
+
+        if (!transaction) {
+            throw new NotFoundException('Transaction not found');
+        }
+
+        // Always preserve existing metadata
+        const existingMetadata = transaction.metadata || {};
+
+        // Update with gateway data while preserving tournament info
+        const updatedTransaction = await this.transactionModel.findByIdAndUpdate(
+            transactionId,
+            {
+                status: TransactionStatus.SUCCEEDED,
+                completedAt: new Date(),
+                externalTransactionId: gatewayData.payosOrderCode?.toString(),
+                metadata: {
+                    ...existingMetadata,
+                    payosReference: gatewayData.payosReference,
+                    payosAccountNumber: gatewayData.payosAccountNumber,
+                    payosTransactionDateTime: gatewayData.payosTransactionDateTime,
+                    paymentVerifiedAt: new Date().toISOString(),
+                },
+                notes: `${transaction.notes || ''}\nPayment verified and completed via PayOS`
+            },
+            { new: true }
+        );
+
+        if (!updatedTransaction) {
+            throw new NotFoundException('Transaction not found after update');
+        }
+
+        return updatedTransaction;
     }
 }

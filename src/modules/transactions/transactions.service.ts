@@ -112,12 +112,13 @@ export class TransactionsService {
   /**
    * Cập nhật trạng thái transaction với PayOS data
    */
+  // In transactions.service.ts - updatePaymentStatus method
+  // In transactions.service.ts - updatePaymentStatus method
   async updatePaymentStatus(
     transactionId: string,
     status: TransactionStatus,
     receiptUrl?: string,
     gatewayData?: {
-      // PayOS fields
       payosOrderCode?: number;
       payosReference?: string;
       payosAccountNumber?: string;
@@ -130,37 +131,41 @@ export class TransactionsService {
       throw new NotFoundException(`Transaction with ID ${transactionId} not found`);
     }
 
+    // Get existing metadata (with proper fallback)
+    const existingMetadata = existingTransaction.metadata || {};
+    console.log('Existing metadata:', existingMetadata);
     const updateData: any = {
       status,
-      ...(receiptUrl && { receiptUrl }),
+      // ... other updates
+      metadata: {
+        ...existingMetadata,  // Preserve existing metadata
+        ...gatewayData,       // Add PayOS data
+      }
     };
 
-    // ✅ FIX: Update PayOS fields while preserving existing metadata
+    // ✅ FIX: Preserve ALL existing metadata and only add PayOS fields
     if (gatewayData) {
-      if (gatewayData.payosOrderCode) {
+      // Update externalTransactionId if needed
+      if (gatewayData.payosOrderCode && !existingTransaction.externalTransactionId) {
         updateData.externalTransactionId = String(gatewayData.payosOrderCode);
       }
-      
-      // Preserve existing metadata and merge with new PayOS data
-      const existingMetadata = existingTransaction.metadata || {};
-      const payosMetadata: any = {};
-      
+
+      // Add PayOS metadata WITHOUT overriding existing metadata
+      const newMetadata = { ...existingMetadata };
+
       if (gatewayData.payosReference) {
-        payosMetadata.payosReference = gatewayData.payosReference;
+        newMetadata.payosReference = gatewayData.payosReference;
       }
       if (gatewayData.payosAccountNumber) {
-        payosMetadata.payosAccountNumber = gatewayData.payosAccountNumber;
+        newMetadata.payosAccountNumber = gatewayData.payosAccountNumber;
       }
       if (gatewayData.payosTransactionDateTime) {
-        payosMetadata.payosTransactionDateTime = gatewayData.payosTransactionDateTime;
+        newMetadata.payosTransactionDateTime = gatewayData.payosTransactionDateTime;
       }
-      
-      // Only update metadata if we have PayOS data to merge
-      if (Object.keys(payosMetadata).length > 0) {
-        updateData.metadata = {
-          ...existingMetadata,
-          ...payosMetadata,
-        };
+
+      // Only update if we actually added PayOS data
+      if (Object.keys(newMetadata).length > Object.keys(existingMetadata).length) {
+        updateData.metadata = newMetadata;
       }
     }
 
@@ -173,26 +178,36 @@ export class TransactionsService {
       updateData.processedAt = new Date();
     }
 
-    // Update notes
+    // Update notes - append to existing notes instead of replacing
+    const existingNotes = existingTransaction.notes || '';
     if (status === TransactionStatus.SUCCEEDED) {
-      updateData.notes = 'Transaction completed successfully';
+      updateData.notes = existingNotes.includes('Transaction completed successfully')
+        ? existingNotes
+        : `${existingNotes}\nPayment completed successfully via PayOS`;
     } else if (status === TransactionStatus.FAILED) {
-      updateData.notes = 'Transaction failed';
+      updateData.notes = `${existingNotes}\nPayment failed`;
+    } else {
+      updateData.notes = existingNotes; // Keep existing notes for other statuses
     }
 
-  const transaction = await this.transactionModel.findByIdAndUpdate(
-    transactionId,
-    updateData,
-    { new: true }
-  ).populate('booking').populate('user');
 
-  if (!transaction) {
-    throw new NotFoundException(`Transaction with ID ${transactionId} not found`);
+    console.log('Existing metadata before update:', existingMetadata);
+    console.log('Gateway data to merge:', gatewayData);
+    console.log('New metadata after merge:', updateData.metadata);
+
+    const transaction = await this.transactionModel.findByIdAndUpdate(
+      transactionId,
+      updateData,
+      { new: true }
+    ).populate('booking').populate('user');
+
+    if (!transaction) {
+      throw new NotFoundException(`Transaction with ID ${transactionId} not found after update`);
+    }
+
+    this.logger.log(`Updated transaction ${transactionId} status to ${status}, preserving metadata`);
+    return transaction;
   }
-
-  this.logger.log(`Updated transaction ${transactionId} status to ${status}, preserving metadata`);
-  return transaction;
-}
   /**
    * Lấy transaction theo booking ID
    */
