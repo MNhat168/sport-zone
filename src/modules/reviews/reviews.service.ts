@@ -1,11 +1,12 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, ClientSession } from 'mongoose';
+import { Model, ClientSession, Types } from 'mongoose';
 import { Review } from './entities/review.entity';
 import { ReviewType } from '@common/enums/review.enum';
 import { Booking } from '../bookings/entities/booking.entity';
 import { BookingType } from '@common/enums/booking.enum';
 import { CoachProfile } from 'src/modules/coaches/entities/coach-profile.entity';
+import { Field } from 'src/modules/fields/entities/field.entity';
 
 @Injectable()
 export class ReviewsService {
@@ -13,6 +14,7 @@ export class ReviewsService {
     @InjectModel(Review.name) private readonly reviewModel: Model<Review>,
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
     @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
+    @InjectModel(Field.name) private readonly fieldModel: Model<Field>,
   ) {}
 
   // Create coach review service *
@@ -186,6 +188,13 @@ export class ReviewsService {
       title: data.title?.trim(),
     });
     await review.save();
+    // Update aggregated stats for the field after creating the review
+    try {
+      await this.recomputeFieldStats(data.field);
+    } catch (err) {
+      // Don't block the review creation on stats update; log silently
+      console.error('Failed to update field stats after review create', err);
+    }
     return review;
   }
 
@@ -299,5 +308,99 @@ export class ReviewsService {
         totalPages: Math.ceil(total / limit) || 1,
       },
     };
+  }
+
+  /**
+   * Recompute and persist totalReviews and averageRating for a field.
+   * Returns an object with { totalReviews, averageRating }.
+   */
+  async recomputeFieldStats(fieldId: string) {
+    if (!fieldId) throw new BadRequestException('fieldId is required');
+    // ensure valid ObjectId
+    let objectId: Types.ObjectId;
+    try {
+      objectId = new Types.ObjectId(fieldId);
+    } catch (err) {
+      throw new BadRequestException('Invalid fieldId');
+    }
+
+    // Try to match reviews where `field` is stored as an ObjectId or as a string.
+    // This makes the recompute robust if older reviews were saved with a string id.
+    const agg = await this.reviewModel.aggregate([
+      {
+        $match: {
+          type: ReviewType.FIELD,
+          $or: [{ field: objectId }, { field: fieldId }],
+        },
+      },
+      { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } },
+    ]).exec();
+
+    // Debug/logging to help investigate cases where aggregation returns no rows
+    // (remove or lower log level in production if desired)
+    try {
+      // eslint-disable-next-line no-console
+      console.debug('recomputeFieldStats agg for', fieldId, JSON.stringify(agg));
+    } catch (e) {
+      // ignore logging errors
+    }
+
+    const result = agg && agg.length > 0 ? agg[0] : null;
+    const totalReviews = result?.count ? Number(result.count) : 0;
+    const averageRating = result?.avg ? Number(Number(result.avg).toFixed(2)) : 0;
+
+    // persist to Field model
+    // Note: field.entity.ts uses `rating` + `totalReviews` (no `averageRating` field),
+    // so update `rating` to store the computed average for fast reads.
+    await this.fieldModel.findByIdAndUpdate(
+      fieldId,
+      {
+        $set: {
+          totalReviews,
+          rating: averageRating,
+        },
+      },
+      { new: true },
+    ).exec();
+
+    return { totalReviews, averageRating };
+  }
+
+  /**
+   * Recompute and persist totalReviews and average rating for a coach.
+   * Returns an object with { totalReviews, averageRating }.
+   */
+  async recomputeCoachStats(coachId: string) {
+    if (!coachId) throw new BadRequestException('coachId is required');
+    // validate ObjectId
+    let objectId: Types.ObjectId;
+    try {
+      objectId = new Types.ObjectId(coachId);
+    } catch (err) {
+      throw new BadRequestException('Invalid coachId');
+    }
+
+    const agg = await this.reviewModel.aggregate([
+      { $match: { coach: objectId, type: ReviewType.COACH } },
+      { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } },
+    ]).exec();
+
+    const result = agg && agg.length > 0 ? agg[0] : null;
+    const totalReviews = result?.count ? Number(result.count) : 0;
+    const averageRating = result?.avg ? Number(Number(result.avg).toFixed(2)) : 0;
+
+    // persist to CoachProfile model
+    await this.coachProfileModel.findByIdAndUpdate(
+      coachId,
+      {
+        $set: {
+          totalReviews,
+          rating: averageRating,
+        },
+      },
+      { new: true },
+    ).exec();
+
+    return { totalReviews, averageRating };
   }
 }

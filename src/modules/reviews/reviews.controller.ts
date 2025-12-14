@@ -173,6 +173,12 @@ export class ReviewsController {
     return this.reviewsService.getAllReviewsForField(fieldId, p, l);
   }
 
+  // Recompute and persist field stats (totalReviews and averageRating)
+  @Get('field/:fieldId/stats')
+  async getFieldStats(@Param('fieldId') fieldId: string) {
+    return this.reviewsService.recomputeFieldStats(fieldId);
+  }
+
   // //Get all reviews for a specific coach
   // // Get all reviews for a specific coach (admin/authenticated route)
   // @UseGuards(AuthGuard('jwt'))
@@ -192,5 +198,11 @@ export class ReviewsController {
     const p = Math.max(1, parseInt(page || '1', 10) || 1);
     const l = Math.max(1, parseInt(limit || '10', 10) || 10);
     return this.reviewsService.getAllReviewsForCoach(coachId, p, l);
+  }
+
+  // Recompute and persist coach stats (totalReviews and average rating)
+  @Get('coach/:coachId/stats')
+  async getCoachStats(@Param('coachId') coachId: string) {
+    return this.reviewsService.recomputeCoachStats(coachId);
   }
 }
