@@ -15,7 +15,7 @@ export interface CreatePaymentData {
   method: PaymentMethod;
   paymentNote?: string;
   transactionId?: string;
-  externalTransactionId?: string; // ✅ PayOS orderCode or VNPay transaction ID
+  externalTransactionId?: string; // ✅ PayOS orderCode
 }
 
 @Injectable()
@@ -50,7 +50,7 @@ export class TransactionsService {
         status: initialStatus,
         type: TransactionType.PAYMENT,
         notes: data.paymentNote || null,
-        // ✅ CRITICAL: Store externalTransactionId for PayOS/VNPay lookup
+        // ✅ CRITICAL: Store externalTransactionId for PayOS lookup
         ...(data.externalTransactionId && { externalTransactionId: data.externalTransactionId }),
       });
 
@@ -110,20 +110,13 @@ export class TransactionsService {
   }
 
   /**
-   * Cập nhật trạng thái transaction với VNPay hoặc PayOS data
+   * Cập nhật trạng thái transaction với PayOS data
    */
   async updatePaymentStatus(
     transactionId: string,
     status: TransactionStatus,
     receiptUrl?: string,
     gatewayData?: {
-      // VNPay fields
-      vnp_TransactionNo?: string;
-      vnp_BankTranNo?: string;
-      vnp_BankCode?: string;
-      vnp_CardType?: string;
-      vnp_ResponseCode?: string;
-      vnp_TransactionStatus?: string;
       // PayOS fields
       payosOrderCode?: number;
       payosReference?: string;
@@ -131,48 +124,42 @@ export class TransactionsService {
       payosTransactionDateTime?: string;
     }
   ): Promise<Transaction> {
+    // ✅ FIX: Get existing transaction first to preserve metadata
+    const existingTransaction = await this.transactionModel.findById(transactionId);
+    if (!existingTransaction) {
+      throw new NotFoundException(`Transaction with ID ${transactionId} not found`);
+    }
+
     const updateData: any = {
       status,
       ...(receiptUrl && { receiptUrl }),
     };
 
-    // Update VNPay fields
+    // ✅ FIX: Update PayOS fields while preserving existing metadata
     if (gatewayData) {
-      if (gatewayData.vnp_TransactionNo) {
-        updateData.vnpayTransactionNo = gatewayData.vnp_TransactionNo;
-        updateData.externalTransactionId = gatewayData.vnp_TransactionNo;
-      }
-      if (gatewayData.vnp_BankTranNo) {
-        updateData.vnpayBankTranNo = gatewayData.vnp_BankTranNo;
-        if (!updateData.externalTransactionId) {
-          updateData.externalTransactionId = gatewayData.vnp_BankTranNo;
-        }
-      }
-      if (gatewayData.vnp_BankCode) updateData.vnpayBankCode = gatewayData.vnp_BankCode;
-      if (gatewayData.vnp_CardType) updateData.vnpayCardType = gatewayData.vnp_CardType;
-      if (gatewayData.vnp_ResponseCode) updateData.vnpayResponseCode = gatewayData.vnp_ResponseCode;
-      if (gatewayData.vnp_TransactionStatus) updateData.vnpayTransactionStatus = gatewayData.vnp_TransactionStatus;
-
-      // Update PayOS fields
       if (gatewayData.payosOrderCode) {
         updateData.externalTransactionId = String(gatewayData.payosOrderCode);
       }
+      
+      // Preserve existing metadata and merge with new PayOS data
+      const existingMetadata = existingTransaction.metadata || {};
+      const payosMetadata: any = {};
+      
       if (gatewayData.payosReference) {
-        updateData.metadata = {
-          ...updateData.metadata,
-          payosReference: gatewayData.payosReference,
-        };
+        payosMetadata.payosReference = gatewayData.payosReference;
       }
       if (gatewayData.payosAccountNumber) {
-        updateData.metadata = {
-          ...updateData.metadata,
-          payosAccountNumber: gatewayData.payosAccountNumber,
-        };
+        payosMetadata.payosAccountNumber = gatewayData.payosAccountNumber;
       }
       if (gatewayData.payosTransactionDateTime) {
+        payosMetadata.payosTransactionDateTime = gatewayData.payosTransactionDateTime;
+      }
+      
+      // Only update metadata if we have PayOS data to merge
+      if (Object.keys(payosMetadata).length > 0) {
         updateData.metadata = {
-          ...updateData.metadata,
-          payosTransactionDateTime: gatewayData.payosTransactionDateTime,
+          ...existingMetadata,
+          ...payosMetadata,
         };
       }
     }
@@ -182,10 +169,6 @@ export class TransactionsService {
       updateData.completedAt = new Date();
     } else if (status === TransactionStatus.FAILED) {
       updateData.failedAt = new Date();
-      if (gatewayData?.vnp_ResponseCode) {
-        updateData.errorCode = gatewayData.vnp_ResponseCode;
-        updateData.errorMessage = this.getVNPayErrorDescription(gatewayData.vnp_ResponseCode);
-      }
     } else if (status === TransactionStatus.PROCESSING) {
       updateData.processedAt = new Date();
     }
@@ -194,7 +177,7 @@ export class TransactionsService {
     if (status === TransactionStatus.SUCCEEDED) {
       updateData.notes = 'Transaction completed successfully';
     } else if (status === TransactionStatus.FAILED) {
-      updateData.notes = `Transaction failed with code ${gatewayData?.vnp_ResponseCode || 'unknown'}`;
+      updateData.notes = 'Transaction failed';
     }
 
     const transaction = await this.transactionModel.findByIdAndUpdate(
@@ -228,7 +211,7 @@ export class TransactionsService {
    * Lấy transaction theo ID
    */
   /**
-   * Get payment by external transaction ID (PayOS order code, VNPay transaction no, etc.)
+   * Get payment by external transaction ID (PayOS order code, etc.)
    */
   async getPaymentByExternalId(externalId: string): Promise<Transaction | null> {
     return await this.transactionModel
@@ -300,122 +283,6 @@ export class TransactionsService {
     } catch (error) {
       this.logger.error('Failed to log transaction error', error);
     }
-  }
-
-  /**
-   * Get VNPay error description from response code
-   * Used for better error reporting
-   */
-  getVNPayErrorDescription(responseCode: string): string {
-    const errorMap: Record<string, string> = {
-      '00': 'Giao dịch thành công',
-      '07': 'Trừ tiền thành công. Giao dịch bị nghi ngờ (liên quan tới lừa đảo, giao dịch bất thường)',
-      '09': 'Thẻ/Tài khoản chưa đăng ký dịch vụ InternetBanking',
-      '10': 'Xác thực thông tin thẻ/tài khoản không đúng quá 3 lần',
-      '11': 'Đã hết hạn chờ thanh toán',
-      '12': 'Thẻ/Tài khoản bị khóa',
-      '13': 'Nhập sai mật khẩu OTP',
-      '24': 'Khách hàng hủy giao dịch',
-      '51': 'Tài khoản không đủ số dư',
-      '65': 'Vượt quá hạn mức giao dịch trong ngày',
-      '75': 'Ngân hàng thanh toán đang bảo trì',
-      '79': 'Nhập sai mật khẩu thanh toán quá số lần quy định',
-      '99': 'Lỗi không xác định',
-    };
-
-    return errorMap[responseCode] || 'Lỗi không xác định';
-  }
-
-
-  createVNPayUrl(amount: number, orderId: string, ipAddr: string, returnUrlOverride?: string, expireInMinutes: number = 10): string {
-    const vnp_TmnCode = this.configService.get<string>('vnp_TmnCode');
-    const vnp_HashSecret = this.configService.get<string>('vnp_HashSecret');
-    const vnp_Url = this.configService.get<string>('vnp_Url');
-
-    // Read returnUrl from .env or use override from query param
-    const configReturnUrl = this.configService.get<string>('vnp_ReturnUrl') || 'http://localhost:5173/transactions/vnpay/return';
-    const vnp_ReturnUrl = returnUrlOverride || configReturnUrl;
-
-    if (!vnp_TmnCode || !vnp_HashSecret || !vnp_Url) {
-      this.logger.error('VNPay configuration is missing. Please check environment variables.');
-      throw new BadRequestException('Payment configuration error');
-    }
-
-    // Trim whitespace from config values to prevent signature errors
-    const tmnCode = vnp_TmnCode.trim();
-    const hashSecret = vnp_HashSecret.trim();
-    const vnpayUrl = vnp_Url.trim();
-
-    this.logger.debug(`[VNPay Config] TMN Code: ${tmnCode}`);
-    this.logger.debug(`[VNPay Config] Hash Secret Length: ${hashSecret.length}`);
-    this.logger.debug(`[VNPay Config] URL: ${vnpayUrl}`);
-
-    const date = new Date();
-    const createDate = `${date.getFullYear()}${(date.getMonth() + 1)
-      .toString()
-      .padStart(2, '0')}${date.getDate().toString().padStart(2, '0')}${date
-        .getHours()
-        .toString()
-        .padStart(2, '0')}${date.getMinutes().toString().padStart(2, '0')}${date
-          .getSeconds()
-          .toString()
-          .padStart(2, '0')}`;
-
-    // Calculate expire date (VNPay supports vnp_ExpireDate)
-    const expireDateObj = new Date(date.getTime() + expireInMinutes * 60 * 1000);
-    const expireDate = `${expireDateObj.getFullYear()}${(expireDateObj.getMonth() + 1)
-      .toString()
-      .padStart(2, '0')}${expireDateObj.getDate().toString().padStart(2, '0')}${expireDateObj
-        .getHours()
-        .toString()
-        .padStart(2, '0')}${expireDateObj.getMinutes().toString().padStart(2, '0')}${expireDateObj
-          .getSeconds()
-          .toString()
-          .padStart(2, '0')}`;
-
-    const vnp_Params: Record<string, string> = {
-      vnp_Version: '2.1.0',
-      vnp_Command: 'pay',
-      vnp_TmnCode: tmnCode,
-      vnp_Locale: 'vn',
-      vnp_CurrCode: 'VND',
-      vnp_TxnRef: orderId,
-      vnp_OrderInfo: `Thanh toan don hang ${orderId}`,
-      vnp_OrderType: 'other',
-      vnp_Amount: (amount * 100).toString(),
-      vnp_ReturnUrl: vnp_ReturnUrl,
-      vnp_IpAddr: ipAddr,
-      vnp_CreateDate: createDate,
-      vnp_ExpireDate: expireDate,
-    };
-
-    // Sort parameters alphabetically
-    const sorted = Object.keys(vnp_Params)
-      .sort()
-      .reduce((acc, key) => {
-        acc[key] = vnp_Params[key];
-        return acc;
-      }, {} as Record<string, string>);
-
-    // Create sign data - DO NOT encode
-    const signData = qs.stringify(sorted, { encode: false });
-
-    // Create HMAC SHA512 signature
-    const hmac = crypto.createHmac('sha512', hashSecret);
-    const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
-
-    sorted['vnp_SecureHash'] = signed;
-
-    // Build final URL - DO NOT encode
-    const finalUrl = `${vnpayUrl}?${qs.stringify(sorted, { encode: false })}`;
-
-    // Debug logging
-    this.logger.log(`[VNPay URL] Created payment URL for order ${orderId}`);
-    this.logger.debug(`[VNPay URL] Sign data: ${signData}`);
-    this.logger.debug(`[VNPay URL] Signature: ${signed}`);
-    this.logger.debug(`[VNPay URL] Final URL (first 150 chars): ${finalUrl.substring(0, 150)}...`);
-
-    return finalUrl;
   }
 
   /**
@@ -617,7 +484,7 @@ export class TransactionsService {
 
   /**
    * Get detailed transaction history for a user
-   * Returns transaction records with full VNPay data and filters
+   * Returns transaction records with full PayOS data and filters
    */
   async getTransactionHistory(userId: string, options?: {
     type?: TransactionType;

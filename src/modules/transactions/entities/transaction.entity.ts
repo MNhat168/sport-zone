@@ -46,14 +46,6 @@ export class Transaction extends BaseEntity {
   @Prop({ type: String, unique: true, sparse: true })
   externalTransactionId?: string;
 
-  // VNPay fields
-  @Prop() vnpayTransactionNo?: string;
-  @Prop() vnpayBankTranNo?: string;
-  @Prop() vnpayBankCode?: string;
-  @Prop() vnpayCardType?: string;
-  @Prop() vnpayResponseCode?: string;
-  @Prop() vnpayTransactionStatus?: string;
-
   // Refund / Adjustment
   @Prop() refundReason?: string;
   @Prop({ type: Types.ObjectId, ref: 'User' }) refundedBy?: Types.ObjectId;
@@ -106,6 +98,5 @@ TransactionSchema.index({ booking: 1 });
 TransactionSchema.index({ user: 1 });
 TransactionSchema.index({ type: 1, status: 1 });
 TransactionSchema.index({ direction: 1 });
-TransactionSchema.index({ vnpayTransactionNo: 1 });
 TransactionSchema.index({ relatedTransaction: 1 });
 TransactionSchema.index({ createdAt: -1 });

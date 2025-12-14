@@ -21,9 +21,6 @@ export enum PaymentMethod {
   /** Ví điện tử ZaloPay */
   ZALOPAY = 6,
   
-  /** Cổng thanh toán VNPay */
-  VNPAY = 7,
-  
   /** Chuyển khoản ngân hàng */
   BANK_TRANSFER = 8,
   
@@ -48,7 +45,6 @@ export const PaymentMethodLabels: Record<PaymentMethod, string> = {
   [PaymentMethod.DEBIT_CARD]: 'Thẻ ghi nợ',
   [PaymentMethod.MOMO]: 'Ví MoMo',
   [PaymentMethod.ZALOPAY]: 'ZaloPay',
-  [PaymentMethod.VNPAY]: 'VNPay',
   [PaymentMethod.BANK_TRANSFER]: 'Chuyển khoản ngân hàng',
   [PaymentMethod.QR_CODE]: 'QR Code',
   [PaymentMethod.INTERNAL]: 'Giao dịch nội bộ',
@@ -66,7 +62,6 @@ export const PaymentMethodNames: Record<PaymentMethod, string> = {
   [PaymentMethod.DEBIT_CARD]: 'debit_card',
   [PaymentMethod.MOMO]: 'momo',
   [PaymentMethod.ZALOPAY]: 'zalopay',
-  [PaymentMethod.VNPAY]: 'vnpay',
   [PaymentMethod.BANK_TRANSFER]: 'bank_transfer',
   [PaymentMethod.QR_CODE]: 'qr_code',
   [PaymentMethod.INTERNAL]: 'internal',

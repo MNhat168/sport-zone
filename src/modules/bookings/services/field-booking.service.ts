@@ -141,11 +141,10 @@ export class FieldBookingService {
         const totalPrice = bookingAmount + platformFee; // For backward compatibility
 
         // Determine booking status based on payment method and note
-        // ✅ CRITICAL: Online payments (PayOS, VNPay, etc.) must be PENDING until payment succeeds
+        // ✅ CRITICAL: Online payments (PayOS, etc.) must be PENDING until payment succeeds
         // Only CASH payments can be CONFIRMED immediately (if no note)
         const paymentMethod = bookingData.paymentMethod ?? PaymentMethod.CASH;
-        const isOnlinePayment = paymentMethod === PaymentMethod.PAYOS || 
-                                paymentMethod === PaymentMethod.VNPAY ||
+        const isOnlinePayment = paymentMethod === PaymentMethod.PAYOS ||
                                 paymentMethod === PaymentMethod.MOMO ||
                                 paymentMethod === PaymentMethod.ZALOPAY ||
                                 paymentMethod === PaymentMethod.EBANKING ||

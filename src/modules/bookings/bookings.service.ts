@@ -245,7 +245,7 @@ export class BookingsService {
     (booking as any).approvalStatus = 'approved';
     await booking.save();
 
-    // Send payment link if method is online (PayOS or VNPay)
+    // Send payment link if method is online (PayOS)
     let paymentLink: string | undefined;
     const transaction = booking.transaction ? await this.transactionsService.getPaymentById((booking.transaction as any).toString()) : await this.transactionsService.getPaymentByBookingId((booking._id as any).toString());
 
@@ -271,15 +271,6 @@ export class BookingsService {
           expiredAt: expiresInMinutes, // minutes
         });
         paymentLink = payosRes.checkoutUrl;
-      } else if (transaction.method === PaymentMethod.VNPAY) {
-        const ip = clientIp || '127.0.0.1';
-        paymentLink = this.transactionsService.createVNPayUrl(
-          amountTotal,
-          (transaction._id as any).toString(),
-          ip,
-          undefined,
-          expiresInMinutes,
-        );
       }
     }
 
@@ -499,12 +490,11 @@ export class BookingsService {
         const totalPrice = bookingAmount + platformFee;
 
         // Determine booking status based on payment method and note
-        // ✅ CRITICAL: Online payments (PayOS, VNPay, etc.) must be PENDING until payment succeeds
+        // ✅ CRITICAL: Online payments (PayOS, etc.) must be PENDING until payment succeeds
         // Only CASH payments can be CONFIRMED immediately (if no note)
         const paymentMethod = dto.paymentMethod ?? PaymentMethod.CASH;
         const isOnlinePayment = [
           PaymentMethod.PAYOS,
-          PaymentMethod.VNPAY,
           PaymentMethod.MOMO,
           PaymentMethod.ZALOPAY,
           PaymentMethod.EBANKING,
