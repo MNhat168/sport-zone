@@ -408,41 +408,29 @@ export class FieldBookingService {
     let finalUserId: string;
 
     try {
-      // Step 0: Resolve userId - create guest user if needed
+      // Validate guest info before starting transaction
       if (!userId) {
-        // Guest booking - validate guest info
         const guestData = bookingData as any;
         if (!guestData.guestEmail) {
           throw new BadRequestException('Email is required for guest bookings');
         }
-        
-        // Create or find guest user (outside transaction first to check existence)
-        const guestUser = await this.createOrFindGuestUser(
-          guestData.guestEmail,
-          guestData.guestName,
-          guestData.guestPhone
-        );
-        finalUserId = (guestUser._id as Types.ObjectId).toString();
-        this.logger.log(`Using guest user ID: ${finalUserId} for email: ${guestData.guestEmail}`);
-      } else {
-        finalUserId = userId;
       }
 
       booking = await session.withTransaction(async () => {
-        // If guest user was created outside transaction, ensure it exists in this session
-        if (!userId && (bookingData as any).guestEmail) {
-          const guestUserInSession = await this.userModel.findById(finalUserId).session(session);
-          if (!guestUserInSession) {
-            // Re-create guest user within transaction
-            const guestData = bookingData as any;
-            const guestUser = await this.createOrFindGuestUser(
-              guestData.guestEmail,
-              guestData.guestName,
-              guestData.guestPhone,
-              session
-            );
-            finalUserId = (guestUser._id as Types.ObjectId).toString();
-          }
+        // Resolve userId - create guest user if needed (WITHIN transaction)
+        if (!userId) {
+          // Guest booking - create or find guest user within transaction
+          const guestData = bookingData as any;
+          const guestUser = await this.createOrFindGuestUser(
+            guestData.guestEmail,
+            guestData.guestName,
+            guestData.guestPhone,
+            session
+          );
+          finalUserId = (guestUser._id as Types.ObjectId).toString();
+          this.logger.log(`Using guest user ID: ${finalUserId} for email: ${guestData.guestEmail}`);
+        } else {
+          finalUserId = userId;
         }
 
         // Validate field
@@ -608,7 +596,18 @@ export class FieldBookingService {
       });
 
     } catch (error) {
-      this.logger.error('Error creating field booking without payment', error);
+      this.logger.error('Error creating field booking without payment', {
+        error: error.message,
+        stack: error.stack,
+        userId,
+        bookingData: {
+          fieldId: bookingData.fieldId,
+          courtId: bookingData.courtId,
+          date: bookingData.date,
+          startTime: bookingData.startTime,
+          endTime: bookingData.endTime,
+        }
+      });
       
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
@@ -618,7 +617,9 @@ export class FieldBookingService {
         throw new BadRequestException('Slot was booked by another user. Please refresh availability and try again.');
       }
       
-      throw new InternalServerErrorException('Failed to create booking. Please try again.');
+      // Re-throw with more context if it's a known error
+      const errorMessage = error.message || 'Failed to create booking. Please try again.';
+      throw new InternalServerErrorException(errorMessage);
     } finally {
       await session.endSession();
     }

@@ -171,7 +171,7 @@ export class BookingsController {
   ): Promise<Booking> {
     // ✅ Optional authentication - get userId if user is logged in
     const userId = req.user?.userId || req.user?._id || req.user?.id || null;
-    
+
     // ✅ Validate guest info if not authenticated
     if (!userId && !bookingData.guestEmail) {
       throw new BadRequestException('Email is required for guest bookings. Please provide guestEmail or login to your account.');
@@ -211,12 +211,12 @@ export class BookingsController {
   ): Promise<Booking> {
     // ✅ Optional authentication - get userId if user is logged in
     const userId = req.user?.userId || req.user?._id || req.user?.id || null;
-    
+
     // ✅ Validate guest info if not authenticated
     if (!userId && !bookingData.guestEmail) {
       throw new BadRequestException('Email is required for guest bookings. Please provide guestEmail or login to your account.');
     }
-    
+
     if (!paymentProof) {
       throw new BadRequestException('Payment proof image is required');
     }
@@ -335,12 +335,12 @@ export class BookingsController {
   ): Promise<Booking> {
     // ✅ Optional authentication - get userId if user is logged in
     const userId = req.user?.userId || req.user?._id || req.user?.id || null;
-    
+
     // ✅ Validate guest info if not authenticated
     if (!userId && !bookingData.guestEmail) {
       throw new BadRequestException('Email is required for guest bookings. Please provide guestEmail or login to your account.');
     }
-    
+
     if (!paymentProof) {
       throw new BadRequestException('Payment proof image is required');
     }
@@ -392,7 +392,7 @@ export class BookingsController {
   ): Promise<Booking> {
     // ✅ Optional authentication - get userId if user is logged in
     const userId = req.user?.userId || req.user?._id || req.user?.id || null;
-    
+
     // ✅ Validate guest info if not authenticated
     if (!userId && !bookingData.guestEmail) {
       throw new BadRequestException('Email is required for guest bookings. Please provide guestEmail or login to your account.');
@@ -887,7 +887,7 @@ export class BookingsController {
     @Body() body: VerifyPaymentProofDto,
   ): Promise<Booking> {
     const userId = this.getUserId(req);
-    
+
     // Get field owner profile ID from user
     const fieldOwnerProfile = await this.bookingsService.getFieldOwnerProfileByUserId(userId);
     if (!fieldOwnerProfile) {
@@ -950,7 +950,7 @@ export class BookingsController {
     @Request() req: any,
   ): Promise<Booking[]> {
     const userId = this.getUserId(req);
-    
+
     // Get field owner profile ID from user
     const fieldOwnerProfile = await this.bookingsService.getFieldOwnerProfileByUserId(userId);
     if (!fieldOwnerProfile) {

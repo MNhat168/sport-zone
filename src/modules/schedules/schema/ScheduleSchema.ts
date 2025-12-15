@@ -5,7 +5,9 @@ import { timeToMinutes } from "src/utils/utils";
 
 export const ScheduleSchema = SchemaFactory.createForClass(Schedule);
 ScheduleSchema.index({ court: 1, date: 1 }, { unique: true, partialFilterExpression: { court: { $exists: true } } });
-ScheduleSchema.index({ field: 1, date: 1 }, { unique: true, partialFilterExpression: { field: { $exists: true } } });
+// ✅ FIX: Thêm điều kiện court: { $exists: false } để tránh conflict với index court_1_date_1
+// Index này chỉ áp dụng cho schedules không có court (legacy schedules hoặc coach schedules)
+ScheduleSchema.index({ field: 1, date: 1 }, { unique: true, partialFilterExpression: { field: { $exists: true }, court: { $exists: false } } });
 ScheduleSchema.index({ date: 1 });
 
 // Virtual slots approach: availableSlots generated from Field config
