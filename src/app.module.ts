@@ -26,9 +26,10 @@ import envConfig from './config/env.config';
 
 import { ChatModule } from '@modules/chat/chat.module';
 import { CourtsModule } from './modules/courts/courts.module';
+import { BillingModule } from './modules/billing/billing.module';
 @Module({
   imports: [
-        LessonTypesModule, 
+    LessonTypesModule,
     ConfigModule.forRoot({
       isGlobal: true, // ← cho phép dùng ở mọi module
       // Dùng .env.prod khi NODE_ENV=production, fallback về .env
@@ -70,7 +71,8 @@ import { CourtsModule } from './modules/courts/courts.module';
     AmenitiesModule,
     NotificationsModule,
     ChatModule,
-    CourtsModule
+    CourtsModule,
+    BillingModule
   ],
   controllers: [AppController],
   providers: [

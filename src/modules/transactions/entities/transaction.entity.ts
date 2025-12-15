@@ -14,6 +14,10 @@ export class Transaction extends BaseEntity {
   @Prop({ type: Types.ObjectId, ref: 'Booking' })
   booking?: Types.ObjectId;
 
+  // Link to Invoice (for Host subscription)
+  @Prop({ type: Types.ObjectId, ref: 'Invoice' })
+  invoice?: Types.ObjectId;
+
   // Số tiền (dương = vào hệ thống, âm = ra hệ thống)
   @Prop({ required: true })
   amount: number;

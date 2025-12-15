@@ -51,6 +51,19 @@ export class User extends BaseEntity {
 
   @Prop({ type: String })
   address?: string; // Địa chỉ từ EKYC
+
+  // Billing / Subscription Fields
+  @Prop({ type: String, enum: ['active', 'grace_period', 'suspended'], default: 'active' })
+  subscriptionStatus: 'active' | 'grace_period' | 'suspended';
+
+  @Prop({ type: Date })
+  nextPaymentDate?: Date;
+
+  @Prop({ type: Date })
+  lastPaymentDate?: Date;
+
+  @Prop({ type: Date })
+  gracePeriodEndDate?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
