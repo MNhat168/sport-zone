@@ -214,6 +214,14 @@ export class BookingsService {
       .findById(bookingId)
       .populate('user', 'fullName email phone')
       .populate('field', 'name location owner')
+      .populate({
+        path: 'court',
+        select: 'name courtNumber',
+      })
+      .populate({
+        path: 'transaction',
+        select: 'status paymentProofImageUrl paymentProofStatus paymentProofRejectionReason',
+      })
       .lean();
     if (!booking) throw new NotFoundException('Booking not found');
 
@@ -342,6 +350,16 @@ export class BookingsService {
       booking.status = BookingStatus.CONFIRMED;
     }
     await booking.save();
+
+    // Gửi email xác nhận cho khách sau khi chủ sân chấp nhận booking
+    // (sử dụng service gửi mail dùng chung cho cả cash & online)
+    try {
+      // Mongoose document có getter `id` (string) nên dùng để tránh lỗi type unknown của `_id`
+      await this.bookingEmailService.sendConfirmationEmails(booking.id);
+    } catch (err) {
+      this.logger.warn(`[OwnerAcceptBooking] Failed to send confirmation email for booking ${bookingId}`, err);
+    }
+
     return booking.toJSON();
   }
 
@@ -1572,6 +1590,25 @@ export class BookingsService {
 
   async getByRequestedCoachId(coachId: string): Promise<Booking[]> {
     return this.sessionBookingService.getByRequestedCoachId(coachId);
+  }
+
+  /**
+   * Get bookings for the currently authenticated coach
+   */
+  async getMyCoachBookings(userId: string): Promise<Booking[]> {
+    // Find coach profile from user ID
+    const coachProfile = await this.coachProfileModel.findOne({ user: new Types.ObjectId(userId) }).lean();
+
+    if (!coachProfile) {
+      throw new NotFoundException('Coach profile not found for this user');
+    }
+
+    // Use the profile ID to get bookings
+    // Note: sessionBookingService.getByRequestedCoachId expects the CoachProfile ID (which is referenced as requestedCoach in Booking)
+    // Double check if requestedCoach stores User ID or Profile ID. 
+    // In createCoachBookingLazy: requestedCoach: new Types.ObjectId(String(coachProfile._id))
+    // So it stores the Profile ID.
+    return this.getByRequestedCoachId(coachProfile._id.toString());
   }
 
   /**

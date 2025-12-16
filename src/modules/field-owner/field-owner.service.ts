@@ -400,27 +400,66 @@ export class FieldOwnerService {
       }
 
       if (filters.transactionStatus) {
-        const transactions = await this.transactionModel
-          .find({ status: filters.transactionStatus })
-          .select('_id')
-          .lean()
-          .exec();
+        // Special case: when filtering by 'pending' transaction status,
+        // also include bookings with paymentStatus = 'paid'
+        if (filters.transactionStatus === 'pending') {
+          const transactions = await this.transactionModel
+            .find({ status: filters.transactionStatus })
+            .select('_id')
+            .lean()
+            .exec();
 
-        const transactionIds = transactions.map((t) => t._id);
-        if (transactionIds.length > 0) {
-          bookingFilter.transaction = { $in: transactionIds };
+          const transactionIds = transactions.map((t) => t._id);
+          
+          // Create $or condition: transaction status = 'pending' OR paymentStatus = 'paid'
+          const orConditions: any[] = [];
+          
+          if (transactionIds.length > 0) {
+            orConditions.push({ transaction: { $in: transactionIds } });
+          }
+          
+          // Also include bookings with paymentStatus = 'paid'
+          orConditions.push({ paymentStatus: 'paid' });
+          
+          if (orConditions.length > 0) {
+            bookingFilter.$or = orConditions;
+          } else {
+            return {
+              bookings: [],
+              pagination: {
+                total: 0,
+                page: filters.page || 1,
+                limit: filters.limit || 10,
+                totalPages: 0,
+                hasNextPage: false,
+                hasPrevPage: false,
+              },
+            };
+          }
         } else {
-          return {
-            bookings: [],
-            pagination: {
-              total: 0,
-              page: filters.page || 1,
-              limit: filters.limit || 10,
-              totalPages: 0,
-              hasNextPage: false,
-              hasPrevPage: false,
-            },
-          };
+          // For other transaction statuses, use the original logic
+          const transactions = await this.transactionModel
+            .find({ status: filters.transactionStatus })
+            .select('_id')
+            .lean()
+            .exec();
+
+          const transactionIds = transactions.map((t) => t._id);
+          if (transactionIds.length > 0) {
+            bookingFilter.transaction = { $in: transactionIds };
+          } else {
+            return {
+              bookings: [],
+              pagination: {
+                total: 0,
+                page: filters.page || 1,
+                limit: filters.limit || 10,
+                totalPages: 0,
+                hasNextPage: false,
+                hasPrevPage: false,
+              },
+            };
+          }
         }
       }
 
@@ -435,6 +474,10 @@ export class FieldOwnerService {
         .populate({
           path: 'field',
           select: 'name _id',
+        })
+        .populate({
+          path: 'court',
+          select: 'name courtNumber',
         })
         .populate({
           path: 'user',
@@ -453,28 +496,37 @@ export class FieldOwnerService {
         .limit(limit)
         .exec();
 
-      const formattedBookings = bookings.map((booking) => ({
-        bookingId: booking._id?.toString(),
-        fieldId: booking.field?._id?.toString(),
-        fieldName: (booking.field as any)?.name || 'Unknown Field',
-        date:
-          typeof booking.date === 'string'
-            ? booking.date
-            : booking.date.toISOString().split('T')[0],
-        startTime: booking.startTime,
-        endTime: booking.endTime,
-        status: booking.status,
-        transactionStatus: (booking.transaction as any)?.status || null,
-        totalPrice: booking.totalPrice,
-        customer: {
-          fullName: (booking.user as any)?.fullName || 'Unknown',
-          phone: (booking.user as any)?.phone || 'N/A',
-          email: (booking.user as any)?.email || 'N/A',
-        },
-        selectedAmenities: booking.selectedAmenities?.map((amenity: any) => amenity.name) || [],
-        amenitiesFee: booking.amenitiesFee || 0,
-        createdAt: booking.createdAt,
-      }));
+      const formattedBookings = bookings.map((booking) => {
+        const court = booking.court as any;
+        const courtName = court?.name || (court?.courtNumber ? `Sân ${court.courtNumber}` : null);
+        const courtNumber = court?.courtNumber;
+        
+        return {
+          bookingId: booking._id?.toString(),
+          fieldId: booking.field?._id?.toString(),
+          fieldName: (booking.field as any)?.name || 'Unknown Field',
+          courtName,
+          courtNumber,
+          date:
+            typeof booking.date === 'string'
+              ? booking.date
+              : booking.date.toISOString().split('T')[0],
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          status: booking.status,
+          transactionStatus: (booking.transaction as any)?.status || null,
+          approvalStatus: (booking as any).approvalStatus || (booking as any).noteStatus || undefined,
+          totalPrice: booking.totalPrice,
+          customer: {
+            fullName: (booking.user as any)?.fullName || 'Unknown',
+            phone: (booking.user as any)?.phone || 'N/A',
+            email: (booking.user as any)?.email || 'N/A',
+          },
+          selectedAmenities: booking.selectedAmenities?.map((amenity: any) => amenity.name) || [],
+          amenitiesFee: booking.amenitiesFee || 0,
+          createdAt: booking.createdAt,
+        };
+      });
 
       const totalPages = Math.ceil(total / limit);
 
