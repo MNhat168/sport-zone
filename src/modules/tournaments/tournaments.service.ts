@@ -10,7 +10,8 @@ import { Court } from '../courts/entities/court.entity'; // Add Court import
 import { Transaction } from '../transactions/entities/transaction.entity';
 import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum';
 import { User } from '../users/entities/user.entity';
-import { CreateTournamentDto, RegisterTournamentDto, UpdateTournamentDto } from './dto/create-tournament.dto';
+import { CreateTournamentDto, UpdateTournamentDto } from './dto/create-tournament.dto';
+import { RegisterTournamentDto } from './dto/RegisterTournamentDto';
 import { SPORT_RULES_MAP, TeamSizeMap, calculateParticipants } from 'src/common/enums/sport-type.enum';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 import { PayOSService } from '@modules/transactions/payos.service';
@@ -252,37 +253,19 @@ export class TournamentService {
             throw new BadRequestException('Already registered for this tournament');
         }
 
-        let paymentMethodValue: number;
-        const paymentMethodStr = dto.paymentMethod as unknown as string;
-
-        switch (paymentMethodStr.toLowerCase()) {
-            case 'payos':
-                paymentMethodValue = PaymentMethod.PAYOS;
-                break;
-            case 'wallet':
-                paymentMethodValue = PaymentMethod.WALLET;
-                break;
-            case 'momo':
-                paymentMethodValue = PaymentMethod.MOMO;
-                break;
-            case 'banking':
-                paymentMethodValue = PaymentMethod.BANK_TRANSFER;
-                break;
-            default:
-                throw new BadRequestException('Invalid payment method');
-        }
+        const paymentMethodValue = dto.paymentMethod;
 
         // Create payment transaction
         const transaction = new this.transactionModel({
             user: new Types.ObjectId(userId),
             amount: tournament.registrationFee,
             direction: 'in',
-            method: paymentMethodValue,
+            method: paymentMethodValue, // This should now be a number
             type: TransactionType.PAYMENT,
             status: TransactionStatus.PENDING,
             notes: `Tournament registration: ${tournament.name}`,
             metadata: {
-                tournamentId: tournament._id,
+                tournamentId: (tournament._id as Types.ObjectId).toString(),
                 tournamentName: tournament.name,
                 sportType: tournament.sportType,
                 category: tournament.category,
@@ -290,6 +273,7 @@ export class TournamentService {
                 participantName: dto.buyerName,
             }
         });
+
 
         await transaction.save();
 
@@ -340,10 +324,20 @@ export class TournamentService {
                 const timestamp = Date.now();
                 orderCode = Number(timestamp.toString().slice(-9));
 
-                // Update transaction with external ID
+                // Update transaction with tournament ID in metadata BEFORE saving
                 transaction.externalTransactionId = orderCode.toString();
-                externalIdToUse = orderCode.toString();
+                transaction.metadata = {
+                    ...transaction.metadata,
+                    tournamentId: (tournament._id as Types.ObjectId).toString(), // Add tournament ID here
+                    tournamentName: tournament.name,
+                    sportType: tournament.sportType,
+                    category: tournament.category,
+                    userId: userId,
+                    participantName: dto.buyerName,
+                };
+
                 await transaction.save();
+                externalIdToUse = orderCode.toString();
 
                 this.logger.log(`Generated new PayOS orderCode: ${orderCode} for transaction ${transaction._id}`);
             }
@@ -377,7 +371,7 @@ export class TournamentService {
             });
 
             // Send registration confirmation email
-            await this.sendTournamentRegistrationConfirmationEmail(userId, tournament, paymentLink.checkoutUrl);
+            // await this.sendTournamentRegistrationConfirmationEmail(userId, tournament, paymentLink.checkoutUrl);
 
             return {
                 success: true,
@@ -586,6 +580,11 @@ export class TournamentService {
         this.logger.log('✅ Tournament payment event listeners registered');
     }
 
+    /**
+     * ✅ ENHANCED: Handle tournament payment success with proper metadata handling
+     * Uses TransactionsService.updateTransactionMetadata() to safely update transaction metadata
+     * without overwriting PayOS webhook data (following bank verification pattern)
+     */
     private async handleTournamentPaymentSuccess(event: {
         paymentId: string;
         bookingId?: string;
@@ -595,107 +594,143 @@ export class TournamentService {
         method?: string;
         transactionId?: string;
     }) {
+        // ✅ CRITICAL FIX: This method now uses atomic updates to prevent race conditions
+        // with PayOS webhooks that may be updating the same transaction simultaneously
         try {
-            const transaction = await this.transactionModel.findById(event.paymentId);
+            this.logger.log(`[Tournament Payment Success] Processing payment success event:`, {
+                paymentId: event.paymentId,
+                tournamentId: event.tournamentId,
+                userId: event.userId,
+                transactionId: event.transactionId
+            });
+
+            // First try to find by _id (paymentId)
+            let transaction = await this.transactionModel.findById(event.paymentId);
+
+            // If not found, try to find by externalTransactionId
+            if (!transaction && event.transactionId) {
+                this.logger.log(`[Tournament Payment Success] Transaction not found by ID, trying externalTransactionId: ${event.transactionId}`);
+                transaction = await this.transactionModel.findOne({
+                    externalTransactionId: event.transactionId
+                });
+            }
+
+            // If still not found, try to find by metadata.payosReference
+            if (!transaction && event.transactionId) {
+                this.logger.log(`[Tournament Payment Success] Transaction not found by externalTransactionId, trying payosReference: ${event.transactionId}`);
+                transaction = await this.transactionModel.findOne({
+                    'metadata.payosReference': event.transactionId
+                });
+            }
 
             if (!transaction) {
-                this.logger.error(`[Tournament Payment Success] Transaction not found: ${event.paymentId}`);
+                this.logger.error(`[Tournament Payment Success] ❌ Transaction not found for:`, {
+                    paymentId: event.paymentId,
+                    transactionId: event.transactionId
+                });
                 return;
             }
 
-            // Check if this is a tournament payment
-            const isTournamentPayment =
-                event.tournamentId ||
-                (transaction.metadata && transaction.metadata.tournamentId) ||
-                transaction.notes?.includes('Tournament registration');
+            this.logger.log(`[Tournament Payment Success] ✅ Transaction found: ${transaction._id}`);
 
-            if (!isTournamentPayment) {
+            // ✅ Get userId from transaction if not provided in event
+            const userId = event.userId ||
+                (transaction.user
+                    ? (typeof transaction.user === 'string'
+                        ? transaction.user
+                        : String(transaction.user))
+                    : null);
+
+            if (!userId) {
+                this.logger.error(`[Tournament Payment Success] ❌ No userId found in event or transaction:`, {
+                    eventUserId: event.userId,
+                    transactionUser: transaction.user
+                });
                 return;
             }
 
-            this.logger.log(`[Tournament Payment Success] Processing tournament payment ${event.paymentId}`);
-
-            // Get tournament ID from metadata or event
+            // ✅ Get tournament ID from event or transaction metadata (prioritize event)
             const tournamentId = event.tournamentId ||
-                (transaction.metadata?.tournamentId ? transaction.metadata.tournamentId.toString() : null);
+                (transaction.metadata?.tournamentId ?
+                    String(transaction.metadata.tournamentId) : null);
 
             if (!tournamentId) {
-                this.logger.error(`[Tournament Payment Success] No tournament ID found for payment ${event.paymentId}`);
+                this.logger.error(`[Tournament Payment Success] ❌ No tournament ID found for transaction:`, {
+                    transactionId: transaction._id,
+                    eventTournamentId: event.tournamentId,
+                    metadata: transaction.metadata
+                });
                 return;
             }
+
+            this.logger.log(`[Tournament Payment Success] ✅ Tournament ID found: ${tournamentId}`);
 
             // Find tournament
             const tournament = await this.tournamentModel.findById(tournamentId);
 
             if (!tournament) {
-                this.logger.error(`[Tournament Payment Success] Tournament not found: ${tournamentId}`);
+                this.logger.error(`[Tournament Payment Success] ❌ Tournament not found: ${tournamentId}`);
                 return;
             }
 
-            // Check if tournament is still accepting registrations
-            const now = new Date();
-            if (now > tournament.registrationEnd) {
-                this.logger.error(`[Tournament Payment Success] Registration period ended for tournament ${tournamentId}`);
-                await this.transactionModel.findByIdAndUpdate(
-                    event.paymentId,
-                    {
-                        status: TransactionStatus.FAILED,
-                        notes: `Payment succeeded but registration period ended`,
-                        errorMessage: 'Registration period ended'
-                    }
-                );
-                return;
-            }
+            this.logger.log(`[Tournament Payment Success] ✅ Tournament found: ${tournament.name}`);
 
-            // Check if tournament is full
-            if (tournament.participants.length >= tournament.maxParticipants) {
-                this.logger.error(`[Tournament Payment Success] Tournament ${tournamentId} is full`);
-                await this.transactionModel.findByIdAndUpdate(
-                    event.paymentId,
-                    {
-                        status: TransactionStatus.FAILED,
-                        notes: `Payment succeeded but tournament is full`,
-                        errorMessage: 'Tournament is full'
-                    }
-                );
-
-                // Refund the payment since tournament is full
-                await this.transactionsService.processRefund(
-                    event.paymentId,
-                    event.amount,
-                    'Tournament is full',
-                    'Automatic refund due to tournament being full'
-                );
-                return;
-            }
-
-            // Check if user already registered
+            // Check if user is already registered
             const alreadyRegistered = tournament.participants.some(
-                p => p.user.toString() === event.userId
+                p => String(p.user) === userId
             );
 
             if (alreadyRegistered) {
-                this.logger.warn(`[Tournament Payment Success] User ${event.userId} already registered for tournament ${tournamentId}`);
+                this.logger.warn(`[Tournament Payment Success] ⚠️ User ${userId} already registered for tournament ${tournamentId}`);
+                // Still send confirmation email in case it wasn't sent before
+                try {
+                    await this.sendTournamentRegistrationConfirmation(userId, tournament);
+                    this.logger.log(`[Tournament Payment Success] ✅ Confirmation email sent to already registered user ${userId}`);
+                } catch (emailError) {
+                    this.logger.error(`[Tournament Payment Success] ❌ Error sending email to already registered user:`, emailError);
+                }
                 return;
             }
 
+            // ✅ Add participant to tournament
             tournament.participants.push({
-                user: new Types.ObjectId(event.userId),
-                registeredAt: now,
-                confirmedAt: now,
-                transaction: new Types.ObjectId(event.paymentId),
+                user: new Types.ObjectId(userId),
+                registeredAt: new Date(),
+                confirmedAt: new Date(),
+                transaction: transaction._id as Types.ObjectId,
                 paymentStatus: 'confirmed',
             });
 
             await tournament.save();
+            this.logger.log(`[Tournament Payment Success] ✅ Participant ${userId} added to tournament ${tournament.name}`);
 
-            // Send confirmation email
-            await this.sendTournamentRegistrationConfirmation(event.userId, tournament);
+            // ✅ ENHANCED: Use TransactionsService to update metadata safely
+            // This ensures PayOS metadata is preserved and atomic operation
+            await this.transactionsService.updateTransactionMetadata(
+                (transaction._id as Types.ObjectId).toString(),
+                {
+                    tournamentProcessed: true,
+                    tournamentProcessedAt: new Date(),
+                    tournamentParticipantConfirmed: true,
+                    tournamentConfirmedAt: new Date(),
+                }
+            );
+            this.logger.log(`[Tournament Payment Success] ✅ Transaction ${transaction._id} metadata updated via TransactionsService`);
 
-            this.logger.log(`[Tournament Payment Success] ✅ Participant ${event.userId} confirmed for tournament ${tournament.name}`);
+            // ✅ Send confirmation email after participant is successfully added
+            try {
+                await this.sendTournamentRegistrationConfirmation(userId, tournament);
+                this.logger.log(`[Tournament Payment Success] ✅ Confirmation email sent to ${userId} for tournament ${tournament.name}`);
+            } catch (emailError) {
+                this.logger.error(`[Tournament Payment Success] ❌ Error sending confirmation email:`, emailError);
+                // Don't fail the whole process if email fails
+            }
+
+            this.logger.log(`[Tournament Payment Success] ✅ Successfully processed tournament payment for participant ${userId} in tournament ${tournament.name}`);
 
         } catch (error) {
-            this.logger.error('[Tournament Payment Success] Error processing tournament payment:', error);
+            this.logger.error('[Tournament Payment Success] ❌ Error processing tournament payment:', error);
+            this.logger.error('[Tournament Payment Success] Error stack:', error.stack);
         }
     }
 
@@ -1447,5 +1482,59 @@ export class TournamentService {
         await tournament.save();
 
         return tournament;
+    }
+
+    /**
+     * ✅ ENHANCED: Confirm tournament payment with proper metadata handling
+     * Uses TransactionsService methods to safely handle PayOS gateway data
+     * without overwriting existing tournament metadata
+     */
+    async confirmTournamentPaymentWithMetadata(
+        transactionId: string,
+        gatewayData: any
+    ): Promise<Transaction> {
+        const transaction = await this.transactionModel.findById(transactionId);
+
+        if (!transaction) {
+            throw new NotFoundException('Transaction not found');
+        }
+
+        // ✅ Use TransactionsService.updatePaymentStatus to handle gateway data properly
+        // This ensures PayOS metadata is merged correctly and atomically
+        const updatedTransaction = await this.transactionsService.updatePaymentStatus(
+            transactionId,
+            TransactionStatus.SUCCEEDED,
+            undefined, // receiptUrl
+            {
+                payosOrderCode: gatewayData.payosOrderCode,
+                payosReference: gatewayData.payosReference,
+                payosAccountNumber: gatewayData.payosAccountNumber,
+                payosTransactionDateTime: gatewayData.payosTransactionDateTime,
+            }
+        );
+
+        // ✅ Use updateTransactionMetadata to add tournament-specific fields
+        await this.transactionsService.updateTransactionMetadata(
+            transactionId,
+            {
+                paymentVerifiedAt: new Date().toISOString(),
+                tournamentPaymentConfirmed: true,
+            }
+        );
+
+        // ✅ Use updateTransactionMetadata to add tournament-specific fields
+        await this.transactionsService.updateTransactionMetadata(
+            transactionId,
+            {
+                paymentVerifiedAt: new Date().toISOString(),
+                tournamentPaymentConfirmed: true,
+            }
+        );
+
+        if (!updatedTransaction) {
+            throw new NotFoundException('Transaction not found after update');
+        }
+
+        return updatedTransaction;
     }
 }

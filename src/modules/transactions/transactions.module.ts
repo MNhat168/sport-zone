@@ -3,7 +3,6 @@ import { ConfigModule } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { TransactionsController } from './transactions.controller';
 import { TransactionsService } from './transactions.service';
-import { VNPayService } from './vnpay.service';
 import { PayOSService } from './payos.service';
 import { Transaction, TransactionSchema } from './entities/transaction.entity';
 import { Booking, BookingSchema } from '../bookings/entities/booking.entity';
@@ -29,10 +28,9 @@ import { BookingsModule } from '../bookings/bookings.module';
   controllers: [TransactionsController],
   providers: [
     TransactionsService, 
-    VNPayService,
     PayOSService,
   ],
-  exports: [TransactionsService, VNPayService, PayOSService], // Export để các module khác sử dụng
+  exports: [TransactionsService, PayOSService], // Export để các module khác sử dụng
 })
 export class TransactionsModule {}
 

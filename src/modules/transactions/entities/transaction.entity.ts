@@ -14,6 +14,10 @@ export class Transaction extends BaseEntity {
   @Prop({ type: Types.ObjectId, ref: 'Booking' })
   booking?: Types.ObjectId;
 
+  // Link to Invoice (for Host subscription)
+  @Prop({ type: Types.ObjectId, ref: 'Invoice' })
+  invoice?: Types.ObjectId;
+
   // Số tiền (dương = vào hệ thống, âm = ra hệ thống)
   @Prop({ required: true })
   amount: number;
@@ -45,14 +49,6 @@ export class Transaction extends BaseEntity {
   // External ID từ gateway
   @Prop({ type: String, unique: true, sparse: true })
   externalTransactionId?: string;
-
-  // VNPay fields
-  @Prop() vnpayTransactionNo?: string;
-  @Prop() vnpayBankTranNo?: string;
-  @Prop() vnpayBankCode?: string;
-  @Prop() vnpayCardType?: string;
-  @Prop() vnpayResponseCode?: string;
-  @Prop() vnpayTransactionStatus?: string;
 
   // Refund / Adjustment
   @Prop() refundReason?: string;
@@ -106,6 +102,5 @@ TransactionSchema.index({ booking: 1 });
 TransactionSchema.index({ user: 1 });
 TransactionSchema.index({ type: 1, status: 1 });
 TransactionSchema.index({ direction: 1 });
-TransactionSchema.index({ vnpayTransactionNo: 1 });
 TransactionSchema.index({ relatedTransaction: 1 });
 TransactionSchema.index({ createdAt: -1 });

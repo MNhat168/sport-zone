@@ -19,7 +19,7 @@ import { getCurrentVietnamTimeForDB } from '../utils/timezone.utils';
 @Injectable()
 export class CleanupService {
   private readonly logger = new Logger(CleanupService.name);
-  
+
   // Payment expiration time in minutes
   private readonly PAYMENT_EXPIRATION_MINUTES = 5;
 
@@ -30,7 +30,7 @@ export class CleanupService {
     private readonly timezoneService: TimezoneService,
     @Inject(forwardRef(() => PaymentHandlerService))
     private readonly paymentHandlerService: PaymentHandlerService,
-  ) {}
+  ) { }
 
   /** Cancel expired payment and associated booking */
   async cancelExpiredPaymentAndBooking(
@@ -66,20 +66,20 @@ export class CleanupService {
     if (bookingId) {
       try {
         const bookingToCancel = await this.bookingModel.findById(bookingId);
-        
+
         if (bookingToCancel) {
           // Only cancel if pending or confirmed
           if (bookingToCancel.status === BookingStatus.PENDING || bookingToCancel.status === BookingStatus.CONFIRMED) {
             const cancellationReason = hasDataInconsistency
               ? 'Payment expired - Data inconsistency: Booking was CONFIRMED but payment was still PENDING. This has been corrected by cancelling the booking.'
               : 'Payment expired - automatically cancelled after 5 minutes';
-            
+
             await this.cancelBookingAndReleaseSlots(
               bookingId,
               cancellationReason,
               paymentId
             );
-            
+
             if (hasDataInconsistency) {
               this.logger.warn(
                 `⚠️  Cancelled booking ${bookingId} and released schedule slots due to data inconsistency (payment ${paymentId} was PENDING but booking was CONFIRMED)`
@@ -140,7 +140,7 @@ export class CleanupService {
     }
 
     // Verify this is a hold booking that can be cancelled
-    const isHoldBooking = 
+    const isHoldBooking =
       booking.status === BookingStatus.PENDING &&
       booking.paymentStatus === 'unpaid' &&
       !booking.transaction &&
@@ -296,7 +296,7 @@ export class CleanupService {
   async cleanupExpiredBookingsAndPayments(): Promise<void> {
     try {
       this.logger.log('🔍 [Cron Job] Starting expired bookings and payments cleanup...');
-      
+
       const nowVN = getCurrentVietnamTimeForDB();
       let totalCancelled = 0;
       let totalErrors = 0;
@@ -319,16 +319,16 @@ export class CleanupService {
         const bookingCreatedAtVN = new Date((booking as any).createdAt);
         const timeSinceBookingMs = nowVN.getTime() - bookingCreatedAtVN.getTime();
         const timeSinceBookingMinutes = timeSinceBookingMs / 1000 / 60;
-        
+
         const hasDataInconsistency = (booking as any).status === 'confirmed';
         const isExpired = timeSinceBookingMinutes >= this.PAYMENT_EXPIRATION_MINUTES || hasDataInconsistency;
-        
+
         if (hasDataInconsistency) {
           this.logger.warn(
             `[Cleanup] ⚠️ DATA INCONSISTENCY: Payment ${payment._id} is PENDING but booking ${(booking as any)._id} is CONFIRMED`
           );
         }
-        
+
         return isExpired;
       });
 
@@ -363,7 +363,7 @@ export class CleanupService {
         const bookingCreatedAtVN = new Date(booking.createdAt);
         const timeSinceBookingMs = nowVN.getTime() - bookingCreatedAtVN.getTime();
         const timeSinceBookingMinutes = timeSinceBookingMs / 1000 / 60;
-        
+
         return timeSinceBookingMinutes >= this.PAYMENT_EXPIRATION_MINUTES;
       });
 
@@ -372,11 +372,11 @@ export class CleanupService {
           const bookingId = (booking._id as any).toString();
           const user = booking.user as any;
           const isGuestBooking = !user?.password || !user?.isVerified;
-          
+
           const cancellationReason = isGuestBooking
             ? 'Guest booking: Payment proof not submitted within 5 minutes - booking automatically cancelled and slots released'
             : 'Payment proof not submitted within 5 minutes - booking automatically cancelled';
-          
+
           await this.cancelBookingAndReleaseSlots(bookingId, cancellationReason);
           totalCancelled++;
 
@@ -414,7 +414,7 @@ export class CleanupService {
    */
   async isPaymentExpiringSoon(paymentId: string): Promise<boolean> {
     const payment = await this.transactionModel.findById(paymentId);
-    
+
     if (!payment || payment.status !== TransactionStatus.PENDING) {
       return false;
     }
@@ -424,7 +424,7 @@ export class CleanupService {
     const nowVN = getCurrentVietnamTimeForDB();
     const createdAtVN = new Date(payment.createdAt);
     const minutesElapsed = (nowVN.getTime() - createdAtVN.getTime()) / 1000 / 60;
-    
+
     // Return true if payment is 3+ minutes old (2 minutes left)
     return minutesElapsed >= (this.PAYMENT_EXPIRATION_MINUTES - 2);
   }
@@ -434,7 +434,7 @@ export class CleanupService {
    */
   async getPaymentRemainingTime(paymentId: string): Promise<number> {
     const payment = await this.transactionModel.findById(paymentId);
-    
+
     if (!payment || payment.status !== TransactionStatus.PENDING) {
       return 0;
     }
@@ -445,7 +445,7 @@ export class CleanupService {
     const createdAtVN = new Date(payment.createdAt);
     const elapsedSeconds = (nowVN.getTime() - createdAtVN.getTime()) / 1000;
     const expirationSeconds = this.PAYMENT_EXPIRATION_MINUTES * 60;
-    
+
     const remainingSeconds = Math.max(0, expirationSeconds - elapsedSeconds);
     return Math.floor(remainingSeconds);
   }
@@ -460,7 +460,7 @@ export class CleanupService {
     additionalMinutes: number = 5
   ): Promise<void> {
     const payment = await this.transactionModel.findById(paymentId);
-    
+
     if (!payment || payment.status !== TransactionStatus.PENDING) {
       throw new Error(`Cannot extend transaction ${paymentId}`);
     }
@@ -507,13 +507,13 @@ export class CleanupService {
    */
   async getEffectiveExpirationTime(paymentId: string): Promise<Date | null> {
     const payment = await this.transactionModel.findById(paymentId);
-    
+
     if (!payment || payment.status !== TransactionStatus.PENDING) {
       return null;
     }
 
     const metadata = (payment as any).metadata || {};
-    
+
     // If payment has been extended, use extended expiration time (stored in UTC+8)
     if (metadata.extendedExpirationTime) {
       return new Date(metadata.extendedExpirationTime);

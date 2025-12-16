@@ -336,15 +336,6 @@ export class ReviewsService {
       { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } },
     ]).exec();
 
-    // Debug/logging to help investigate cases where aggregation returns no rows
-    // (remove or lower log level in production if desired)
-    try {
-      // eslint-disable-next-line no-console
-      console.debug('recomputeFieldStats agg for', fieldId, JSON.stringify(agg));
-    } catch (e) {
-      // ignore logging errors
-    }
-
     const result = agg && agg.length > 0 ? agg[0] : null;
     const totalReviews = result?.count ? Number(result.count) : 0;
     const averageRating = result?.avg ? Number(Number(result.avg).toFixed(2)) : 0;

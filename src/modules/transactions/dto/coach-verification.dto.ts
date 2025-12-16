@@ -11,7 +11,7 @@ export class CreateCoachVerificationDto {
   @IsString()
   bankName: string;
 
-  @ApiProperty({ enum: PaymentMethod, example: PaymentMethod.VNPAY })
+  @ApiProperty({ enum: PaymentMethod, example: PaymentMethod.PAYOS })
   @IsInt()
   @IsEnum(PaymentMethod)
   method: PaymentMethod;

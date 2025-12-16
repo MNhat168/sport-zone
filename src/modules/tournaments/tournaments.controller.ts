@@ -15,9 +15,14 @@ import {
   Delete
 } from '@nestjs/common';
 import { TournamentService } from './tournaments.service';
-import { CreateTournamentDto, RegisterTournamentDto, UpdateTournamentDto } from './dto/create-tournament.dto';
+import { CreateTournamentDto, UpdateTournamentDto } from './dto/create-tournament.dto';
+import { RegisterTournamentDto } from './dto/RegisterTournamentDto';
 import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
 import { ApiOperation } from '@nestjs/swagger';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import { Transaction } from '../transactions/entities/transaction.entity'; // Add this import
+import { TransactionStatus } from '@common/enums/transaction.enum'; // Add this import
 
 @Controller('tournaments')
 export class TournamentController {
@@ -26,7 +31,10 @@ export class TournamentController {
   transactionsService: any;
   eventEmitter: any;
 
-  constructor(private readonly tournamentService: TournamentService) { }
+  constructor(
+    private readonly tournamentService: TournamentService,
+    @InjectModel(Transaction.name) private transactionModel: Model<Transaction> // Add this
+  ) { }
 
   @Post()
   @UseGuards(JwtAccessTokenGuard)
@@ -89,80 +97,6 @@ export class TournamentController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.tournamentService.findOne(id);
-  }
-
-  @Get(':id/payment-return')
-  @ApiOperation({ summary: 'Handle tournament payment return from PayOS' })
-  async handleTournamentPaymentReturn(
-    @Param('id') tournamentId: string,
-    @Query() query: any,
-    @Req() req: Request
-  ) {
-    try {
-      const { orderCode, status } = query;
-
-      if (!orderCode) {
-        throw new BadRequestException('Missing order code');
-      }
-
-      // Query PayOS for transaction status
-      const payosTransaction = await this.payosService.queryTransaction(Number(orderCode));
-
-      // Find local transaction
-      const transaction = await this.transactionsService.getPaymentByExternalId(String(orderCode));
-
-      if (!transaction) {
-        throw new NotFoundException('Transaction not found');
-      }
-
-      // Determine status
-      let paymentStatus: 'succeeded' | 'failed' | 'pending';
-
-      if (payosTransaction.status === 'PAID') {
-        paymentStatus = 'succeeded';
-      } else if (payosTransaction.status === 'CANCELLED' || payosTransaction.status === 'EXPIRED') {
-        paymentStatus = 'failed';
-      } else {
-        paymentStatus = 'pending';
-      }
-
-      // Emit payment event based on status
-      if (paymentStatus === 'succeeded') {
-        this.eventEmitter.emit('payment.success', {
-          paymentId: transaction._id.toString(),
-          tournamentId: tournamentId,
-          userId: transaction.user.toString(),
-          amount: transaction.amount,
-          method: transaction.method,
-          transactionId: payosTransaction.reference,
-        });
-      } else if (paymentStatus === 'failed') {
-        this.eventEmitter.emit('payment.failed', {
-          paymentId: transaction._id.toString(),
-          tournamentId: tournamentId,
-          userId: transaction.user.toString(),
-          amount: transaction.amount,
-          method: transaction.method,
-          transactionId: payosTransaction.reference,
-          reason: payosTransaction.status === 'CANCELLED'
-            ? 'Transaction cancelled'
-            : 'Transaction expired',
-        });
-      }
-
-      return {
-        success: paymentStatus === 'succeeded',
-        paymentStatus,
-        tournamentId,
-        message: paymentStatus === 'succeeded'
-          ? 'Payment successful! You are now registered.'
-          : 'Payment failed',
-      };
-
-    } catch (error) {
-      this.logger.error('Error handling tournament payment return:', error);
-      throw new BadRequestException('Error verifying payment');
-    }
   }
 
   @Put(':id')

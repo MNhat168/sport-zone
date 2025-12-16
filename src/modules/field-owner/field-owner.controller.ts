@@ -33,6 +33,7 @@ import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { FieldOwnerService } from './field-owner.service';
 import { FieldsService } from '../fields/fields.service';
 import { AwsS3Service } from '../../service/aws-s3.service';
+import { SubscriptionStatusGuard } from '../../common/guards/subscription-status.guard';
 import {
   CreateFieldDto,
   CreateFieldWithFilesDto,
@@ -160,7 +161,7 @@ export class FieldOwnerController {
   }
 
   @Post('fields')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), SubscriptionStatusGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create new field (owner)' })
   async createField(
@@ -174,7 +175,7 @@ export class FieldOwnerController {
 
   @Post('fields/with-images')
   @UseInterceptors(FilesInterceptor('images', 10))
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), SubscriptionStatusGuard)
   @ApiBearerAuth()
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Create new field with images' })
@@ -189,7 +190,7 @@ export class FieldOwnerController {
   }
 
   @Put('fields/:id')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), SubscriptionStatusGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update field info' })
   async updateField(
