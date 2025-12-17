@@ -31,7 +31,7 @@ import { BookingInvoiceDto } from './dto/booking-invoice.dto';
 import { BookingUpcomingDto } from './dto/booking-upcoming.dto';
 import { Schedule } from '../schedules/entities/schedule.entity';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { RateLimit, RateLimitGuard } from '@common/guards/rate-limit.guard';
 import { CleanupService } from '../../service/cleanup.service';
 import { BookingStatus } from '@common/enums/booking.enum';
@@ -171,7 +171,7 @@ export class BookingsController {
   ): Promise<Booking> {
     // ✅ Optional authentication - get userId if user is logged in
     const userId = req.user?.userId || req.user?._id || req.user?.id || null;
-    
+
     // ✅ Validate guest info if not authenticated
     if (!userId && !bookingData.guestEmail) {
       throw new BadRequestException('Email is required for guest bookings. Please provide guestEmail or login to your account.');
@@ -211,12 +211,12 @@ export class BookingsController {
   ): Promise<Booking> {
     // ✅ Optional authentication - get userId if user is logged in
     const userId = req.user?.userId || req.user?._id || req.user?.id || null;
-    
+
     // ✅ Validate guest info if not authenticated
     if (!userId && !bookingData.guestEmail) {
       throw new BadRequestException('Email is required for guest bookings. Please provide guestEmail or login to your account.');
     }
-    
+
     if (!paymentProof) {
       throw new BadRequestException('Payment proof image is required');
     }
@@ -335,12 +335,12 @@ export class BookingsController {
   ): Promise<Booking> {
     // ✅ Optional authentication - get userId if user is logged in
     const userId = req.user?.userId || req.user?._id || req.user?.id || null;
-    
+
     // ✅ Validate guest info if not authenticated
     if (!userId && !bookingData.guestEmail) {
       throw new BadRequestException('Email is required for guest bookings. Please provide guestEmail or login to your account.');
     }
-    
+
     if (!paymentProof) {
       throw new BadRequestException('Payment proof image is required');
     }
@@ -392,7 +392,7 @@ export class BookingsController {
   ): Promise<Booking> {
     // ✅ Optional authentication - get userId if user is logged in
     const userId = req.user?.userId || req.user?._id || req.user?.id || null;
-    
+
     // ✅ Validate guest info if not authenticated
     if (!userId && !bookingData.guestEmail) {
       throw new BadRequestException('Email is required for guest bookings. Please provide guestEmail or login to your account.');
@@ -563,10 +563,27 @@ export class BookingsController {
   }
 
   /**
+   * Get all bookings for the authenticated coach
+   * NOTE: This route must be defined BEFORE the parameterized route to avoid route conflicts
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Get('bookings/coach/my-bookings')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get all bookings for the authenticated coach' })
+  async getMyCoachBookings(@Request() req): Promise<Booking[]> {
+    const userId = this.getUserId(req);
+    return this.bookingsService.getMyCoachBookings(userId);
+  }
+
+  /**
    * Get all bookings of a coach
    */
   @Get('bookings/coach/:coachId')
   async getBookingsByCoachId(@Param('coachId') coachId: string): Promise<Booking[]> {
+    // Validate ObjectId format to prevent BSONError
+    if (!coachId || !Types.ObjectId.isValid(coachId)) {
+      throw new BadRequestException(`Invalid coach ID format: "${coachId}". Coach ID must be a valid MongoDB ObjectId.`);
+    }
     return this.bookingsService.getByRequestedCoachId(coachId);
   }
 
@@ -887,7 +904,7 @@ export class BookingsController {
     @Body() body: VerifyPaymentProofDto,
   ): Promise<Booking> {
     const userId = this.getUserId(req);
-    
+
     // Get field owner profile ID from user
     const fieldOwnerProfile = await this.bookingsService.getFieldOwnerProfileByUserId(userId);
     if (!fieldOwnerProfile) {
@@ -950,7 +967,7 @@ export class BookingsController {
     @Request() req: any,
   ): Promise<Booking[]> {
     const userId = this.getUserId(req);
-    
+
     // Get field owner profile ID from user
     const fieldOwnerProfile = await this.bookingsService.getFieldOwnerProfileByUserId(userId);
     if (!fieldOwnerProfile) {

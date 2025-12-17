@@ -21,6 +21,7 @@ import { Booking } from '../bookings/entities/booking.entity';
 import { FavouriteCoachDto } from './dto/favourite-coach.dto';
 import { UserRole } from '@common/enums/user.enum';
 import { Field } from '../fields/entities/field.entity';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
@@ -44,21 +45,21 @@ export class UsersService {
     return result;
   }
 
-    async findById(id: string): Promise<User> {
-      const user = await this.userRepository.findById(id);
-        if (!user) throw new NotFoundException('User not found');
-        return user;
+  async findById(id: string): Promise<User> {
+    const user = await this.userRepository.findById(id);
+    if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
+  async update(
+    id: string,
+    data: UpdateUserDto,
+    avatarFile?: any, // Avatar file từ multer
+  ): Promise<User> {
+    const user = await this.userRepository.findById(id);
+    if (!user) {
+      throw new NotFoundException('User not found');
     }
-    
-    async update(
-        id: string,
-        data: UpdateUserDto,
-        avatarFile?: any, // Avatar file từ multer
-    ): Promise<User> {
-        const user = await this.userRepository.findById(id);
-        if (!user) {
-            throw new NotFoundException('User not found');
-        }
 
     let updateData = { ...data };
 
@@ -467,5 +468,32 @@ export class UsersService {
       hasNextPage,
       hasPrevPage,
     };
+  }
+
+  async changePassword(userId: string, body: { oldPassword: string; newPassword: string; confirmPassword: string }) {
+    const { oldPassword, newPassword, confirmPassword } = body;
+    if (newPassword !== confirmPassword) {
+      throw new BadRequestException('Mật khẩu xác nhận không khớp');
+    }
+
+    const user = await this.userModel.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (user.password) {
+      const isMatch = await bcrypt.compare(oldPassword, user.password);
+      if (!isMatch) {
+        throw new BadRequestException('Mật khẩu cũ không đúng');
+      }
+    } else {
+      throw new BadRequestException('Tài khoản này chưa thiết lập mật khẩu');
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    user.password = hashed;
+    await user.save();
+
+    return { message: 'Đổi mật khẩu thành công' };
   }
 }

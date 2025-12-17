@@ -30,6 +30,11 @@ export class SessionBookingService {
    * Get bookings by requested coach ID
    */
   async getByRequestedCoachId(coachId: string): Promise<Booking[]> {
+    // Validate ObjectId format to prevent BSONError
+    if (!coachId || !Types.ObjectId.isValid(coachId)) {
+      throw new BadRequestException(`Invalid coach ID format: "${coachId}". Coach ID must be a valid MongoDB ObjectId.`);
+    }
+
     const bookings = await this.bookingModel
       .find({ requestedCoach: new Types.ObjectId(coachId) })
       .populate('user')
@@ -44,6 +49,14 @@ export class SessionBookingService {
    * Accept a booking request for a coach
    */
   async acceptCoachRequest(coachId: string, bookingId: string): Promise<Booking> {
+    // Validate ObjectId formats to prevent BSONError
+    if (!coachId || !Types.ObjectId.isValid(coachId)) {
+      throw new BadRequestException(`Invalid coach ID format: "${coachId}". Coach ID must be a valid MongoDB ObjectId.`);
+    }
+    if (!bookingId || !Types.ObjectId.isValid(bookingId)) {
+      throw new BadRequestException(`Invalid booking ID format: "${bookingId}". Booking ID must be a valid MongoDB ObjectId.`);
+    }
+
     const booking = await this.bookingModel.findOne({
       _id: new Types.ObjectId(bookingId),
       requestedCoach: new Types.ObjectId(coachId),
@@ -91,6 +104,14 @@ export class SessionBookingService {
     bookingId: string,
     reason?: string,
   ): Promise<Booking> {
+    // Validate ObjectId formats to prevent BSONError
+    if (!coachId || !Types.ObjectId.isValid(coachId)) {
+      throw new BadRequestException(`Invalid coach ID format: "${coachId}". Coach ID must be a valid MongoDB ObjectId.`);
+    }
+    if (!bookingId || !Types.ObjectId.isValid(bookingId)) {
+      throw new BadRequestException(`Invalid booking ID format: "${bookingId}". Booking ID must be a valid MongoDB ObjectId.`);
+    }
+
     const booking = await this.bookingModel.findOne({
       _id: new Types.ObjectId(bookingId),
       requestedCoach: new Types.ObjectId(coachId),

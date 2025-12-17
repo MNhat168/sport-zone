@@ -8,4 +8,8 @@ export enum NotificationType {
   COACH_REQUEST = 'coach_request',
   FIELD_APPROVAL = 'field_approval',
   REPORT_SUBMITTED = 'report_submitted',
+  INVOICE_GENERATED = 'invoice_generated',
+  INVOICE_OVERDUE = 'invoice_overdue',
+  SUBSCRIPTION_SUSPENDED = 'subscription_suspended',
+  SUBSCRIPTION_REACTIVATED = 'subscription_reactivated',
 }

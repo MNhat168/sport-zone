@@ -95,26 +95,49 @@ export class Tournament extends BaseEntity {
   })
   status: TournamentStatus;
 
-  // Field Reservation
+  // Court Reservation (instead of fields)
   @Prop({ 
     type: [{ 
-      field: { type: Types.ObjectId, ref: 'Field', required: true },
+      court: { type: Types.ObjectId, ref: 'Court', required: true },
+      field: { type: Types.ObjectId, ref: 'Field' }, // Keep reference to parent field
+      reservation: { type: Types.ObjectId, ref: 'TournamentFieldReservation' },
+      booking: { type: Types.ObjectId, ref: 'Booking' }
+    }],
+    default: []
+  })
+  courts: Array<{
+    court: Types.ObjectId;
+    field?: Types.ObjectId;
+    reservation?: Types.ObjectId;
+    booking?: Types.ObjectId;
+  }>;
+
+  @Prop({ required: true, min: 1 })
+  courtsNeeded: number;
+
+  @Prop({ required: true, min: 0 })
+  totalCourtCost: number;
+
+  // Keep backward compatibility for fields
+  @Prop({ 
+    type: [{ 
+      field: { type: Types.ObjectId, ref: 'Field' },
       reservation: { type: Types.ObjectId, ref: 'TournamentFieldReservation' },
       booking: { type: Types.ObjectId, ref: 'Booking' }
     }],
     default: []
   })
   fields: Array<{
-    field: Types.ObjectId;
+    field?: Types.ObjectId;
     reservation?: Types.ObjectId;
     booking?: Types.ObjectId;
   }>;
 
-  @Prop({ required: true, min: 1 })
-  fieldsNeeded: number;
+  @Prop({ min: 1 })
+  fieldsNeeded?: number;
 
-  @Prop({ required: true, min: 0 })
-  totalFieldCost: number;
+  @Prop({ min: 0 })
+  totalFieldCost?: number;
 
   // Confirmation deadline (e.g., 48 hours before tournament)
   @Prop({ required: true, type: Date })
@@ -191,7 +214,7 @@ export class Tournament extends BaseEntity {
       round: { type: String },
       teamA: { type: Number }, // teamNumber
       teamB: { type: Number }, // teamNumber
-      field: { type: Types.ObjectId, ref: 'Field' },
+      court: { type: Types.ObjectId, ref: 'Court' }, // Changed from field to court
       startTime: { type: Date },
       endTime: { type: Date },
       scoreA: { type: Number },
@@ -211,7 +234,7 @@ export class Tournament extends BaseEntity {
     round: string;
     teamA: number;
     teamB: number;
-    field?: Types.ObjectId;
+    court?: Types.ObjectId; // Changed from field to court
     startTime?: Date;
     endTime?: Date;
     scoreA?: number;
@@ -252,11 +275,19 @@ export class Tournament extends BaseEntity {
 
   @Prop({ type: Number, default: 0 })
   totalReviews: number;
+
+  // Court-specific methods
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Court' }] })
+  selectedCourtIds?: Types.ObjectId[];
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Field' }] })
+  selectedFieldIds?: Types.ObjectId[];
 }
 
 export const TournamentSchema = SchemaFactory.createForClass(Tournament);
 configureBaseEntitySchema(TournamentSchema);
 
+// Indexes
 TournamentSchema.index({ sportType: 1, status: 1 });
 TournamentSchema.index({ tournamentDate: 1 });
 TournamentSchema.index({ registrationEnd: 1 });
@@ -265,6 +296,8 @@ TournamentSchema.index({ 'teams.captain': 1 });
 TournamentSchema.index({ 'participants.user': 1 });
 TournamentSchema.index({ numberOfTeams: 1, teamSize: 1 });
 TournamentSchema.index({ location: 'text', name: 'text', description: 'text' });
+TournamentSchema.index({ 'courts.court': 1 });
+TournamentSchema.index({ 'selectedCourtIds': 1 });
 
 // Virtual for calculating current teams formed
 TournamentSchema.virtual('currentTeams').get(function() {
@@ -285,7 +318,7 @@ TournamentSchema.virtual('isFull').get(function() {
   return this.participants.length >= totalSpots;
 });
 
-// Add a virtual for calculating currentTeams properly:
+// Virtual for calculating currentTeams properly
 TournamentSchema.virtual('currentTeams').get(function() {
   if (!this.teamSize || this.teamSize === 0) return 0;
   if (!this.participants || this.participants.length === 0) return 0;
@@ -303,6 +336,18 @@ TournamentSchema.virtual('teamInfo').get(function() {
     participants: this.participants.length,
     remainingSpots: Math.max(0, (this.numberOfTeams * this.teamSize) - this.participants.length),
     isFull: this.participants.length >= (this.numberOfTeams * this.teamSize)
+  };
+});
+
+// Virtual for getting court info
+TournamentSchema.virtual('courtInfo').get(function() {
+  return {
+    courtsNeeded: this.courtsNeeded,
+    totalCourtCost: this.totalCourtCost,
+    selectedCourts: this.courts?.length || 0,
+    // For backward compatibility
+    fieldsNeeded: this.fieldsNeeded,
+    totalFieldCost: this.totalFieldCost,
   };
 });
 
@@ -385,6 +430,132 @@ TournamentSchema.methods.getParticipantTeam = function(userId: Types.ObjectId) {
   if (!participant || !participant.teamNumber) return null;
   
   return this.teams.find(t => t.teamNumber === participant.teamNumber);
+};
+
+// Method to add court to tournament
+TournamentSchema.methods.addCourt = function(
+  courtId: Types.ObjectId, 
+  fieldId?: Types.ObjectId, 
+  reservationId?: Types.ObjectId, 
+  bookingId?: Types.ObjectId
+) {
+  const existingCourt = this.courts.find(c => c.court.toString() === courtId.toString());
+  
+  if (existingCourt) {
+    throw new Error('Court already added to tournament');
+  }
+  
+  this.courts.push({
+    court: courtId,
+    field: fieldId,
+    reservation: reservationId,
+    booking: bookingId
+  });
+  
+  return this.courts[this.courts.length - 1];
+};
+
+// Method to remove court from tournament
+TournamentSchema.methods.removeCourt = function(courtId: Types.ObjectId) {
+  const initialLength = this.courts.length;
+  this.courts = this.courts.filter(c => c.court.toString() !== courtId.toString());
+  
+  if (this.courts.length === initialLength) {
+    throw new Error('Court not found in tournament');
+  }
+  
+  return true;
+};
+
+// Method to get court by ID
+TournamentSchema.methods.getCourt = function(courtId: Types.ObjectId) {
+  return this.courts.find(c => c.court.toString() === courtId.toString());
+};
+
+// Method to get all courts with populated information
+TournamentSchema.methods.getCourtsInfo = async function() {
+  // This would typically be populated when querying the tournament
+  return this.courts;
+};
+
+// Method to check if tournament has enough courts
+TournamentSchema.methods.hasEnoughCourts = function() {
+  return this.courts.length >= this.courtsNeeded;
+};
+
+// Method to calculate total court cost (recalculates based on current courts)
+TournamentSchema.methods.recalculateCourtCost = async function(courtService: any) {
+  let totalCost = 0;
+  
+  for (const court of this.courts) {
+    // This would need to query court pricing information
+    // For now, we'll use the stored cost or recalculate
+    totalCost += await courtService.calculateCourtCostForTournament(
+      court.court,
+      this.tournamentDate,
+      this.startTime,
+      this.endTime
+    );
+  }
+  
+  this.totalCourtCost = totalCost;
+  return totalCost;
+};
+
+// Method to get court schedule (which matches are scheduled on which courts)
+TournamentSchema.methods.getCourtSchedule = function() {
+  const courtSchedule = new Map();
+  
+  for (const match of this.schedule) {
+    if (match.court) {
+      if (!courtSchedule.has(match.court.toString())) {
+        courtSchedule.set(match.court.toString(), []);
+      }
+      courtSchedule.get(match.court.toString()).push({
+        matchNumber: match.matchNumber,
+        round: match.round,
+        teamA: match.teamA,
+        teamB: match.teamB,
+        startTime: match.startTime,
+        endTime: match.endTime,
+        status: match.status
+      });
+    }
+  }
+  
+  return courtSchedule;
+};
+
+// Method to assign match to court
+TournamentSchema.methods.assignMatchToCourt = function(matchNumber: number, courtId: Types.ObjectId) {
+  const match = this.schedule.find(m => m.matchNumber === matchNumber);
+  if (!match) {
+    throw new Error('Match not found');
+  }
+  
+  // Check if court belongs to this tournament
+  const court = this.courts.find(c => c.court.toString() === courtId.toString());
+  if (!court) {
+    throw new Error('Court not available for this tournament');
+  }
+  
+  match.court = courtId;
+  return match;
+};
+
+// Static method to find tournaments by court
+TournamentSchema.statics.findByCourt = function(courtId: Types.ObjectId) {
+  return this.find({ 'courts.court': courtId });
+};
+
+// Static method to find tournaments by field (for backward compatibility)
+TournamentSchema.statics.findByField = function(fieldId: Types.ObjectId) {
+  return this.find({ 
+    $or: [
+      { 'courts.field': fieldId },
+      { 'fields.field': fieldId }
+    ]
+  });
 };
 
 export type TournamentDocument = Tournament & Document;

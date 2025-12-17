@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectModel, InjectConnection } from '@nestjs/mongoose';
 import { Model, Types, Connection, ClientSession } from 'mongoose';
 import { Schedule } from './entities/schedule.entity';
@@ -8,7 +8,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BookingsService } from '../bookings/bookings.service';
 
 @Injectable()
-export class SchedulesService {
+export class SchedulesService implements OnModuleInit {
     private readonly logger = new Logger(SchedulesService.name);
 
     constructor(
@@ -22,6 +22,30 @@ export class SchedulesService {
         private eventEmitter: EventEmitter2,
         private bookingsService: BookingsService,
     ) { }
+
+    async onModuleInit() {
+        try {
+            // Check for problematic indexes and fix them
+            const indexes = await this.scheduleModel.collection.indexes();
+
+            // Check field_1_date_1
+            // The issue is that we need a partial index for field_1_date_1 (only when court doesn't exist)
+            // But if a non-partial unique index exists, it blocks creating schedules for different courts on same field/date
+            const fieldDateIndex = indexes.find(idx => idx.name === 'field_1_date_1');
+            if (fieldDateIndex && !fieldDateIndex.partialFilterExpression) {
+                this.logger.warn('Found problematic non-partial field_1_date_1 index. Dropping it...');
+                await this.scheduleModel.collection.dropIndex('field_1_date_1');
+                this.logger.log('Successfully dropped field_1_date_1 index. Recreating with correct partial filter...');
+
+                // Trigger recreation of indexes to ensure the correct partial index is created immediately
+                await this.scheduleModel.ensureIndexes();
+                this.logger.log('Indexes recreated successfully.');
+            }
+        } catch (error) {
+            // Log but don't crash app if index check fails
+            this.logger.error('Error checking indexes during module init', error);
+        }
+    }
 
     // ============================================================================
     // PURE LAZY CREATION METHODS (NEW)
@@ -430,12 +454,12 @@ export class SchedulesService {
         startDate: Date,
         endDate: Date,
     ): Promise<{ modifiedCount: number }> {
-// ✅ CRITICAL: Use UTC methods to normalize date
-const start = new Date(startDate);
-start.setUTCHours(0, 0, 0, 0);
+        // ✅ CRITICAL: Use UTC methods to normalize date
+        const start = new Date(startDate);
+        start.setUTCHours(0, 0, 0, 0);
 
-const end = new Date(endDate);
-end.setUTCHours(23, 59, 59, 999);
+        const end = new Date(endDate);
+        end.setUTCHours(23, 59, 59, 999);
 
         if (new Date(startDate) > new Date(endDate)) {
             throw new BadRequestException('Start date must be before end date');
@@ -473,12 +497,12 @@ end.setUTCHours(23, 59, 59, 999);
     }
 
     async UnsetHoliday(startDate: Date, endDate: Date): Promise<{ modifiedCount: number }> {
-// ✅ CRITICAL: Use UTC methods to normalize date
-const start = new Date(startDate);
-start.setUTCHours(0, 0, 0, 0);
+        // ✅ CRITICAL: Use UTC methods to normalize date
+        const start = new Date(startDate);
+        start.setUTCHours(0, 0, 0, 0);
 
-const end = new Date(endDate);
-end.setUTCHours(23, 59, 59, 999);
+        const end = new Date(endDate);
+        end.setUTCHours(23, 59, 59, 999);
 
         const result = await this.scheduleModel.updateMany(
             { date: { $gte: start, $lte: end } },

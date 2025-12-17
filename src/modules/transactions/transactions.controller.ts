@@ -1,8 +1,6 @@
 import { Controller, Get, Post, Body, Query, Param, Req, BadRequestException, NotFoundException, Delete, Patch, HttpCode, Res, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { TransactionsService } from './transactions.service';
-import { VNPayService } from './vnpay.service';
-import { sortObject } from './utils/vnpay.utils';
 import * as crypto from 'crypto';
 import * as qs from 'qs';
 import { ConfigService } from '@nestjs/config';
@@ -10,13 +8,6 @@ import { Request } from 'express';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthGuard } from '@nestjs/passport';
 import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum';
-import { 
-    CreateVNPayUrlDto, 
-    QueryTransactionDto, 
-    RefundTransactionDto,
-    VNPayIPNResponseDto,
-    VNPayVerificationResultDto
-} from './dto/vnpay.dto';
 import { PayOSService } from './payos.service';
 import { CreateCoachVerificationDto } from './dto/coach-verification.dto';
 import { InjectModel } from '@nestjs/mongoose';
@@ -34,6 +25,7 @@ import { Inject, forwardRef } from '@nestjs/common';
 import { FieldOwnerService } from '../field-owner/field-owner.service';
 import { Response } from 'express';
 import { CleanupService } from '../../service/cleanup.service';
+import { Transaction } from './entities/transaction.entity';
 
 @ApiTags('Transactions')
 @Controller('transactions')
@@ -42,84 +34,14 @@ export class TransactionsController {
   constructor(
         private readonly transactionsService: TransactionsService,
         private readonly cleanupService: CleanupService,
-        private readonly vnpayService: VNPayService,
         private readonly payosService: PayOSService,
         private readonly configService: ConfigService,
         private readonly eventEmitter: EventEmitter2,
         @Inject(forwardRef(() => FieldOwnerService))
         private readonly fieldOwnerService: FieldOwnerService,
         @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
+         @InjectModel(Transaction.name) private readonly transactionModel: Model<Transaction>,
     ) { }
-
-    /**
-     * Create VNPay payment URL
-     * Improved version using VNPayService
-     */
-    @Get('create-vnpay-url')
-    @ApiOperation({
-        summary: 'Tạo URL thanh toán VNPay',
-        description: 'Generate VNPay payment URL for booking. Uses official VNPay implementation.'
-    })
-    @ApiQuery({ name: 'amount', description: 'Số tiền thanh toán (VND)', example: '200000' })
-    @ApiQuery({ name: 'orderId', description: 'Booking ID hoặc Payment ID', example: '6904dd2a6289f3cf36b1dbe3' })
-    @ApiQuery({ name: 'bankCode', description: 'Bank code for direct payment (optional)', required: false, example: 'NCB' })
-    @ApiQuery({ name: 'locale', description: 'Language (vn/en)', required: false, example: 'vn' })
-    @ApiQuery({ name: 'returnUrl', description: 'URL redirect sau khi thanh toán (optional)', required: false })
-    @ApiResponse({ status: 200, description: 'Payment URL được tạo thành công' })
-    @ApiResponse({ status: 400, description: 'Invalid amount or orderId' })
-    createVNPayUrl(
-        @Query('amount') amount: string,
-        @Query('orderId') orderId: string,
-        @Query('bankCode') bankCode: string | undefined,
-        @Query('locale') locale: string | undefined,
-        @Query('returnUrl') returnUrl: string | undefined,
-        @Req() req: Request,
-    ) {
-        // Validate input
-        const parsedAmount = Number(amount);
-        if (!orderId || !amount || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
-            throw new BadRequestException('Invalid amount or orderId');
-        }
-
-        if (parsedAmount < 1000) {
-            throw new BadRequestException('Minimum payment amount is 1,000 VND');
-        }
-
-        // Extract client IP address
-        const forwarded = req.headers['x-forwarded-for'];
-        let ipAddr: string = (typeof req.ip === 'string' && req.ip.length > 0)
-            ? req.ip
-            : (req.socket && typeof req.socket.remoteAddress === 'string' ? req.socket.remoteAddress : '0.0.0.0');
-        if (Array.isArray(forwarded)) {
-            if (forwarded.length > 0 && typeof forwarded[0] === 'string') {
-                ipAddr = forwarded[0];
-            }
-        } else if (typeof forwarded === 'string' && forwarded.length > 0) {
-            ipAddr = forwarded;
-        }
-
-        // Remove IPv6 prefix if present
-        if (ipAddr.startsWith('::ffff:')) {
-            ipAddr = ipAddr.substring(7);
-        }
-
-        // Create payment URL using VNPayService
-        const dto: CreateVNPayUrlDto = {
-            amount: parsedAmount,
-            orderId,
-            bankCode,
-            locale,
-            returnUrl,
-        };
-
-        const paymentUrl = this.vnpayService.createPaymentUrl(dto, ipAddr);
-
-        return { 
-            paymentUrl,
-            orderId,
-            amount: parsedAmount,
-        };
-    }
 
     /**
      * Tạo transaction xác thực tài khoản ngân hàng cho coach (10k)
@@ -148,654 +70,25 @@ export class TransactionsController {
         amount: dto.amount,
       });
 
-      // Trả về transactionId để FE gọi create-vnpay-url / tạo link thanh toán
+      // Trả về transactionId để FE gọi tạo link thanh toán
       return {
         transactionId: (tx._id as any).toString(),
         amount: tx.amount,
         method: tx.method,
         metadata: tx.metadata,
-        note: 'Dùng transactionId này để tạo link thanh toán (VD: GET /transactions/create-vnpay-url?amount=10000&orderId=<transactionId>)'
+        note: 'Dùng transactionId này để tạo link thanh toán'
       };
     }
 
-    /**
-     * VNPay IPN (Instant Payment Notification) - Server-to-Server callback
-     * CRITICAL: This endpoint must be configured in VNPay merchant portal
-     * URL: https://your-domain.com/api/payments/vnpay-ipn
-     * Improved version using VNPayService
-     */
-    @Get('vnpay-ipn')
-    @ApiOperation({
-        summary: 'VNPay IPN callback (Internal)',
-        description: 'Server-to-server callback from VNPay. Must be configured in VNPay portal. Uses official VNPay implementation.'
-    })
-    @ApiResponse({ status: 200, description: 'IPN processed successfully', type: VNPayIPNResponseDto })
-    async handleVNPayCallback(@Query() query: any): Promise<VNPayIPNResponseDto> {
-        try {
-            // Step 1: Verify signature using VNPayService
-            const verificationResult = this.vnpayService.verifyCallback(query);
 
-            if (!verificationResult.isValid) {
-                console.error('[VNPay IPN] ❌ Invalid signature');
-                return { RspCode: '97', Message: 'Invalid signature' };
-            }
 
-            const { orderId, responseCode, transactionNo, bankTranNo, bankCode, cardType, payDate, amount } = verificationResult.data;
 
-            console.log('[VNPay IPN] ✅ Signature valid');
-            console.log('[VNPay IPN] Processing payment:', { orderId, responseCode, transactionNo });
 
-            // Step 2: Find payment
-            if (!orderId) {
-                console.warn('[VNPay IPN] ⚠️ Missing orderId, acknowledging');
-                return { RspCode: '00', Message: 'No orderId, acknowledged' };
-            }
 
-            // Try to find payment by ID or booking ID
-            let payment = await this.transactionsService.getPaymentById(orderId);
-            if (!payment) {
-                payment = await this.transactionsService.getPaymentByBookingId(orderId);
-            }
 
-            if (!payment) {
-                console.warn('[VNPay IPN] ⚠️ Payment not found:', orderId);
-                return { RspCode: '01', Message: 'Order not found' };
-            }
 
-            // Step 3: Check idempotency
-            if (payment.status === TransactionStatus.SUCCEEDED || payment.status === TransactionStatus.FAILED) {
-                console.log('[VNPay IPN] ℹ️ Payment already processed:', payment.status);
-                return { RspCode: '02', Message: 'Order already confirmed' };
-            }
 
-            // Step 4: Process payment based on response code
-            // Note: VNPay transaction IDs are stored in vnpayTransactionNo/externalTransactionId
 
-            if (responseCode === '00') {
-                // Payment successful
-                const vnpayData = {
-                    vnp_TransactionNo: transactionNo,
-                    vnp_BankTranNo: bankTranNo,
-                    vnp_BankCode: bankCode,
-                    vnp_CardType: cardType,
-                    vnp_ResponseCode: responseCode,
-                    vnp_PayDate: payDate,
-                };
-
-                const updated = await this.transactionsService.updatePaymentStatus(
-                    (payment._id as any).toString(),
-                    TransactionStatus.SUCCEEDED,
-                    undefined,
-                    vnpayData,
-                );
-
-                // Emit success event - Ensure all IDs are strings
-                const bookingIdStr = updated.booking 
-                    ? (typeof updated.booking === 'string' 
-                        ? updated.booking 
-                        : (updated.booking as any)?._id 
-                            ? String((updated.booking as any)._id)
-                            : String(updated.booking))
-                    : undefined;
-                
-                const userIdStr = updated.user
-                    ? (typeof updated.user === 'string'
-                        ? updated.user
-                        : (updated.user as any)?._id
-                            ? String((updated.user as any)._id)
-                            : String(updated.user))
-                    : undefined;
-
-                this.eventEmitter.emit('payment.success', {
-                    paymentId: String(updated._id),
-                    bookingId: bookingIdStr,
-                    userId: userIdStr,
-                    amount: updated.amount,
-                    method: updated.method,
-                    transactionId: updated.externalTransactionId || updated.vnpayTransactionNo || undefined,
-                });
-
-                console.log('[VNPay IPN] ✅ Payment succeeded:', orderId);
-                return { RspCode: '00', Message: 'Confirm Success' };
-            } else {
-                // Payment failed
-                const vnpayData = {
-                    vnp_TransactionNo: transactionNo,
-                    vnp_BankTranNo: bankTranNo,
-                    vnp_BankCode: bankCode,
-                    vnp_CardType: cardType,
-                    vnp_ResponseCode: responseCode,
-                    vnp_PayDate: payDate,
-                };
-
-                const updated = await this.transactionsService.updatePaymentStatus(
-                    (payment._id as any).toString(),
-                    TransactionStatus.FAILED,
-                    undefined,
-                    vnpayData,
-                );
-
-                // Emit failed event - Ensure all IDs are strings
-                const bookingIdStrFailed = updated.booking 
-                    ? (typeof updated.booking === 'string' 
-                        ? updated.booking 
-                        : (updated.booking as any)?._id 
-                            ? String((updated.booking as any)._id)
-                            : String(updated.booking))
-                    : undefined;
-                
-                const userIdStrFailed = updated.user
-                    ? (typeof updated.user === 'string'
-                        ? updated.user
-                        : (updated.user as any)?._id
-                            ? String((updated.user as any)._id)
-                            : String(updated.user))
-                    : undefined;
-
-                const description = this.vnpayService.getResponseDescription(responseCode);
-                this.eventEmitter.emit('payment.failed', {
-                    paymentId: String(updated._id),
-                    bookingId: bookingIdStrFailed,
-                    userId: userIdStrFailed,
-                    amount: updated.amount,
-                    method: updated.method,
-                    transactionId: updated.externalTransactionId || updated.vnpayTransactionNo || undefined,
-                    reason: `VNPay ${responseCode}: ${description}`,
-                });
-
-                console.log('[VNPay IPN] ❌ Payment failed:', orderId, responseCode);
-                return { RspCode: '00', Message: 'Confirm Success' };
-            }
-        } catch (error) {
-            console.error('[VNPay IPN] ❌ Error processing callback:', error);
-            // Always acknowledge to VNPay to prevent retries
-            return { RspCode: '00', Message: 'Processed with internal error' };
-        }
-    }
-
-    /**
-     * Verify VNPay return from frontend
-     * Called by frontend after user is redirected from VNPay
-     * This provides immediate feedback while waiting for IPN
-     */
-    @Get('verify-vnpay')
-    @ApiOperation({
-        summary: 'Xác minh thanh toán VNPay',
-        description: 'Verify VNPay payment from frontend redirect. Use this to update UI immediately.'
-    })
-    @ApiQuery({ name: 'vnp_SecureHash', description: 'VNPay secure hash' })
-    @ApiQuery({ name: 'vnp_TxnRef', description: 'Order ID (booking ID)' })
-    @ApiQuery({ name: 'vnp_ResponseCode', description: 'Response code from VNPay' })
-    @ApiResponse({
-        status: 200,
-        description: 'Payment verified successfully',
-        schema: {
-            type: 'object',
-            properties: {
-                success: { type: 'boolean' },
-                paymentStatus: { type: 'string', enum: ['succeeded', 'failed'] },
-                bookingId: { type: 'string' },
-                message: { type: 'string' }
-            }
-        }
-    })
-    @ApiResponse({ status: 400, description: 'Invalid signature or missing parameters' })
-    @ApiResponse({ status: 404, description: 'Payment not found' })
-    async verifyVNPayReturn(@Query() query: any) {
-        console.log('[Verify VNPay] Received query params:', Object.keys(query));
-        
-        const vnp_HashSecret = this.configService.get<string>('vnp_HashSecret');
-        if (!vnp_HashSecret) {
-            console.error('[Verify VNPay] ❌ Missing vnp_HashSecret in configuration');
-            throw new BadRequestException('Payment configuration error: Missing vnp_HashSecret');
-        }
-
-        // Trim whitespace from hash secret
-        const hashSecret = vnp_HashSecret.trim();
-
-        const vnp_SecureHash = query.vnp_SecureHash;
-        if (!vnp_SecureHash) {
-            console.error('[Verify VNPay] ❌ Missing vnp_SecureHash in query params');
-            throw new BadRequestException('Missing vnp_SecureHash parameter');
-        }
-
-        const queryWithoutHash = { ...query };
-        delete queryWithoutHash.vnp_SecureHash;
-        delete queryWithoutHash.vnp_SecureHashType;
-
-        // CRITICAL: VNPay uses sortObject then qs.stringify with encode: false
-        // We need to match vnpay_nodejs/routes/order.js vnpay_return handler EXACTLY
-        // Step 1: Use sortObject to encode keys and values like VNPay does
-        const sorted = sortObject(queryWithoutHash);
-        
-        console.log('[Verify VNPay] Sorted params (first 200 chars):', JSON.stringify(sorted).substring(0, 200));
-        
-        // Step 2: Use qs.stringify with encode: false (same as VNPay)
-        const signData = qs.stringify(sorted, { encode: false });
-        
-        console.log('[Verify VNPay] Sign data (full):', signData);
-        console.log('[Verify VNPay] Sign data length:', signData.length);
-        
-        const hmac = crypto.createHmac('sha512', hashSecret);
-        const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
-
-        console.log('[Verify VNPay] Signature check:', {
-            received: vnp_SecureHash.substring(0, 20) + '...',
-            calculated: signed.substring(0, 20) + '...',
-            match: signed === vnp_SecureHash,
-            receivedFull: vnp_SecureHash,
-            calculatedFull: signed
-        });
-
-        if (signed !== vnp_SecureHash) {
-            console.error('[Verify VNPay] ❌ Invalid signature');
-            console.error('[Verify VNPay] Hash secret length:', hashSecret.length);
-            console.error('[Verify VNPay] Hash secret preview:', hashSecret.substring(0, 10) + '...');
-            console.error('[Verify VNPay] Sign data:', signData);
-            throw new BadRequestException('Invalid signature. Please check VNPay parameters.');
-        }
-
-        const responseCode: string | undefined = query.vnp_ResponseCode;
-        const orderId: string | undefined = query.vnp_TxnRef;
-        // Note: VNPay transaction IDs are stored in vnpayTransactionNo/externalTransactionId
-        const vnpayTransactionId: string | undefined = query.vnp_TransactionNo || query.vnp_BankTranNo;
-
-        console.log('[Verify VNPay] Extracted params:', {
-            responseCode,
-            orderId,
-            vnpayTransactionId,
-            hasAllParams: !!(responseCode !== undefined && orderId)
-        });
-
-        if (!orderId) {
-            console.error('[Verify VNPay] ❌ Missing vnp_TxnRef (orderId) in query params');
-            throw new BadRequestException('Missing order ID (vnp_TxnRef). Please ensure VNPay redirect includes this parameter.');
-        }
-
-        // Get payment
-        let payment = await this.transactionsService.getPaymentById(orderId);
-        if (!payment) {
-            payment = await this.transactionsService.getPaymentByBookingId(orderId);
-        }
-
-        if (!payment) {
-            throw new NotFoundException('Payment not found');
-        }
-
-        // Check if already processed (by IPN)
-        if (payment.status !== TransactionStatus.PENDING) {
-            console.log('[Verify VNPay] Payment already processed by IPN:', payment.status);
-            // Convert to string to ensure comparison works correctly
-            const paymentStatusStr = String(payment.status);
-            const isSucceeded = paymentStatusStr === TransactionStatus.SUCCEEDED ||
-                                 paymentStatusStr === 'succeeded';
-            
-            console.log('[Verify VNPay] Status check:', {
-                paymentStatus: paymentStatusStr,
-                isSucceeded,
-                enumSucceeded: TransactionStatus.SUCCEEDED
-            });
-            
-            // Ensure bookingId is a string
-            const bookingIdStr = payment.booking 
-                ? (typeof payment.booking === 'string' 
-                    ? payment.booking 
-                    : (payment.booking as any)?._id 
-                        ? String((payment.booking as any)._id)
-                        : String(payment.booking))
-                : undefined;
-            
-            return {
-                success: isSucceeded,
-                paymentStatus: payment.status,
-                bookingId: bookingIdStr || String(payment.booking),
-                message: 'Payment already processed'
-            };
-        }
-
-        // Update payment status if still pending
-        if (responseCode === '00') {
-            // Payment success - extract VNPay data
-            const vnpayData = {
-                vnp_TransactionNo: query.vnp_TransactionNo,
-                vnp_BankTranNo: query.vnp_BankTranNo,
-                vnp_BankCode: query.vnp_BankCode,
-                vnp_CardType: query.vnp_CardType,
-                vnp_ResponseCode: query.vnp_ResponseCode,
-                vnp_TransactionStatus: query.vnp_TransactionStatus,
-            };
-
-            const updated = await this.transactionsService.updatePaymentStatus(
-                (payment._id as any).toString(),
-                TransactionStatus.SUCCEEDED,
-                undefined,
-                vnpayData,
-            );
-
-            console.log('[Verify VNPay] ✅ Payment succeeded');
-
-            // Emit success event - Ensure all IDs are strings
-            const bookingIdStr = updated.booking 
-                ? (typeof updated.booking === 'string' 
-                    ? updated.booking 
-                    : (updated.booking as any)?._id 
-                        ? String((updated.booking as any)._id)
-                        : String(updated.booking))
-                : undefined;
-            
-            const userIdStr = updated.user
-                ? (typeof updated.user === 'string'
-                    ? updated.user
-                    : (updated.user as any)?._id
-                        ? String((updated.user as any)._id)
-                        : String(updated.user))
-                : undefined;
-
-            this.eventEmitter.emit('payment.success', {
-                paymentId: String(updated._id),
-                bookingId: bookingIdStr,
-                userId: userIdStr,
-                amount: updated.amount,
-                method: updated.method,
-                transactionId: updated.externalTransactionId || updated.vnpayTransactionNo || undefined,
-            });
-
-            // Ensure bookingId is a string
-            const bookingIdSuccessStr = updated.booking 
-                ? (typeof updated.booking === 'string' 
-                    ? updated.booking 
-                    : (updated.booking as any)?._id 
-                        ? String((updated.booking as any)._id)
-                        : String(updated.booking))
-                : undefined;
-
-            console.log('[Verify VNPay] Response data:', {
-                success: true,
-                paymentStatus: 'succeeded',
-                bookingId: bookingIdSuccessStr,
-                bookingIdType: typeof bookingIdSuccessStr,
-                originalBooking: updated.booking
-            });
-
-            return {
-                success: true,
-                paymentStatus: 'succeeded',
-                bookingId: bookingIdSuccessStr || String(updated.booking),
-                message: 'Payment successful'
-            };
-        } else {
-            // Payment failed - get error description and extract VNPay data
-            const errorDescription = this.transactionsService.getVNPayErrorDescription(responseCode || '99');
-            
-            const vnpayData = {
-                vnp_TransactionNo: query.vnp_TransactionNo,
-                vnp_BankTranNo: query.vnp_BankTranNo,
-                vnp_BankCode: query.vnp_BankCode,
-                vnp_CardType: query.vnp_CardType,
-                vnp_ResponseCode: query.vnp_ResponseCode,
-                vnp_TransactionStatus: query.vnp_TransactionStatus,
-            };
-
-            const updated = await this.transactionsService.updatePaymentStatus(
-                (payment._id as any).toString(),
-                TransactionStatus.FAILED,
-                undefined,
-                vnpayData,
-            );
-
-            console.log('[Verify VNPay] ⚠️ Payment failed:', responseCode, errorDescription);
-
-            // Log payment error for tracking
-            await this.transactionsService.logPaymentError(
-                (updated._id as any).toString(),
-                responseCode || '99',
-                errorDescription,
-                {
-                    transactionId: vnpayTransactionId,
-                    vnpayParams: {
-                        vnp_TxnRef: orderId,
-                        vnp_ResponseCode: responseCode,
-                        vnp_TransactionStatus: query.vnp_TransactionStatus,
-                    }
-                }
-            );
-
-            // Emit failed event - Ensure all IDs are strings
-            const bookingIdStrFailed2 = updated.booking 
-                ? (typeof updated.booking === 'string' 
-                    ? updated.booking 
-                    : (updated.booking as any)?._id 
-                        ? String((updated.booking as any)._id)
-                        : String(updated.booking))
-                : undefined;
-            
-            const userIdStrFailed2 = updated.user
-                ? (typeof updated.user === 'string'
-                    ? updated.user
-                    : (updated.user as any)?._id
-                        ? String((updated.user as any)._id)
-                        : String(updated.user))
-                : undefined;
-
-            this.eventEmitter.emit('payment.failed', {
-                paymentId: String(updated._id),
-                bookingId: bookingIdStrFailed2,
-                userId: userIdStrFailed2,
-                amount: updated.amount,
-                method: updated.method,
-                transactionId: updated.externalTransactionId || updated.vnpayTransactionNo || undefined,
-                reason: `VNPay response ${responseCode}: ${errorDescription}`,
-            });
-
-            return {
-                success: false,
-                paymentStatus: 'failed',
-                bookingId: updated.booking,
-                reason: errorDescription,
-                message: 'Payment failed'
-            };
-        }
-    }
-
-    /**
-     * Query transaction status from VNPay
-     * Based on vnpay_nodejs querydr endpoint
-     * Use this to check transaction status directly from VNPay
-     */
-    @Post('vnpay-query-transaction')
-    @ApiOperation({
-        summary: 'Query transaction từ VNPay',
-        description: 'Query transaction status directly from VNPay API. Useful for checking payment status.'
-    })
-    @ApiBody({ type: QueryTransactionDto })
-    @ApiResponse({ status: 200, description: 'Transaction query result' })
-    async queryVNPayTransaction(
-        @Body() dto: QueryTransactionDto,
-        @Req() req: Request,
-    ) {
-        // Extract IP address
-        const forwarded = req.headers['x-forwarded-for'];
-        let ipAddr: string = (typeof req.ip === 'string' && req.ip.length > 0)
-            ? req.ip
-            : (req.socket && typeof req.socket.remoteAddress === 'string' ? req.socket.remoteAddress : '0.0.0.0');
-        if (Array.isArray(forwarded)) {
-            if (forwarded.length > 0 && typeof forwarded[0] === 'string') {
-                ipAddr = forwarded[0];
-            }
-        } else if (typeof forwarded === 'string' && forwarded.length > 0) {
-            ipAddr = forwarded;
-        }
-
-        if (ipAddr.startsWith('::ffff:')) {
-            ipAddr = ipAddr.substring(7);
-        }
-
-        try {
-            const result = await this.vnpayService.queryTransaction(dto, ipAddr);
-            return {
-                success: true,
-                data: result,
-            };
-        } catch (error) {
-            throw new BadRequestException(error.message || 'Failed to query transaction');
-        }
-    }
-
-    /**
-     * Process refund via VNPay API
-     * Based on vnpay_nodejs refund endpoint
-     * Calls VNPay API to process refund transaction
-     */
-    @Post('vnpay-refund')
-    @ApiOperation({
-        summary: 'Hoàn tiền qua VNPay API',
-        description: 'Process refund transaction via VNPay API. Requires admin authorization.'
-    })
-    @ApiBody({ type: RefundTransactionDto })
-    @ApiResponse({ status: 200, description: 'Refund processed successfully' })
-    async processVNPayRefund(
-        @Body() dto: RefundTransactionDto,
-        @Req() req: Request,
-    ) {
-        // Extract IP address
-        const forwarded = req.headers['x-forwarded-for'];
-        let ipAddr: string = (typeof req.ip === 'string' && req.ip.length > 0)
-            ? req.ip
-            : (req.socket && typeof req.socket.remoteAddress === 'string' ? req.socket.remoteAddress : '0.0.0.0');
-        if (Array.isArray(forwarded)) {
-            if (forwarded.length > 0 && typeof forwarded[0] === 'string') {
-                ipAddr = forwarded[0];
-            }
-        } else if (typeof forwarded === 'string' && forwarded.length > 0) {
-            ipAddr = forwarded;
-        }
-
-        if (ipAddr.startsWith('::ffff:')) {
-            ipAddr = ipAddr.substring(7);
-        }
-
-        try {
-            // Call VNPay API to process refund
-            const vnpayResult = await this.vnpayService.processRefund(dto, ipAddr);
-
-            // If VNPay refund successful, update local payment status
-            if (vnpayResult.vnp_ResponseCode === '00') {
-                // Find the payment
-                let payment = await this.transactionsService.getPaymentById(dto.orderId);
-                if (!payment) {
-                    payment = await this.transactionsService.getPaymentByBookingId(dto.orderId);
-                }
-
-                if (payment) {
-                    // Process refund in local system
-                    const refundResult = await this.transactionsService.processRefund(
-                        (payment._id as any).toString(),
-                        dto.amount,
-                        dto.reason || 'VNPay API refund',
-                        `VNPay refund processed. Response: ${vnpayResult.vnp_Message}`,
-                        dto.createdBy,
-                    );
-
-                    return {
-                        success: true,
-                        message: 'Refund processed successfully',
-                        vnpayResponse: vnpayResult,
-                        localRefund: refundResult,
-                    };
-                }
-            }
-
-            return {
-                success: vnpayResult.vnp_ResponseCode === '00',
-                message: vnpayResult.vnp_Message,
-                vnpayResponse: vnpayResult,
-            };
-        } catch (error) {
-            throw new BadRequestException(error.message || 'Failed to process refund');
-        }
-    }
-
-    /**
-     * Create VNPay QR Code payment URL
-     * For QR code payment, we use the same VNPay URL but frontend will display it as QR
-     */
-    @Post('create-vnpay-qr')
-    @ApiOperation({
-        summary: 'Tạo mã QR thanh toán VNPay',
-        description: 'Generate VNPay payment URL for QR code display'
-    })
-    @ApiBody({
-        schema: {
-            type: 'object',
-            properties: {
-                paymentId: { type: 'string', description: 'Payment ID', example: '6904dd2a6289f3cf36b1dbe3' },
-                amount: { type: 'number', description: 'Số tiền thanh toán (VND)', example: 200000 }
-            },
-            required: ['paymentId', 'amount']
-        }
-    })
-    @ApiResponse({
-        status: 200,
-        description: 'QR code data được tạo thành công',
-        schema: {
-            type: 'object',
-            properties: {
-                qrCodeUrl: { type: 'string', description: 'VNPay payment URL for QR display' },
-                qrDataUrl: { type: 'string', description: 'Data URL for QR code image (optional)' },
-                paymentId: { type: 'string', description: 'Payment ID' },
-                amount: { type: 'number', description: 'Payment amount' },
-                expiresAt: { type: 'string', description: 'QR expiration time (ISO 8601)' },
-                expiresIn: { type: 'number', description: 'Seconds until expiration' }
-            }
-        }
-    })
-    @ApiResponse({ status: 400, description: 'Invalid paymentId or amount' })
-    @ApiResponse({ status: 404, description: 'Payment not found' })
-    async createVNPayQRCode(
-        @Body() body: { paymentId: string; amount: number },
-        @Req() req: Request
-    ) {
-        const { paymentId, amount } = body;
-
-        if (!paymentId || !amount || amount <= 0) {
-            throw new BadRequestException('Invalid paymentId or amount');
-        }
-
-        // Verify payment exists
-        const payment = await this.transactionsService.getPaymentById(paymentId);
-        if (!payment) {
-            throw new NotFoundException('Payment not found');
-        }
-
-        // Get IP address
-        const forwarded = req.headers['x-forwarded-for'];
-        let ipAddr: string = (typeof req.ip === 'string' && req.ip.length > 0)
-            ? req.ip
-            : (req.socket && typeof req.socket.remoteAddress === 'string' ? req.socket.remoteAddress : '0.0.0.0');
-        if (Array.isArray(forwarded)) {
-            if (forwarded.length > 0 && typeof forwarded[0] === 'string') {
-                ipAddr = forwarded[0];
-            }
-        } else if (typeof forwarded === 'string' && forwarded.length > 0) {
-            ipAddr = forwarded;
-        }
-
-        // Create VNPay URL (same as regular payment)
-        const qrCodeUrl = this.transactionsService.createVNPayUrl(amount, paymentId, ipAddr);
-
-        // Calculate expiration (15 minutes from now)
-        const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-        const expiresIn = 15 * 60; // 900 seconds
-
-        return {
-            qrCodeUrl,
-            qrDataUrl: qrCodeUrl, // Frontend can generate QR from this URL
-            paymentId,
-            amount,
-            expiresAt: expiresAt.toISOString(),
-            expiresIn
-        };
-    }
 
     /**
      * Get payment status by ID
@@ -836,7 +129,7 @@ export class TransactionsController {
             status: payment.status,
             bookingId: (payment.booking as any)?.toString?.() || payment.booking,
             amount: payment.amount,
-            transactionId: payment.externalTransactionId || payment.vnpayTransactionNo || null,
+            transactionId: payment.externalTransactionId || null,
             createdAt: payment.createdAt,
             updatedAt: payment.updatedAt
         };
@@ -1096,12 +389,12 @@ export class TransactionsController {
 
     /**
      * Get transaction history for a user
-     * Returns detailed transaction records with VNPay data, refunds, etc.
+     * Returns detailed transaction records with PayOS data, refunds, etc.
      */
     @Get('transactions/history/:userId')
     @ApiOperation({
         summary: 'Lịch sử giao dịch chi tiết của user',
-        description: 'Get detailed transaction history including VNPay data, refunds, and full audit trail'
+        description: 'Get detailed transaction history including PayOS data, refunds, and full audit trail'
     })
     @ApiParam({ name: 'userId', description: 'User ID' })
     @ApiQuery({ 
@@ -1159,9 +452,7 @@ export class TransactionsController {
                             status: { type: 'string' },
                             amount: { type: 'number' },
                             method: { type: 'string' },
-                            vnpayTransactionNo: { type: 'string' },
-                            vnpayBankCode: { type: 'string' },
-                            vnpayCardType: { type: 'string' },
+
                             relatedTransaction: { type: 'string' },
                             refundReason: { type: 'string' },
                             createdAt: { type: 'string' },
@@ -1616,6 +907,11 @@ export class TransactionsController {
                 }
             );
 
+            // ✅ Extract tournamentId from transaction metadata if present
+            const tournamentId = updated.metadata?.tournamentId 
+                ? String(updated.metadata.tournamentId)
+                : undefined;
+
             // Emit payment.failed event if transaction was cancelled or expired
             // This triggers cleanup (cancel booking and release slots) via CleanupService
             if (newStatus === TransactionStatus.FAILED) {
@@ -1642,6 +938,7 @@ export class TransactionsController {
                 this.eventEmitter.emit('payment.failed', {
                     paymentId: String(updated._id),
                     bookingId: bookingIdStr,
+                    tournamentId: tournamentId, // ✅ Include tournamentId if present
                     userId: userIdStr,
                     amount: updated.amount,
                     method: updated.method,
@@ -1650,6 +947,9 @@ export class TransactionsController {
                 });
 
                 console.log(`[PayOS Webhook] ❌ Payment failed (${payosStatus}), emitted payment.failed event`);
+                if (tournamentId) {
+                    console.log(`[PayOS Webhook] Tournament ID included in failed event: ${tournamentId}`);
+                }
             }
 
             // ✅ CRITICAL: Verify transaction was actually updated to SUCCEEDED before emitting event
@@ -1681,6 +981,11 @@ export class TransactionsController {
                 
                 console.log(`[PayOS Webhook] ✅ Transaction ${updated._id} verified as SUCCEEDED, emitting event`);
                 
+                // ✅ Extract tournamentId from verified transaction metadata
+                const verifiedTournamentId = verifiedTransaction.metadata?.tournamentId 
+                    ? String(verifiedTransaction.metadata.tournamentId)
+                    : tournamentId; // Fallback to previously extracted tournamentId
+                
                 const bookingIdStr = updated.booking
                     ? (typeof updated.booking === 'string'
                         ? updated.booking
@@ -1697,15 +1002,23 @@ export class TransactionsController {
                             : String(updated.user))
                     : undefined;
 
-                // Only emit event after transaction is verified as SUCCEEDED
+                // ✅ Only emit event after transaction is verified as SUCCEEDED
+                // Include tournamentId in event payload if present
                 this.eventEmitter.emit('payment.success', {
                     paymentId: String(updated._id),
                     bookingId: bookingIdStr,
+                    tournamentId: verifiedTournamentId, // ✅ Include tournamentId from metadata
                     userId: userIdStr,
                     amount: updated.amount,
                     method: updated.method,
                     transactionId: webhookData.reference,
                 });
+
+                if (verifiedTournamentId) {
+                    console.log(`[PayOS Webhook] ✅ Tournament ID included in success event: ${verifiedTournamentId}`);
+                } else {
+                    console.log(`[PayOS Webhook] ℹ️ No tournament ID found in transaction metadata`);
+                }
             }
 
             console.log(`[PayOS Webhook] ✅ Transaction updated: ${newStatus}`);
@@ -1726,7 +1039,7 @@ export class TransactionsController {
     /**
      * PayOS Return URL Handler
      * Called when user returns from PayOS payment page
-     * ✅ CRITICAL: Updates transaction status and emits payment events (similar to webhook)
+     * ✅ ENHANCED: Updates transaction status and emits payment events with idempotency check
      */
     @Get('payos/return')
     @ApiOperation({
@@ -1774,27 +1087,39 @@ export class TransactionsController {
             // Map PayOS status to our TransactionStatus enum
             let newStatus: TransactionStatus;
             let paymentStatus: 'succeeded' | 'failed' | 'pending' | 'cancelled';
+            let shouldEmitFailedEvent = false;
+            let shouldEmitSuccessEvent = false;
             
             if (payosTransaction.status === 'PAID') {
                 newStatus = TransactionStatus.SUCCEEDED;
                 paymentStatus = 'succeeded';
-            } else if (payosTransaction.status === 'CANCELLED' || payosTransaction.status === 'EXPIRED') {
+                shouldEmitSuccessEvent = true;
+            } else if (payosTransaction.status === 'CANCELLED') {
+                newStatus = TransactionStatus.CANCELLED;
+                paymentStatus = 'cancelled';
+                shouldEmitFailedEvent = true;
+            } else if (payosTransaction.status === 'EXPIRED') {
                 newStatus = TransactionStatus.FAILED;
                 paymentStatus = 'failed';
+                shouldEmitFailedEvent = true;
             } else if (payosTransaction.status === 'PENDING' || payosTransaction.status === 'PROCESSING') {
                 newStatus = TransactionStatus.PROCESSING;
                 paymentStatus = 'pending';
             } else {
                 newStatus = TransactionStatus.FAILED;
-                paymentStatus = 'cancelled';
+                paymentStatus = 'failed';
+                shouldEmitFailedEvent = true;
             }
 
-            // ✅ CRITICAL: Only update if status has changed and transaction is not already finalized
-            if (transaction.status !== TransactionStatus.SUCCEEDED && transaction.status !== TransactionStatus.FAILED) {
-                console.log(`[PayOS Return] Updating transaction ${transaction._id} from ${transaction.status} to ${newStatus}`);
+            console.log(`[PayOS Return] Current transaction status: ${transaction.status}, New status: ${newStatus}`);
+
+            // ✅ ENHANCED IDEMPOTENCY CHECK: Only update if status has actually changed
+            let updated = transaction;
+            if (transaction.status !== newStatus) {
+                console.log(`[PayOS Return] Status changed from ${transaction.status} to ${newStatus}. Updating...`);
                 
-                // Update transaction status (similar to webhook)
-                const updated = await this.transactionsService.updatePaymentStatus(
+                // Update transaction status with atomic $set operation
+                updated = await this.transactionsService.updatePaymentStatus(
                     (transaction._id as any).toString(),
                     newStatus,
                     undefined,
@@ -1806,8 +1131,8 @@ export class TransactionsController {
                     }
                 );
 
-                // Emit payment.failed event if transaction was cancelled or expired
-                if (newStatus === TransactionStatus.FAILED) {
+                // ✅ CRITICAL: Emit events ONLY when status actually changes
+                if (shouldEmitFailedEvent) {
                     const bookingIdStr = updated.booking 
                         ? (typeof updated.booking === 'string' 
                             ? updated.booking 
@@ -1826,7 +1151,7 @@ export class TransactionsController {
 
                     const reason = payosTransaction.status === 'CANCELLED' 
                         ? 'PayOS transaction cancelled' 
-                        : 'PayOS transaction expired';
+                        : 'PayOS transaction expired or failed';
 
                     this.eventEmitter.emit('payment.failed', {
                         paymentId: String(updated._id),
@@ -1842,61 +1167,47 @@ export class TransactionsController {
                 }
 
                 // ✅ CRITICAL: Emit payment.success event if payment succeeded
-                if (newStatus === TransactionStatus.SUCCEEDED) {
-                    // Double-check transaction status to ensure it's actually succeeded
-                    const verifiedTransaction = await this.transactionsService.getPaymentById(
-                        (updated._id as any).toString()
-                    );
+                if (shouldEmitSuccessEvent) {
+                    console.log(`[PayOS Return] ✅ Transaction ${updated._id} succeeded, emitting payment.success event`);
                     
-                    if (!verifiedTransaction) {
-                        console.error(`[PayOS Return] ❌ Transaction ${updated._id} not found after update`);
-                    } else if (verifiedTransaction.status !== TransactionStatus.SUCCEEDED) {
-                        console.error(
-                            `[PayOS Return] ❌ Transaction ${updated._id} status mismatch: ` +
-                            `expected SUCCEEDED, got ${verifiedTransaction.status}`
-                        );
-                    } else {
-                        console.log(`[PayOS Return] ✅ Transaction ${updated._id} verified as SUCCEEDED, emitting event`);
-                        
-                        const bookingIdStr = updated.booking
-                            ? (typeof updated.booking === 'string'
-                                ? updated.booking
-                                : (updated.booking as any)?._id
-                                    ? String((updated.booking as any)._id)
-                                    : String(updated.booking))
-                            : undefined;
+                    const bookingIdStr = updated.booking
+                        ? (typeof updated.booking === 'string'
+                            ? updated.booking
+                            : (updated.booking as any)?._id
+                                ? String((updated.booking as any)._id)
+                                : String(updated.booking))
+                        : undefined;
 
-                        const userIdStr = updated.user
-                            ? (typeof updated.user === 'string'
-                                ? updated.user
-                                : (updated.user as any)?._id
-                                    ? String((updated.user as any)._id)
-                                    : String(updated.user))
-                            : undefined;
+                    const userIdStr = updated.user
+                        ? (typeof updated.user === 'string'
+                            ? updated.user
+                            : (updated.user as any)?._id
+                                ? String((updated.user as any)._id)
+                                : String(updated.user))
+                        : undefined;
 
-                        // Emit payment.success event to trigger booking confirmation
-                        this.eventEmitter.emit('payment.success', {
-                            paymentId: String(updated._id),
-                            bookingId: bookingIdStr,
-                            userId: userIdStr,
-                            amount: updated.amount,
-                            method: updated.method,
-                            transactionId: payosTransaction.reference,
-                        });
+                    // Emit payment.success event to trigger booking confirmation
+                    this.eventEmitter.emit('payment.success', {
+                        paymentId: String(updated._id),
+                        bookingId: bookingIdStr,
+                        userId: userIdStr,
+                        amount: updated.amount,
+                        method: updated.method,
+                        transactionId: payosTransaction.reference,
+                    });
 
-                        console.log(`[PayOS Return] ✅ Payment success event emitted for booking ${bookingIdStr}`);
-                    }
+                    console.log(`[PayOS Return] ✅ Payment success event emitted for booking ${bookingIdStr}`);
                 }
             } else {
-                console.log(`[PayOS Return] ℹ️ Transaction ${transaction._id} already processed: ${transaction.status}`);
+                console.log(`[PayOS Return] ℹ️ Transaction ${transaction._id} is already ${transaction.status}. Skipping update to prevent race condition.`);
             }
 
-            const bookingId = transaction.booking
-                ? (typeof transaction.booking === 'string'
-                    ? transaction.booking
-                    : (transaction.booking as any)?._id
-                        ? String((transaction.booking as any)._id)
-                        : String(transaction.booking))
+            const bookingId = updated.booking
+                ? (typeof updated.booking === 'string'
+                    ? updated.booking
+                    : (updated.booking as any)?._id
+                        ? String((updated.booking as any)._id)
+                        : String(updated.booking))
                 : '';
 
             return {
@@ -1963,9 +1274,10 @@ export class TransactionsController {
         return await this.payosService.cancelTransaction(orderCodeNum, dto?.cancellationReason);
     }
 
-    /**
+        /**
  * Tournament-specific PayOS return URL
  * Handles return from tournament payment and redirects to tournament page
+ * ✅ ENHANCED: Added idempotency check to prevent race conditions with webhook
  */
 @Get('payos/tournament-return/:tournamentId')
 @ApiOperation({
@@ -2001,29 +1313,41 @@ async handleTournamentPaymentReturn(
         const transaction = await this.transactionsService.getPaymentByExternalId(String(orderCode));
 
         if (!transaction) {
-            console.warn(`[Tournament Payment Return] Transaction not found for orderCode: ${orderCode}`);
-            return res.redirect(`${frontendUrl}/tournaments/${tournamentId}?payment=error&reason=transaction_not_found`);
+            console.log(`[Tournament Return URL] Transaction not found for orderCode ${orderCode}`);
+            return res.redirect(`${this.configService.get('FRONTEND_URL')}/tournament/${tournamentId}?payment=error&reason=transaction_not_found`);
         }
 
         // Map PayOS status to our TransactionStatus enum
         let newStatus: TransactionStatus;
-        let paymentStatus: 'success' | 'failed' | 'pending' | 'cancelled';
-        
-        if (payosTransaction.status === 'PAID') {
-            newStatus = TransactionStatus.SUCCEEDED;
-            paymentStatus = 'success';
-        } else if (payosTransaction.status === 'CANCELLED' || payosTransaction.status === 'EXPIRED') {
-            newStatus = TransactionStatus.FAILED;
-            paymentStatus = 'failed';
-        } else if (payosTransaction.status === 'PENDING' || payosTransaction.status === 'PROCESSING') {
-            newStatus = TransactionStatus.PROCESSING;
-            paymentStatus = 'pending';
-        } else {
-            newStatus = TransactionStatus.FAILED;
-            paymentStatus = 'cancelled';
+        let paymentStatus: 'succeeded' | 'failed' | 'pending' | 'cancelled';
+        let shouldEmitEvent = false;
+
+        switch (payosTransaction.status) {
+            case 'PAID':
+                newStatus = TransactionStatus.SUCCEEDED;
+                paymentStatus = 'succeeded';
+                shouldEmitEvent = true;
+                break;
+            case 'PENDING':
+                newStatus = TransactionStatus.PENDING;
+                paymentStatus = 'pending';
+                break;
+            case 'PROCESSING':
+                newStatus = TransactionStatus.PROCESSING;
+                paymentStatus = 'pending';
+                break;
+            case 'CANCELLED':
+                newStatus = TransactionStatus.CANCELLED;
+                paymentStatus = 'cancelled';
+                break;
+            default:
+                newStatus = TransactionStatus.FAILED;
+                paymentStatus = 'failed';
+                break;
         }
 
-        // Update transaction status if not already finalized
+        // ✅ Update transaction status if not already finalized
+        // updatePaymentStatus now preserves existing metadata automatically
         if (transaction.status !== TransactionStatus.SUCCEEDED && transaction.status !== TransactionStatus.FAILED) {
             console.log(`[Tournament Payment Return] Updating transaction ${transaction._id} from ${transaction.status} to ${newStatus}`);
             
@@ -2039,6 +1363,24 @@ async handleTournamentPaymentReturn(
                 }
             );
 
+            console.log(`[Tournament Payment Return] ✅ Transaction updated, metadata preserved:`, {
+                hasTournamentId: !!updated.metadata?.tournamentId,
+                metadataKeys: Object.keys(updated.metadata || {})
+            });
+
+            // ✅ Extract userId and tournamentId for event emission
+            const userIdStr = updated.user
+                ? (typeof updated.user === 'string'
+                    ? updated.user
+                    : (updated.user as any)?._id
+                        ? String((updated.user as any)._id)
+                        : String(updated.user))
+                : undefined;
+
+            // ✅ Use tournamentId from URL param, fallback to metadata if needed
+            const finalTournamentId = tournamentId || 
+                (updated.metadata?.tournamentId ? String(updated.metadata.tournamentId) : undefined);
+
             // Emit payment events based on status
             if (newStatus === TransactionStatus.FAILED) {
                 const bookingIdStr = updated.booking 
@@ -2048,14 +1390,6 @@ async handleTournamentPaymentReturn(
                             ? String((updated.booking as any)._id)
                             : String(updated.booking))
                     : undefined;
-                
-                const userIdStr = updated.user
-                    ? (typeof updated.user === 'string'
-                        ? updated.user
-                        : (updated.user as any)?._id
-                            ? String((updated.user as any)._id)
-                            : String(updated.user))
-                    : undefined;
 
                 const reason = payosTransaction.status === 'CANCELLED' 
                     ? 'PayOS transaction cancelled' 
@@ -2063,15 +1397,17 @@ async handleTournamentPaymentReturn(
 
                 this.eventEmitter.emit('payment.failed', {
                     paymentId: String(updated._id),
-                    tournamentId: tournamentId,
+                    tournamentId: finalTournamentId, // ✅ Include tournamentId
                     userId: userIdStr,
                     amount: updated.amount,
                     method: updated.method,
                     transactionId: payosTransaction.reference || String(payosTransaction.orderCode),
                     reason,
                 });
+
+                console.log(`[Tournament Payment Return] ❌ Payment failed event emitted for tournament: ${finalTournamentId}`);
             } else if (newStatus === TransactionStatus.SUCCEEDED) {
-                // Double-check transaction status
+                // ✅ Double-check transaction status before emitting success event
                 const verifiedTransaction = await this.transactionsService.getPaymentById(
                     (updated._id as any).toString()
                 );
@@ -2085,23 +1421,53 @@ async handleTournamentPaymentReturn(
                                 : String(updated.booking))
                         : undefined;
 
-                    const userIdStr = updated.user
-                        ? (typeof updated.user === 'string'
-                            ? updated.user
-                            : (updated.user as any)?._id
-                                ? String((updated.user as any)._id)
-                                : String(updated.user))
-                        : undefined;
-
-                    // Emit payment.success event for tournament
+                    // ✅ Emit payment.success event for tournament with all required fields
                     this.eventEmitter.emit('payment.success', {
                         paymentId: String(updated._id),
-                        tournamentId: tournamentId,
+                        tournamentId: finalTournamentId, // ✅ Ensure tournamentId is included
                         userId: userIdStr,
                         amount: updated.amount,
                         method: updated.method,
                         transactionId: payosTransaction.reference,
                     });
+
+                    console.log(`[Tournament Payment Return] ✅ Payment success event emitted for tournament: ${finalTournamentId}, userId: ${userIdStr}`);
+                } else {
+                    console.warn(`[Tournament Payment Return] ⚠️ Transaction status verification failed, not emitting success event`);
+                }
+            }
+        } else {
+            console.log(`[Tournament Payment Return] ℹ️ Transaction ${transaction._id} already finalized (${transaction.status}), skipping update`);
+            
+            // ✅ Even if transaction is already finalized, emit event if it's SUCCEEDED and event hasn't been processed
+            // This handles cases where webhook processed but return URL is called first
+            if (transaction.status === TransactionStatus.SUCCEEDED && shouldEmitEvent) {
+                const userIdStr = transaction.user
+                    ? (typeof transaction.user === 'string'
+                        ? transaction.user
+                        : (transaction.user as any)?._id
+                            ? String((transaction.user as any)._id)
+                            : String(transaction.user))
+                    : undefined;
+
+                const finalTournamentId = tournamentId || 
+                    (transaction.metadata?.tournamentId ? String(transaction.metadata.tournamentId) : undefined);
+
+                if (finalTournamentId && userIdStr) {
+                    // Check if already processed by looking at metadata
+                    if (!transaction.metadata?.tournamentProcessed) {
+                        this.eventEmitter.emit('payment.success', {
+                            paymentId: String(transaction._id),
+                            tournamentId: finalTournamentId,
+                            userId: userIdStr,
+                            amount: transaction.amount,
+                            method: transaction.method,
+                            transactionId: transaction.externalTransactionId || undefined,
+                        });
+                        console.log(`[Tournament Payment Return] ✅ Emitted success event for already-succeeded transaction`);
+                    } else {
+                        console.log(`[Tournament Payment Return] ℹ️ Transaction already processed (tournamentProcessed flag set)`);
+                    }
                 }
             }
         }
@@ -2112,11 +1478,9 @@ async handleTournamentPaymentReturn(
         );
 
     } catch (error) {
-        console.error('[Tournament Payment Return] Error:', error);
-        const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
-        return res.redirect(
-            `${frontendUrl}/tournaments/${tournamentId}?payment=error&reason=system_error`
-        );
+        console.error(`[Tournament Return URL] Error:`, error);
+        const frontendUrl = this.configService.get('FRONTEND_URL') || 'http://localhost:5173';
+        return res.redirect(`${frontendUrl}/tournament/${tournamentId}?payment=error&reason=server_error`);
     }
 }
 }

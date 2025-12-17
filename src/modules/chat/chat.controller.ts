@@ -18,7 +18,7 @@ import { ChatStatus } from '@common/enums/chat.enum';
 @Controller('chat')
 @ApiBearerAuth()
 export class ChatController {
-  constructor(private readonly chatService: ChatService) {}
+  constructor(private readonly chatService: ChatService) { }
 
   @UseGuards(JwtAccessTokenGuard)
   @Post('start')
@@ -40,6 +40,13 @@ export class ChatController {
   @ApiOperation({ summary: 'Get all chat rooms for user' })
   async getChatRooms(@Request() req) {
     return this.chatService.getChatRoomsForUser(req.user.userId);
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
+  @Get('field-owner/rooms')
+  @ApiOperation({ summary: 'Get chat rooms for field owner' })
+  async getFieldOwnerChatRooms(@Request() req) {
+    return this.chatService.getChatRoomsForFieldOwner(req.user.userId);
   }
 
   @UseGuards(JwtAccessTokenGuard)

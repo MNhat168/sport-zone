@@ -9,13 +9,13 @@ import * as crypto from 'crypto';
 import * as qs from 'qs';
 
 export interface CreatePaymentData {
-  bookingId: string;
+  bookingId?: string;
   userId: string;
   amount: number;
   method: PaymentMethod;
   paymentNote?: string;
   transactionId?: string;
-  externalTransactionId?: string; // ✅ PayOS orderCode or VNPay transaction ID
+  externalTransactionId?: string; // ✅ PayOS orderCode
 }
 
 @Injectable()
@@ -42,7 +42,7 @@ export class TransactionsService {
           : TransactionStatus.PENDING;
 
       const transaction = new this.transactionModel({
-        booking: new Types.ObjectId(data.bookingId),
+        booking: data.bookingId ? new Types.ObjectId(data.bookingId) : undefined,
         user: new Types.ObjectId(data.userId),
         amount: data.amount,
         direction: 'in',
@@ -50,7 +50,7 @@ export class TransactionsService {
         status: initialStatus,
         type: TransactionType.PAYMENT,
         notes: data.paymentNote || null,
-        // ✅ CRITICAL: Store externalTransactionId for PayOS/VNPay lookup
+        // ✅ CRITICAL: Store externalTransactionId for PayOS lookup
         ...(data.externalTransactionId && { externalTransactionId: data.externalTransactionId }),
       });
 
@@ -109,105 +109,127 @@ export class TransactionsService {
     }
   }
 
-  /**
-   * Cập nhật trạng thái transaction với VNPay hoặc PayOS data
-   */
   async updatePaymentStatus(
     transactionId: string,
     status: TransactionStatus,
     receiptUrl?: string,
     gatewayData?: {
-      // VNPay fields
-      vnp_TransactionNo?: string;
-      vnp_BankTranNo?: string;
-      vnp_BankCode?: string;
-      vnp_CardType?: string;
-      vnp_ResponseCode?: string;
-      vnp_TransactionStatus?: string;
-      // PayOS fields
       payosOrderCode?: number;
       payosReference?: string;
       payosAccountNumber?: string;
       payosTransactionDateTime?: string;
     }
   ): Promise<Transaction> {
-    const updateData: any = {
-      status,
-      ...(receiptUrl && { receiptUrl }),
-    };
+    // ✅ CRITICAL: Read existing transaction first to preserve metadata
+    // Use findOneAndUpdate with $set on metadata fields to ensure atomic merge
+    const existingTransaction = await this.transactionModel.findById(transactionId);
 
-    // Update VNPay fields
-    if (gatewayData) {
-      if (gatewayData.vnp_TransactionNo) {
-        updateData.vnpayTransactionNo = gatewayData.vnp_TransactionNo;
-        updateData.externalTransactionId = gatewayData.vnp_TransactionNo;
-      }
-      if (gatewayData.vnp_BankTranNo) {
-        updateData.vnpayBankTranNo = gatewayData.vnp_BankTranNo;
-        if (!updateData.externalTransactionId) {
-          updateData.externalTransactionId = gatewayData.vnp_BankTranNo;
-        }
-      }
-      if (gatewayData.vnp_BankCode) updateData.vnpayBankCode = gatewayData.vnp_BankCode;
-      if (gatewayData.vnp_CardType) updateData.vnpayCardType = gatewayData.vnp_CardType;
-      if (gatewayData.vnp_ResponseCode) updateData.vnpayResponseCode = gatewayData.vnp_ResponseCode;
-      if (gatewayData.vnp_TransactionStatus) updateData.vnpayTransactionStatus = gatewayData.vnp_TransactionStatus;
-
-      // Update PayOS fields
-      if (gatewayData.payosOrderCode) {
-        updateData.externalTransactionId = String(gatewayData.payosOrderCode);
-      }
-      if (gatewayData.payosReference) {
-        updateData.metadata = {
-          ...updateData.metadata,
-          payosReference: gatewayData.payosReference,
-        };
-      }
-      if (gatewayData.payosAccountNumber) {
-        updateData.metadata = {
-          ...updateData.metadata,
-          payosAccountNumber: gatewayData.payosAccountNumber,
-        };
-      }
-      if (gatewayData.payosTransactionDateTime) {
-        updateData.metadata = {
-          ...updateData.metadata,
-          payosTransactionDateTime: gatewayData.payosTransactionDateTime,
-        };
-      }
-    }
-
-    // Update timestamps based on status
-    if (status === TransactionStatus.SUCCEEDED) {
-      updateData.completedAt = new Date();
-    } else if (status === TransactionStatus.FAILED) {
-      updateData.failedAt = new Date();
-      if (gatewayData?.vnp_ResponseCode) {
-        updateData.errorCode = gatewayData.vnp_ResponseCode;
-        updateData.errorMessage = this.getVNPayErrorDescription(gatewayData.vnp_ResponseCode);
-      }
-    } else if (status === TransactionStatus.PROCESSING) {
-      updateData.processedAt = new Date();
-    }
-
-    // Update notes
-    if (status === TransactionStatus.SUCCEEDED) {
-      updateData.notes = 'Transaction completed successfully';
-    } else if (status === TransactionStatus.FAILED) {
-      updateData.notes = `Transaction failed with code ${gatewayData?.vnp_ResponseCode || 'unknown'}`;
-    }
-
-    const transaction = await this.transactionModel.findByIdAndUpdate(
-      transactionId,
-      updateData,
-      { new: true }
-    ).populate('booking').populate('user');
-
-    if (!transaction) {
+    if (!existingTransaction) {
       throw new NotFoundException(`Transaction with ID ${transactionId} not found`);
     }
 
-    this.logger.log(`Updated transaction ${transactionId} status to ${status}`);
+    // ✅ Log existing metadata for debugging
+    this.logger.debug(`[updatePaymentStatus] Existing metadata before update: ${JSON.stringify(existingTransaction.metadata)}`);
+
+    // ✅ Preserve existing metadata and merge with new PayOS data
+    const existingMetadata = existingTransaction.metadata || {};
+
+    // ✅ Log existing metadata for debugging
+    this.logger.debug(`[updatePaymentStatus] Existing metadata keys: ${Object.keys(existingMetadata).join(', ')}`);
+
+    // 1. Build atomic update operations
+    const updateOperations: any = {
+      $set: {
+        status,
+      }
+    };
+
+    // ✅ CRITICAL: Use dot notation to update individual metadata fields
+    // This ensures MongoDB merges the fields instead of replacing the entire object
+    // First, ensure metadata object exists
+    if (!existingTransaction.metadata) {
+      updateOperations.$set.metadata = {};
+    }
+
+    // ✅ Merge PayOS gateway data into metadata using dot notation
+    // This preserves all existing metadata fields
+    if (gatewayData) {
+      if (gatewayData.payosOrderCode) {
+        updateOperations.$set['metadata.payosOrderCode'] = gatewayData.payosOrderCode;
+      }
+      if (gatewayData.payosReference) {
+        updateOperations.$set['metadata.payosReference'] = gatewayData.payosReference;
+      }
+      if (gatewayData.payosAccountNumber) {
+        updateOperations.$set['metadata.payosAccountNumber'] = gatewayData.payosAccountNumber;
+      }
+      if (gatewayData.payosTransactionDateTime) {
+        updateOperations.$set['metadata.payosTransactionDateTime'] = gatewayData.payosTransactionDateTime;
+      }
+    }
+
+    // ✅ Log what will be updated
+    const payosFields = gatewayData ? Object.keys(gatewayData).filter(k => gatewayData[k]) : [];
+    this.logger.debug(`[updatePaymentStatus] Will update PayOS fields: ${payosFields.join(', ')}`);
+    this.logger.debug(`[updatePaymentStatus] Existing metadata will be preserved: ${Object.keys(existingMetadata).join(', ')}`);
+
+    // Set externalTransactionId if PayOS order code provided
+    if (gatewayData?.payosOrderCode) {
+      updateOperations.$set.externalTransactionId = String(gatewayData.payosOrderCode);
+    }
+
+    // 2. Update timestamps based on status
+    if (status === TransactionStatus.SUCCEEDED) {
+      updateOperations.$set.completedAt = new Date();
+      // Preserve existing notes if any
+      const existingNotes = existingTransaction.notes || '';
+      updateOperations.$set.notes = existingNotes
+        ? `${existingNotes}\nTransaction completed successfully`
+        : 'Transaction completed successfully';
+    } else if (status === TransactionStatus.FAILED) {
+      updateOperations.$set.failedAt = new Date();
+      const existingNotes = existingTransaction.notes || '';
+      updateOperations.$set.notes = existingNotes
+        ? `${existingNotes}\nTransaction failed`
+        : 'Transaction failed';
+    } else if (status === TransactionStatus.PROCESSING) {
+      updateOperations.$set.processedAt = new Date();
+    }
+
+    // 3. ✅ CRITICAL: Use findOneAndUpdate with atomic operations
+    // This ensures metadata is properly merged and preserved
+    const transaction = await this.transactionModel.findOneAndUpdate(
+      {
+        _id: transactionId,
+      },
+      updateOperations,
+      {
+        new: true,
+        runValidators: true
+      }
+    ).populate('booking').populate('user');
+
+    if (!transaction) {
+      throw new NotFoundException(`Transaction with ID ${transactionId} not found after update`);
+    }
+
+    // ✅ Verify metadata was preserved
+    const preservedKeys = Object.keys(existingMetadata);
+    const finalKeys = Object.keys(transaction.metadata || {});
+    const missingKeys = preservedKeys.filter(key => !finalKeys.includes(key));
+
+    if (missingKeys.length > 0) {
+      this.logger.error(`[updatePaymentStatus] ❌ CRITICAL: Metadata keys were lost: ${missingKeys.join(', ')}`);
+      this.logger.error(`[updatePaymentStatus] Expected keys: ${preservedKeys.join(', ')}, Final keys: ${finalKeys.join(', ')}`);
+      this.logger.error(`[updatePaymentStatus] Existing metadata was: ${JSON.stringify(existingMetadata)}`);
+      this.logger.error(`[updatePaymentStatus] Final metadata is: ${JSON.stringify(transaction.metadata)}`);
+    } else {
+      this.logger.debug(`[updatePaymentStatus] ✅ All metadata keys preserved: ${preservedKeys.join(', ')}`);
+    }
+
+    this.logger.log(`Updated transaction ${transactionId} status to ${status} via Atomic $set Update`);
+    this.logger.debug(`Transaction metadata after update: ${JSON.stringify(transaction.metadata)}`);
+
     return transaction;
   }
 
@@ -228,7 +250,7 @@ export class TransactionsService {
    * Lấy transaction theo ID
    */
   /**
-   * Get payment by external transaction ID (PayOS order code, VNPay transaction no, etc.)
+   * Get payment by external transaction ID (PayOS order code, etc.)
    */
   async getPaymentByExternalId(externalId: string): Promise<Transaction | null> {
     return await this.transactionModel
@@ -300,122 +322,6 @@ export class TransactionsService {
     } catch (error) {
       this.logger.error('Failed to log transaction error', error);
     }
-  }
-
-  /**
-   * Get VNPay error description from response code
-   * Used for better error reporting
-   */
-  getVNPayErrorDescription(responseCode: string): string {
-    const errorMap: Record<string, string> = {
-      '00': 'Giao dịch thành công',
-      '07': 'Trừ tiền thành công. Giao dịch bị nghi ngờ (liên quan tới lừa đảo, giao dịch bất thường)',
-      '09': 'Thẻ/Tài khoản chưa đăng ký dịch vụ InternetBanking',
-      '10': 'Xác thực thông tin thẻ/tài khoản không đúng quá 3 lần',
-      '11': 'Đã hết hạn chờ thanh toán',
-      '12': 'Thẻ/Tài khoản bị khóa',
-      '13': 'Nhập sai mật khẩu OTP',
-      '24': 'Khách hàng hủy giao dịch',
-      '51': 'Tài khoản không đủ số dư',
-      '65': 'Vượt quá hạn mức giao dịch trong ngày',
-      '75': 'Ngân hàng thanh toán đang bảo trì',
-      '79': 'Nhập sai mật khẩu thanh toán quá số lần quy định',
-      '99': 'Lỗi không xác định',
-    };
-
-    return errorMap[responseCode] || 'Lỗi không xác định';
-  }
-
-
-  createVNPayUrl(amount: number, orderId: string, ipAddr: string, returnUrlOverride?: string, expireInMinutes: number = 10): string {
-    const vnp_TmnCode = this.configService.get<string>('vnp_TmnCode');
-    const vnp_HashSecret = this.configService.get<string>('vnp_HashSecret');
-    const vnp_Url = this.configService.get<string>('vnp_Url');
-
-    // Read returnUrl from .env or use override from query param
-    const configReturnUrl = this.configService.get<string>('vnp_ReturnUrl') || 'http://localhost:5173/transactions/vnpay/return';
-    const vnp_ReturnUrl = returnUrlOverride || configReturnUrl;
-
-    if (!vnp_TmnCode || !vnp_HashSecret || !vnp_Url) {
-      this.logger.error('VNPay configuration is missing. Please check environment variables.');
-      throw new BadRequestException('Payment configuration error');
-    }
-
-    // Trim whitespace from config values to prevent signature errors
-    const tmnCode = vnp_TmnCode.trim();
-    const hashSecret = vnp_HashSecret.trim();
-    const vnpayUrl = vnp_Url.trim();
-
-    this.logger.debug(`[VNPay Config] TMN Code: ${tmnCode}`);
-    this.logger.debug(`[VNPay Config] Hash Secret Length: ${hashSecret.length}`);
-    this.logger.debug(`[VNPay Config] URL: ${vnpayUrl}`);
-
-    const date = new Date();
-    const createDate = `${date.getFullYear()}${(date.getMonth() + 1)
-      .toString()
-      .padStart(2, '0')}${date.getDate().toString().padStart(2, '0')}${date
-        .getHours()
-        .toString()
-        .padStart(2, '0')}${date.getMinutes().toString().padStart(2, '0')}${date
-          .getSeconds()
-          .toString()
-          .padStart(2, '0')}`;
-
-    // Calculate expire date (VNPay supports vnp_ExpireDate)
-    const expireDateObj = new Date(date.getTime() + expireInMinutes * 60 * 1000);
-    const expireDate = `${expireDateObj.getFullYear()}${(expireDateObj.getMonth() + 1)
-      .toString()
-      .padStart(2, '0')}${expireDateObj.getDate().toString().padStart(2, '0')}${expireDateObj
-        .getHours()
-        .toString()
-        .padStart(2, '0')}${expireDateObj.getMinutes().toString().padStart(2, '0')}${expireDateObj
-          .getSeconds()
-          .toString()
-          .padStart(2, '0')}`;
-
-    const vnp_Params: Record<string, string> = {
-      vnp_Version: '2.1.0',
-      vnp_Command: 'pay',
-      vnp_TmnCode: tmnCode,
-      vnp_Locale: 'vn',
-      vnp_CurrCode: 'VND',
-      vnp_TxnRef: orderId,
-      vnp_OrderInfo: `Thanh toan don hang ${orderId}`,
-      vnp_OrderType: 'other',
-      vnp_Amount: (amount * 100).toString(),
-      vnp_ReturnUrl: vnp_ReturnUrl,
-      vnp_IpAddr: ipAddr,
-      vnp_CreateDate: createDate,
-      vnp_ExpireDate: expireDate,
-    };
-
-    // Sort parameters alphabetically
-    const sorted = Object.keys(vnp_Params)
-      .sort()
-      .reduce((acc, key) => {
-        acc[key] = vnp_Params[key];
-        return acc;
-      }, {} as Record<string, string>);
-
-    // Create sign data - DO NOT encode
-    const signData = qs.stringify(sorted, { encode: false });
-
-    // Create HMAC SHA512 signature
-    const hmac = crypto.createHmac('sha512', hashSecret);
-    const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
-
-    sorted['vnp_SecureHash'] = signed;
-
-    // Build final URL - DO NOT encode
-    const finalUrl = `${vnpayUrl}?${qs.stringify(sorted, { encode: false })}`;
-
-    // Debug logging
-    this.logger.log(`[VNPay URL] Created payment URL for order ${orderId}`);
-    this.logger.debug(`[VNPay URL] Sign data: ${signData}`);
-    this.logger.debug(`[VNPay URL] Signature: ${signed}`);
-    this.logger.debug(`[VNPay URL] Final URL (first 150 chars): ${finalUrl.substring(0, 150)}...`);
-
-    return finalUrl;
   }
 
   /**
@@ -617,7 +523,7 @@ export class TransactionsService {
 
   /**
    * Get detailed transaction history for a user
-   * Returns transaction records with full VNPay data and filters
+   * Returns transaction records with full PayOS data and filters
    */
   async getTransactionHistory(userId: string, options?: {
     type?: TransactionType;
@@ -673,6 +579,40 @@ export class TransactionsService {
       limit,
       offset,
     };
+  }
+
+  /**
+   * Update transaction metadata atomically (tránh race condition)
+   * Dùng cho việc đánh dấu email sent, hoặc update thông tin khác mà không ảnh hưởng PayOS data
+   */
+  async updateTransactionMetadata(
+    transactionId: string,
+    metadataUpdates: Record<string, any>,
+    additionalFields?: Record<string, any>
+  ): Promise<Transaction | null> {
+    const updateData: any = {};
+
+    // Update metadata fields using dot notation
+    Object.keys(metadataUpdates).forEach(key => {
+      updateData[`metadata.${key}`] = metadataUpdates[key];
+    });
+
+    // Add any additional top-level fields
+    if (additionalFields) {
+      Object.assign(updateData, additionalFields);
+    }
+
+    const transaction = await this.transactionModel.findByIdAndUpdate(
+      transactionId,
+      { $set: updateData },
+      { new: true }
+    ).populate('booking').populate('user', 'fullName email');
+
+    if (transaction) {
+      this.logger.log(`Updated transaction ${transactionId} metadata atomically`);
+    }
+
+    return transaction;
   }
 
   /**

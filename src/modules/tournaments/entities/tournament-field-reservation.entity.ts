@@ -8,11 +8,11 @@ export class TournamentFieldReservation extends BaseEntity {
   @Prop({ type: Types.ObjectId, ref: 'Tournament', required: true })
   tournament: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Field', required: true })
-  field: Types.ObjectId;
+ @Prop({ type: Types.ObjectId, ref: 'Court', required: true }) // Changed from Field to Court
+  court: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Court', required: false })
-  court?: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Field', required: false })
+  field?: Types.ObjectId;
 
   @Prop({ required: true, type: Date })
   date: Date;

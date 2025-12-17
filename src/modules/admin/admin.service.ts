@@ -413,7 +413,6 @@ export class AdminService {
                 debit_card: PaymentMethod.DEBIT_CARD,
                 momo: PaymentMethod.MOMO,
                 zalopay: PaymentMethod.ZALOPAY,
-                vnpay: PaymentMethod.VNPAY,
                 bank_transfer: PaymentMethod.BANK_TRANSFER,
                 qr_code: PaymentMethod.QR_CODE,
                 internal: PaymentMethod.INTERNAL,
