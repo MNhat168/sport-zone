@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { ApiTags, ApiConsumes, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { GetAllUsersDto } from './dto/get-all-users.dto';
 import { GetAllUsersResponseDto } from './dto/get-all-users-response.dto';
@@ -33,7 +34,7 @@ import { UserRole } from '@common/enums/user.enum';
 import { SetFavouriteSportsDto } from './dto/set-favourite-sports.dto';
 import { SetFavouriteCoachesDto } from './dto/set-favourite-coaches.dto';
 import { SetFavouriteFieldsDto } from './dto/set-favourite-fields.dto';
-import { ChangePasswordDto } from './dto/change-password.dto';
+import { FavouriteCoachDto } from './dto/favourite-coach.dto';
 import { Roles } from 'src/decorators/roles.decorator';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 @ApiTags('Users')
@@ -161,6 +162,30 @@ export class UsersController {
   }
 
   @UseGuards(JwtAccessTokenGuard)
+  @Get('favourite-fields')
+  async getFavouriteFields(@Request() req) {
+    const userEmail = req.user.email;
+    const user = await this.usersService.findByEmail(userEmail);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+    return this.usersService.getFavouriteFields(userEmail);
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
+  @Get('favourite-coaches')
+  @ApiOperation({ summary: 'Get current user favourite coaches' })
+  @ApiResponse({ status: 200, description: 'List of favourite coaches', type: [FavouriteCoachDto] })
+  async getFavouriteCoaches(@Request() req): Promise<FavouriteCoachDto[]> {
+    const userEmail = req.user.email;
+    const user = await this.usersService.findByEmail(userEmail);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+    return this.usersService.getFavouriteCoaches(userEmail);
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
   @Delete('favourite-fields')
   async removeFavouriteFields(
     @Request() req,
@@ -194,4 +219,5 @@ export class UsersController {
   ): Promise<GetAllUsersResponseDto> {
     return this.usersService.getAllUsers(query);
   }
+  
 }
