@@ -17,6 +17,8 @@ import { GetAllUsersDto } from './dto/get-all-users.dto';
 import { GetAllUsersResponseDto, UserListDto } from './dto/get-all-users-response.dto';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
+import { Booking } from '../bookings/entities/booking.entity';
+import { FavouriteCoachDto } from './dto/favourite-coach.dto';
 import { UserRole } from '@common/enums/user.enum';
 import { Field } from '../fields/entities/field.entity';
 
@@ -29,6 +31,7 @@ export class UsersService {
     private readonly configService: ConfigService,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Field.name) private readonly fieldModel: Model<Field>,
+    @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
   ) {}
 
   async findOneByCondition(condition: FilterQuery<User>): Promise<User | null> {
@@ -305,6 +308,92 @@ export class UsersService {
     user.favouriteFields.push(...newFieldIds.map((id) => new Types.ObjectId(id)));
     await user.save();
     return user;
+  }
+
+  /**
+   * Return favourite fields for a user with minimal data
+   * @param email - user email
+   * @returns array of { _id, name, avatar, totalBookings }
+   */
+  async getFavouriteFields(email: string) {
+    const user = await this.userModel.findOne({ email }).lean();
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    const favouriteFields = Array.isArray(user.favouriteFields)
+      ? user.favouriteFields.map((f: any) => (typeof f === 'string' ? f : (f as any).toString()))
+      : [];
+
+    if (favouriteFields.length === 0) return [];
+
+    // Fetch basic field info
+    const fields = await this.fieldModel
+      .find({ _id: { $in: favouriteFields.map((id) => new Types.ObjectId(id)) }, isActive: true })
+      .select('name images')
+      .lean()
+      .exec();
+
+    // Aggregate booking counts per field
+    const agg = await this.bookingModel
+      .aggregate([
+        { $match: { field: { $in: fields.map((f) => new Types.ObjectId((f as any)._id)) } } },
+        { $group: { _id: '$field', totalBookings: { $sum: 1 } } },
+      ])
+      .exec();
+
+    const countsMap: Record<string, number> = {};
+    for (const c of agg) countsMap[(c._id as any).toString()] = c.totalBookings || 0;
+
+    return fields.map((f: any) => ({
+      _id: (f._id as any).toString(),
+      name: f.name,
+      avatar: Array.isArray(f.images) && f.images.length > 0 ? f.images[0] : null,
+      totalBookings: countsMap[(f._id as any).toString()] || 0,
+    }));
+  }
+
+  /**
+   * Return favourite coaches for a user with minimal data
+   * @param email - user email
+   * @returns array of { _id, name, avatar, totalBookings }
+   */
+  async getFavouriteCoaches(email: string): Promise<FavouriteCoachDto[]> {
+    const user = await this.userModel.findOne({ email }).lean();
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    const favouriteCoaches = Array.isArray(user.favouriteCoaches)
+      ? user.favouriteCoaches.map((c: any) => (typeof c === 'string' ? c : (c as any).toString()))
+      : [];
+
+    if (favouriteCoaches.length === 0) return [];
+
+    // Fetch basic coach info (users with role COACH)
+    const coaches = await this.userModel
+      .find({ _id: { $in: favouriteCoaches.map((id) => new Types.ObjectId(id)) }, role: UserRole.COACH })
+      .select('fullName avatarUrl')
+      .lean()
+      .exec();
+
+    // Aggregate booking counts per requestedCoach
+    const agg = await this.bookingModel
+      .aggregate([
+        { $match: { requestedCoach: { $in: coaches.map((c) => new Types.ObjectId((c as any)._id)) } } },
+        { $group: { _id: '$requestedCoach', totalBookings: { $sum: 1 } } },
+      ])
+      .exec();
+
+    const countsMap: Record<string, number> = {};
+    for (const c of agg) countsMap[(c._id as any).toString()] = c.totalBookings || 0;
+
+    return coaches.map((c: any) => ({
+      _id: (c._id as any).toString(),
+      name: c.fullName,
+      avatar: c.avatarUrl || null,
+      totalBookings: countsMap[(c._id as any).toString()] || 0,
+    })) as FavouriteCoachDto[];
   }
 
   async getAllUsers(query: GetAllUsersDto): Promise<GetAllUsersResponseDto> {

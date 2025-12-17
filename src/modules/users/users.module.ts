@@ -1,9 +1,11 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { BookingsModule } from '../bookings/bookings.module';
 import { MongooseModule } from '@nestjs/mongoose';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { User, UserSchema } from './entities/user.entity';
 import { Field, FieldSchema } from '../fields/entities/field.entity';
+import { Booking, BookingSchema } from '../bookings/entities/booking.entity';
 import { UserRepository } from './repositories/user.repository';
 import { USER_REPOSITORY } from './interface/users.interface';
 import { ServiceModule } from '../../service/service.module';
@@ -14,8 +16,10 @@ import { JwtModule } from '@nestjs/jwt';
   imports: [
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
-      { name: Field.name, schema: FieldSchema }
+      { name: Field.name, schema: FieldSchema },
+      { name: Booking.name, schema: BookingSchema },
     ]),
+    forwardRef(() => BookingsModule),
     ServiceModule,
     JwtModule.register({}),
     EmailModule
