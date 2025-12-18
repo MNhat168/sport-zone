@@ -53,7 +53,7 @@ export class RegisterDto {
      * Tên đầy đủ của người dùng
      * @example "Nguyễn Văn A"
      */
-    @ApiProperty({ 
+    @ApiProperty({
         example: 'Nguyễn Văn A',
         description: 'Tên đầy đủ của người dùng',
         minLength: 2,
@@ -67,7 +67,7 @@ export class RegisterDto {
      * Email của người dùng
      * @example "nguyenvana@example.com"
      */
-    @ApiProperty({ 
+    @ApiProperty({
         example: 'nguyenvana@example.com',
         description: 'Địa chỉ email của người dùng'
     })
@@ -78,7 +78,7 @@ export class RegisterDto {
      * Số điện thoại của người dùng (định dạng Việt Nam)
      * @example "0123456789"
      */
-    @ApiProperty({ 
+    @ApiProperty({
         example: '0123456789',
         description: 'Số điện thoại của người dùng (10 chữ số)',
         pattern: '^[0-9]{10}$'
@@ -91,7 +91,7 @@ export class RegisterDto {
      * Ngày sinh của người dùng
      * @example "1990-01-01"
      */
-    @ApiProperty({ 
+    @ApiProperty({
         example: '1990-01-01',
         description: 'Ngày sinh của người dùng (YYYY-MM-DD)'
     })
@@ -102,7 +102,7 @@ export class RegisterDto {
      * Mật khẩu của người dùng
      * @example "Password123!"
      */
-    @ApiProperty({ 
+    @ApiProperty({
         example: 'Password123!',
         description: 'Mật khẩu của người dùng (ít nhất 6 ký tự)',
         minLength: 6
@@ -120,7 +120,7 @@ export class LoginDto {
      * Email của người dùng
      * @example "nguyenvana@example.com"
      */
-    @ApiProperty({ 
+    @ApiProperty({
         example: 'nguyenvana@example.com',
         description: 'Địa chỉ email của người dùng'
     })
@@ -131,7 +131,7 @@ export class LoginDto {
      * Mật khẩu của người dùng
      * @example "Password123!"
      */
-    @ApiProperty({ 
+    @ApiProperty({
         example: 'Password123!',
         description: 'Mật khẩu của người dùng'
     })
@@ -160,7 +160,7 @@ export class VerifyAccountDto {
      * Email của người dùng
      * @example "nguyenvana@example.com"
      */
-    @ApiProperty({ 
+    @ApiProperty({
         example: 'nguyenvana@example.com',
         description: 'Địa chỉ email của người dùng'
     })
@@ -171,12 +171,12 @@ export class VerifyAccountDto {
      * Mã xác thực 6 chữ số
      * @example "123456"
      */
-    @ApiProperty({ 
+    @ApiProperty({
         example: '123456',
         description: 'Mã xác thực 6 chữ số được gửi qua email'
     })
     @IsString()
-    @Length(6, 6, { message: 'Mã xác thực phải có 6 chữ số' })
+    @Length(6, 1000, { message: 'Mã xác thực không hợp lệ' })
     verificationToken: string;
 }
 
@@ -188,7 +188,7 @@ export class ForgotPasswordDto {
      * Email của người dùng
      * @example "nguyenvana@example.com"
      */
-    @ApiProperty({ 
+    @ApiProperty({
         example: 'nguyenvana@example.com',
         description: 'Địa chỉ email của người dùng'
     })
@@ -204,7 +204,7 @@ export class ResetPasswordDto {
      * Email của người dùng
      * @example "nguyenvana@example.com"
      */
-    @ApiProperty({ 
+    @ApiProperty({
         example: 'nguyenvana@example.com',
         description: 'Địa chỉ email của người dùng'
     })
@@ -213,21 +213,21 @@ export class ResetPasswordDto {
 
     /**
      * Mã đặt lại mật khẩu
-     * @example "123456"
+     * @example "eyJhbGciOiJIUzI1NiIsIn..."
      */
-    @ApiProperty({ 
-        example: '123456',
-        description: 'Mã đặt lại mật khẩu 6 chữ số'
+    @ApiProperty({
+        example: 'eyJhbGciOiJIUzI1NiIsIn...',
+        description: 'Mã đặt lại mật khẩu (JWT token)'
     })
     @IsString()
-    @Length(6, 6, { message: 'Mã đặt lại mật khẩu phải có 6 chữ số' })
+    @Length(6, 1000, { message: 'Mã đặt lại mật khẩu không hợp lệ' })
     resetPasswordToken: string;
 
     /**
      * Mật khẩu mới
      * @example "NewPassword123!"
      */
-    @ApiProperty({ 
+    @ApiProperty({
         example: 'NewPassword123!',
         description: 'Mật khẩu mới (ít nhất 6 ký tự)'
     })
@@ -239,7 +239,7 @@ export class ResetPasswordDto {
      * Xác nhận mật khẩu mới
      * @example "NewPassword123!"
      */
-    @ApiProperty({ 
+    @ApiProperty({
         example: 'NewPassword123!',
         description: 'Xác nhận mật khẩu mới (phải giống mật khẩu mới)'
     })

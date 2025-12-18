@@ -208,9 +208,7 @@ export class EmailService {
 			template: 'reset-password.hbs',
 			context: {
 				// Link có thể là backend endpoint hoặc frontend page
-				link: backendUrl
-					? `${backendUrl}/auth/reset-password?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`
-					: `${frontendUrl}/reset-password?token=${encodeURIComponent(token)}`,
+				link: `${frontendUrl}/reset-password?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`,
 			},
 		});
 	}

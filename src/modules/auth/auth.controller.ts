@@ -39,21 +39,21 @@ export class AuthController {
    * dù cùng gọi tới 1 API domain.
    */
   private setAuthCookies(
-    res: Response, 
-    accessToken: string, 
-    refreshToken: string, 
+    res: Response,
+    accessToken: string,
+    refreshToken: string,
     rememberMe: boolean,
     clientType: 'admin' | 'web' = 'web',
     req?: any,  // Thêm req để detect origin
   ): void {
     const isProduction = process.env.NODE_ENV === 'production';
-    
+
     // Detect nếu đang chạy trên server (không phải localhost)
     // Kiểm tra origin từ request hoặc từ ENV
     const origin = req?.headers?.origin || req?.headers?.referer || '';
     const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1') || !origin;
     const isCrossOrigin = !isLocalhost && origin && !origin.includes(req?.headers?.host || '');
-    
+
     // Detect HTTPS: kiểm tra nhiều nguồn
     // 1. req.secure (sau khi trust proxy)
     // 2. x-forwarded-proto header (từ reverse proxy)
@@ -63,14 +63,14 @@ export class AuthController {
     const forwardedProto = req?.headers?.['x-forwarded-proto'];
     const forwardedSsl = req?.headers?.['x-forwarded-ssl'];
     const forceSecure = String(process.env.FORCE_SECURE_COOKIES || '').toLowerCase() === 'true';
-    const hasHttps = 
-      req?.secure === true || 
-      forwardedProto === 'https' || 
+    const hasHttps =
+      req?.secure === true ||
+      forwardedProto === 'https' ||
       forwardedSsl === 'on' ||
       origin.startsWith('https://') ||
       (isProduction && !isLocalhost) ||
       forceSecure; // Cho phép ép bật Secure qua ENV
-    
+
     // Nếu cross-origin hoặc production, cần sameSite: 'none' + secure: true
     const needsCrossSiteCookie = isCrossOrigin || isProduction;
 
@@ -95,7 +95,7 @@ export class AuthController {
      */
     let sameSiteOption: 'lax' | 'none' | 'strict' = 'lax';
     let secureOption = false;
-    
+
     if (needsCrossSiteCookie && hasHttps) {
       // Cross-origin với HTTPS: dùng 'none' + secure
       sameSiteOption = 'none';
@@ -111,11 +111,11 @@ export class AuthController {
       sameSiteOption = 'lax';
       secureOption = isProduction;
     }
-    
+
     // Xác định domain dựa trên môi trường
     // Không set domain cho localhost (để hoạt động với mọi port)
     // Set domain cho production nếu cần (ví dụ: .yourdomain.com)
-    const cookieDomain = isProduction 
+    const cookieDomain = isProduction
       ? process.env.COOKIE_DOMAIN || undefined  // Có thể set trong ENV nếu cần
       : undefined;  // Localhost: không set domain
 
@@ -125,12 +125,12 @@ export class AuthController {
       sameSite: sameSiteOption,
       path: '/',
     };
-    
+
     // Chỉ thêm domain nếu được set (undefined = không set domain)
     if (cookieDomain) {
       cookieOptions.domain = cookieDomain;
     }
-    
+
     const isAdminClient = clientType === 'admin';
     const accessCookieName = isAdminClient ? 'access_token_admin' : 'access_token';
     const refreshCookieName = isAdminClient ? 'refresh_token_admin' : 'refresh_token';
@@ -146,7 +146,7 @@ export class AuthController {
       ...cookieOptions,
       expires: rememberMe ? new Date(Date.now() + refreshMs) : undefined,
     });
-    
+
     // Log cookie config để debug
     console.log('🍪 [setAuthCookies] Cookie config:', {
       origin: origin || 'no origin',
@@ -157,7 +157,7 @@ export class AuthController {
       secure: secureOption,
       host: req?.headers?.host,
     });
-    
+
     // Log warning nếu cross-origin không có HTTPS
     if (needsCrossSiteCookie && !hasHttps) {
       console.warn('⚠️ [setAuthCookies] Cross-origin cookie without HTTPS - browser may reject');
@@ -188,7 +188,7 @@ export class AuthController {
       default: return value * 1000;
     }
   }
-  
+
   /**
    * Đăng ký tài khoản mới
    * @param registerDto - Thông tin đăng ký
@@ -196,13 +196,13 @@ export class AuthController {
    */
   @Post('register')
   @ApiOperation({ summary: 'Đăng ký tài khoản mới' })
-  @ApiResponse({ 
-    status: 201, 
-    description: 'Đăng ký thành công. Mã xác thực đã được gửi qua email.' 
+  @ApiResponse({
+    status: 201,
+    description: 'Đăng ký thành công. Mã xác thực đã được gửi qua email.'
   })
-  @ApiResponse({ 
-    status: 400, 
-    description: 'Dữ liệu không hợp lệ hoặc email đã tồn tại' 
+  @ApiResponse({
+    status: 400,
+    description: 'Dữ liệu không hợp lệ hoặc email đã tồn tại'
   })
   async register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
@@ -232,13 +232,13 @@ export class AuthController {
    */
   @Post('verify')
   @ApiOperation({ summary: 'Xác thực tài khoản' })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Xác thực thành công' 
+  @ApiResponse({
+    status: 200,
+    description: 'Xác thực thành công'
   })
-  @ApiResponse({ 
-    status: 400, 
-    description: 'Mã xác thực không hợp lệ hoặc tài khoản không tìm thấy' 
+  @ApiResponse({
+    status: 400,
+    description: 'Mã xác thực không hợp lệ hoặc tài khoản không tìm thấy'
   })
   async verify(@Body() verifyDto: VerifyAccountDto) {
     return this.authService.verify(verifyDto.email, verifyDto.verificationToken);
@@ -301,25 +301,25 @@ export class AuthController {
     description: 'Email hoặc mật khẩu không đúng',
   })
   async login(@Body() loginDto: LoginWithRememberDto, @Req() req: any, @Res() res: Response) {
-    const result = await this.authService.login({ 
-      ...loginDto, 
-      rememberMe: !!loginDto.rememberMe 
+    const result = await this.authService.login({
+      ...loginDto,
+      rememberMe: !!loginDto.rememberMe
     });
-    
+
     // Xác định loại client từ header
     const clientHeader = (req.headers['x-client-type'] as string) || '';
     const clientType: 'admin' | 'web' = clientHeader === 'admin' ? 'admin' : 'web';
 
     // Set authentication cookies (theo từng loại client)
     this.setAuthCookies(
-      res, 
-      result.accessToken, 
-      result.refreshToken, 
+      res,
+      result.accessToken,
+      result.refreshToken,
       !!loginDto.rememberMe,
       clientType,
       req,
     );
-    
+
     return res.status(HttpStatus.OK).json({ user: result.user });
   }
 
@@ -330,16 +330,35 @@ export class AuthController {
    */
   @Post('forgot-password')
   @ApiOperation({ summary: 'Quên mật khẩu' })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Mã đặt lại mật khẩu đã được gửi qua email' 
+  @ApiResponse({
+    status: 200,
+    description: 'Mã đặt lại mật khẩu đã được gửi qua email'
   })
-  @ApiResponse({ 
-    status: 400, 
-    description: 'Email không tồn tại' 
+  @ApiResponse({
+    status: 400,
+    description: 'Email không tồn tại'
   })
   async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
     return this.authService.forgotPassword(forgotPasswordDto.email);
+  }
+
+  /**
+   * Endpoint GET để redirect legacy link hoặc link từ backend về frontend
+   */
+  @Get('reset-password')
+  @ApiOperation({ summary: 'Redirect xác thực reset password (hỗ trợ legacy link)' })
+  @ApiQuery({ name: 'token', required: true })
+  @ApiQuery({ name: 'email', required: false })
+  async resetPasswordRedirect(
+    @Query('token') token: string,
+    @Query('email') email: string,
+    @Res() res: Response
+  ) {
+    const frontend = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const redirectUrl = email
+      ? `${frontend}/reset-password?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`
+      : `${frontend}/reset-password?token=${encodeURIComponent(token)}`;
+    return res.redirect(redirectUrl);
   }
 
   /**
@@ -349,13 +368,13 @@ export class AuthController {
    */
   @Post('reset-password')
   @ApiOperation({ summary: 'Đặt lại mật khẩu' })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Đặt lại mật khẩu thành công' 
+  @ApiResponse({
+    status: 200,
+    description: 'Đặt lại mật khẩu thành công'
   })
-  @ApiResponse({ 
-    status: 400, 
-    description: 'Mã xác thực không hợp lệ hoặc đã hết hạn' 
+  @ApiResponse({
+    status: 400,
+    description: 'Mã xác thực không hợp lệ hoặc đã hết hạn'
   })
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     return this.authService.resetPassword(resetPasswordDto);
@@ -365,29 +384,29 @@ export class AuthController {
   @Post('google')
   @ApiOperation({ summary: 'Đăng nhập bằng Google OAuth' })
   async authWithGoogle(
-    @Body() sign_in_token: SignInTokenDto & { rememberMe: boolean }, 
+    @Body() sign_in_token: SignInTokenDto & { rememberMe: boolean },
     @Req() req: any,
     @Res() res: Response
   ) {
     const result = await this.authService.authenticateWithGoogle(sign_in_token);
-    
+
     // Xác định loại client từ header
     const clientHeader = (req.headers['x-client-type'] as string) || '';
     const clientType: 'admin' | 'web' = clientHeader === 'admin' ? 'admin' : 'web';
 
     // Set authentication cookies
     this.setAuthCookies(
-      res, 
-      result.accessToken, 
-      result.refreshToken, 
+      res,
+      result.accessToken,
+      result.refreshToken,
       !!sign_in_token.rememberMe,
       clientType,
       req,  // Pass req để detect origin
     );
-    
-    return res.status(HttpStatus.OK).json({ 
-      user: result.user, 
-      message: 'Đăng nhập Google thành công' 
+
+    return res.status(HttpStatus.OK).json({
+      user: result.user,
+      message: 'Đăng nhập Google thành công'
     });
   }
 
@@ -397,7 +416,7 @@ export class AuthController {
   @UseGuards(JwtRefreshTokenGuard)
   async refreshToken(@Req() req: any, @Res() res: Response) {
     const { userId, email, role } = req.user;
-    
+
     // Tạo token mới
     const newAccessToken = this.authService.generateAccessToken({ userId, email, role });
     const newRefreshToken = this.authService.generateRefreshToken({ userId, email, role });
@@ -419,36 +438,36 @@ export class AuthController {
     } else {
       clientType = 'web';
     }
-    
+
     // Set lại cookies với cùng pattern & đúng loại client
     this.setAuthCookies(res, newAccessToken, newRefreshToken, hasRefreshToken, clientType, req);
 
-    return res.status(HttpStatus.OK).json({ 
-      message: 'Token refreshed successfully' 
+    return res.status(HttpStatus.OK).json({
+      message: 'Token refreshed successfully'
     });
   }
 
   // Kiểm tra session hiện tại có hợp lệ không
   @Get('validate')
   @ApiOperation({ summary: 'Kiểm tra session có hợp lệ không' })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Session hợp lệ, trả về thông tin user' 
+  @ApiResponse({
+    status: 200,
+    description: 'Session hợp lệ, trả về thông tin user'
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token không hợp lệ hoặc đã hết hạn' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token không hợp lệ hoặc đã hết hạn'
   })
   @UseGuards(JwtAccessTokenGuard)
   async validateSession(@Req() req: any) {
     // Nếu đến đây, JWT guard đã verify token thành công
     // Lấy thông tin user đầy đủ từ database
     const user = await this.authService.getUserById(req.user.userId);
-    
+
     if (!user) {
       throw new BadRequestException('User not found');
     }
-    
+
     return {
       user: {
         _id: user._id,
@@ -477,9 +496,9 @@ export class AuthController {
     // Xóa cookies tương ứng với client hiện tại
     res.clearCookie(accessCookieName, { path: '/' });
     res.clearCookie(refreshCookieName, { path: '/' });
-    
-    return res.status(HttpStatus.OK).json({ 
-      message: 'Logged out successfully' 
+
+    return res.status(HttpStatus.OK).json({
+      message: 'Logged out successfully'
     });
   }
 
