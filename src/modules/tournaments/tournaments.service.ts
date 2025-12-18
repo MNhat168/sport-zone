@@ -118,52 +118,87 @@ export class TournamentService {
             throw new BadRequestException('Registration must end before tournament date');
         }
 
-        // Validate selected courts exist and are available
-        const selectedCourtIds = createTournamentDto.selectedCourtIds || createTournamentDto.selectedFieldIds;
-        const courts = await this.courtModel.find({
-            _id: { $in: selectedCourtIds.map(id => new Types.ObjectId(id)) },
-            isActive: true,
-        })
-            .populate({
-                path: 'field',
-                match: {
-                    sportType: createTournamentDto.sportType,
-                    isActive: true
-                },
-                select: 'name location basePrice sportType'
-            });
+        // Get selected IDs (can be either court IDs or field IDs)
+        const selectedIds = createTournamentDto.selectedCourtIds || createTournamentDto.selectedFieldIds || [];
 
-        if (courts.length !== selectedCourtIds.length) {
-            throw new BadRequestException('Some selected courts are not available');
-        }
+        // Calculate total cost from frontend data (trust the frontend calculation)
+        const totalCostFromDto = createTournamentDto.totalCourtCost || createTournamentDto.totalFieldCost || 0;
 
-        // Calculate total court cost
+        // Calculate times
         const startTime = createTournamentDto.startTime;
         const endTime = createTournamentDto.endTime;
 
-        let totalCourtCost = 0;
-
-        // Create court reservations
+        let totalCourtCost = totalCostFromDto;
         const courtReservations: InstanceType<typeof this.reservationModel>[] = [];
+        let courts: any[] = [];
+        let fields: any[] = [];
 
-        for (const court of courts) {
-            const cost = this.calculateCourtCost(court, tournamentDate, startTime, endTime);
-            totalCourtCost += cost;
+        // Only validate and create reservations if IDs are provided
+        if (selectedIds.length > 0) {
+            // First, try to find as courts
+            courts = await this.courtModel.find({
+                _id: { $in: selectedIds.map(id => new Types.ObjectId(id)) },
+                isActive: true,
+            })
+                .populate({
+                    path: 'field',
+                    match: {
+                        sportType: createTournamentDto.sportType,
+                        isActive: true
+                    },
+                    select: 'name location basePrice sportType'
+                });
 
-            // Create temporary reservation for court
-            const reservation = new this.reservationModel({
-                tournament: null, // Will be set after tournament creation
-                court: court._id,
-                field: court.field?._id,
-                date: tournamentDate,
-                startTime,
-                endTime,
-                estimatedCost: cost,
-                status: ReservationStatus.PENDING,
-                expiresAt: new Date(tournamentDate.getTime() - 48 * 60 * 60 * 1000), // 48 hours before tournament
-            });
+            // If not found as courts, try as fields
+            if (courts.length === 0) {
+                this.logger.log('No courts found with provided IDs, trying as field IDs...');
+                fields = await this.fieldModel.find({
+                    _id: { $in: selectedIds.map(id => new Types.ObjectId(id)) },
+                    sportType: createTournamentDto.sportType,
+                    isActive: true,
+                });
 
-            courtReservations.push(reservation);
+                if (fields.length > 0) {
+                    this.logger.log(`Found ${fields.length} fields with provided IDs`);
+                    // Calculate cost from fields if not provided
+                    if (totalCourtCost === 0) {
+                        for (const field of fields) {
+                            const cost = this.calculateFieldCost(field, tournamentDate, startTime, endTime);
+                            totalCourtCost += cost;
+                        }
+                    }
+                } else {
+                    this.logger.warn('No courts or fields found with provided IDs, creating tournament without reservations');
+                }
+            } else {
+                this.logger.log(`Found ${courts.length} courts with provided IDs`);
+                // Calculate cost from courts if not provided
+                if (totalCourtCost === 0) {
+                    for (const court of courts) {
+                        const cost = this.calculateCourtCost(court, tournamentDate, startTime, endTime);
+                        totalCourtCost += cost;
+                    }
+                }
+
+                // Create court reservations
+                for (const court of courts) {
+                    const cost = this.calculateCourtCost(court, tournamentDate, startTime, endTime);
+
+                    const reservation = new this.reservationModel({
+                        tournament: null,
+                        court: court._id,
+                        field: court.field?._id,
+                        date: tournamentDate,
+                        startTime,
+                        endTime,
+                        estimatedCost: cost,
+                        status: ReservationStatus.PENDING,
+                        expiresAt: new Date(tournamentDate.getTime() - 48 * 60 * 60 * 1000),
+                    });
+
+                    courtReservations.push(reservation);
+                }
+            }
         }
 
         const maxParticipants = createTournamentDto.numberOfTeams * teamSize;
@@ -172,20 +207,20 @@ export class TournamentService {
         // Calculate confirmation deadline (48 hours before tournament)
         const confirmationDeadline = new Date(tournamentDate.getTime() - 48 * 60 * 60 * 1000);
 
-        // Create tournament with court information
+        // Create tournament
         const tournament = new this.tournamentModel({
             ...createTournamentDto,
             organizer: new Types.ObjectId(userId),
             status: TournamentStatus.PENDING,
             totalCourtCost,
-            totalFieldCost: totalCourtCost, // Keep backward compatibility
+            totalFieldCost: totalCourtCost,
             confirmationDeadline,
             commissionRate: 0.1,
             participants: [],
-            courts: [], // Initialize courts array
-            fields: [], // Keep for backward compatibility
+            courts: [],
+            fields: [],
             courtsNeeded: courtsNeeded,
-            fieldsNeeded: courtsNeeded, // Keep backward compatibility
+            fieldsNeeded: courtsNeeded,
             numberOfTeams: createTournamentDto.numberOfTeams,
             teamSize: teamSize,
             maxParticipants: maxParticipants,
@@ -194,12 +229,11 @@ export class TournamentService {
 
         await tournament.save();
 
-        // Save reservations and link to tournament
+        // Save court reservations and link to tournament (if any)
         for (const reservation of courtReservations) {
             reservation.tournament = tournament._id as Types.ObjectId;
             await reservation.save();
 
-            // Find the court for this reservation
             const court = courts.find(c => (c._id as Types.ObjectId).equals(reservation.court));
 
             tournament.courts.push({
@@ -208,13 +242,20 @@ export class TournamentService {
                 reservation: reservation._id as Types.ObjectId,
             });
 
-            // Also add to fields array for backward compatibility
             if (court?.field) {
                 tournament.fields.push({
                     field: court.field._id as Types.ObjectId,
                     reservation: reservation._id as Types.ObjectId,
                 });
             }
+        }
+
+        // If fields were found (not courts), add them to the tournament
+        for (const field of fields) {
+            tournament.fields.push({
+                field: field._id as Types.ObjectId,
+                reservation: null as any, // No reservation for field-only mode
+            });
         }
 
         await tournament.save();
@@ -1118,6 +1159,21 @@ export class TournamentService {
         }
 
         return (endTotalMinutes - startTotalMinutes) / 60;
+    }
+
+    private calculateFieldCost(field: any, date: Date, startTime: string, endTime: string): number {
+        // Calculate hours from start to end time
+        const hours = this.calculateHours(startTime, endTime);
+
+        // Get base price from field
+        const basePrice = field.basePrice || 100000;
+
+        // Apply any date-based pricing (weekend/holiday multipliers)
+        const dayOfWeek = date.getDay();
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+        const multiplier = isWeekend ? 1.2 : 1.0;
+
+        return Math.round(basePrice * hours * multiplier);
     }
 
     async findAll(filters: any) {
