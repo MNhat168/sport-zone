@@ -12,4 +12,5 @@ export class CoachesDto {
     bio: string;
     rating: number;
     totalReviews: number;
+    rank?: string;
 }
