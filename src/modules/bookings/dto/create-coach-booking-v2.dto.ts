@@ -1,4 +1,4 @@
-import { IsString, IsDateString, IsOptional, MaxLength, IsEmail, ValidateIf } from 'class-validator';
+import { IsString, IsDateString, IsOptional, MaxLength, IsEmail } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -11,7 +11,7 @@ export class CreateCoachBookingV2Dto {
    * ID của sân thể thao (tùy chọn)
    * @example "507f1f77bcf86cd799439011"
    */
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     example: '507f1f77bcf86cd799439011',
     description: 'ID của sân thể thao (tùy chọn)'
   })
@@ -23,7 +23,7 @@ export class CreateCoachBookingV2Dto {
    * ID của coach
    * @example "507f1f77bcf86cd799439012"
    */
-  @ApiProperty({ 
+  @ApiProperty({
     example: '507f1f77bcf86cd799439012',
     description: 'ID của coach'
   })
@@ -34,7 +34,7 @@ export class CreateCoachBookingV2Dto {
    * Ngày đặt (YYYY-MM-DD)
    * @example "2025-10-15"
    */
-  @ApiProperty({ 
+  @ApiProperty({
     example: '2025-10-15',
     description: 'Ngày đặt (YYYY-MM-DD)'
   })
@@ -45,7 +45,7 @@ export class CreateCoachBookingV2Dto {
    * Thời gian bắt đầu (HH:MM)
    * @example "09:00"
    */
-  @ApiProperty({ 
+  @ApiProperty({
     example: '09:00',
     description: 'Thời gian bắt đầu (HH:MM)'
   })
@@ -56,7 +56,7 @@ export class CreateCoachBookingV2Dto {
    * Thời gian kết thúc (HH:MM)
    * @example "11:00"
    */
-  @ApiProperty({ 
+  @ApiProperty({
     example: '11:00',
     description: 'Thời gian kết thúc (HH:MM)'
   })
@@ -75,13 +75,14 @@ export class CreateCoachBookingV2Dto {
 
   /**
    * Email của khách hàng (bắt buộc nếu không có userId từ authentication)
+   * Controller sẽ kiểm tra required - DTO chỉ validate format nếu có giá trị
    * @example "guest@example.com"
    */
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     example: 'guest@example.com',
     description: 'Email của khách hàng (bắt buộc nếu không đăng nhập)'
   })
-  @ValidateIf((o) => !o.userId) // Required if no userId
+  @IsOptional()
   @IsEmail({}, { message: 'Email không hợp lệ' })
   guestEmail?: string;
 
@@ -89,7 +90,7 @@ export class CreateCoachBookingV2Dto {
    * Số điện thoại của khách hàng (tùy chọn)
    * @example "0123456789"
    */
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     example: '0123456789',
     description: 'Số điện thoại của khách hàng (10 chữ số)'
   })
@@ -102,7 +103,7 @@ export class CreateCoachBookingV2Dto {
    * Tên của khách hàng (tùy chọn)
    * @example "Nguyễn Văn A"
    */
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     example: 'Nguyễn Văn A',
     description: 'Tên của khách hàng'
   })

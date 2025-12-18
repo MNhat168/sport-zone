@@ -21,6 +21,7 @@ import { ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { GetAllUsersDto } from './dto/get-all-users.dto';
 import { GetAllUsersResponseDto } from './dto/get-all-users-response.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 // import { UserProfileDto } from './dtos/user-profile.dto';
 import { UserRepository } from '@modules/users/repositories/user.repository';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
