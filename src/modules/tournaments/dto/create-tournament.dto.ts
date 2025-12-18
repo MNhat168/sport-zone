@@ -1,11 +1,11 @@
-import { 
-  IsString, 
-  IsEnum, 
-  IsNumber, 
-  IsDateString, 
-  Min, 
-  Max, 
-  IsArray, 
+import {
+  IsString,
+  IsEnum,
+  IsNumber,
+  IsDateString,
+  Min,
+  Max,
+  IsArray,
   IsOptional,
   ValidateNested,
   Matches,
@@ -94,31 +94,34 @@ export class CreateTournamentDto {
   @IsString()
   description: string;
 
-  @ApiProperty({ description: 'Number of courts needed' })
+  @ApiPropertyOptional({ description: 'Number of courts needed (use courtsNeeded or fieldsNeeded)' })
+  @IsOptional()
   @IsNumber()
   @Min(1)
-  courtsNeeded: number = 1;
+  courtsNeeded?: number;
 
-  @ApiProperty({ 
-    description: 'Selected court IDs', 
+  @ApiPropertyOptional({
+    description: 'Selected court IDs (use selectedCourtIds or selectedFieldIds)',
     type: [String],
     example: ['courtId1', 'courtId2']
   })
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  selectedCourtIds: string[];
+  selectedCourtIds?: string[];
 
-  @ApiProperty({ description: 'Total cost for all courts' })
+  @ApiPropertyOptional({ description: 'Total cost for all courts (use totalCourtCost or totalFieldCost)' })
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  totalCourtCost: number;
+  totalCourtCost?: number;
 
   @ApiPropertyOptional({ description: 'Tournament rules and regulations' })
   @IsOptional()
   @IsString()
   rules?: string;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'Tournament images',
     type: [String],
     example: ['image1.jpg', 'image2.jpg']
@@ -129,7 +132,7 @@ export class CreateTournamentDto {
   images?: string[];
 
   // Backward compatibility fields (deprecated but kept for migration)
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'Number of fields needed (deprecated, use courtsNeeded instead)',
     deprecated: true
   })
@@ -138,7 +141,7 @@ export class CreateTournamentDto {
   @Min(1)
   fieldsNeeded?: number;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'Selected field IDs (deprecated, use selectedCourtIds instead)',
     type: [String],
     deprecated: true
@@ -148,7 +151,7 @@ export class CreateTournamentDto {
   @IsString({ each: true })
   selectedFieldIds?: string[];
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'Total field cost (deprecated, use totalCourtCost instead)',
     deprecated: true
   })
@@ -297,7 +300,7 @@ export class UpdateTournamentDto {
   @IsString()
   rules?: string;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'Tournament images',
     type: [String]
   })
@@ -324,7 +327,7 @@ export class UpdateTournamentDto {
   @Matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
   endTime?: string;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'Selected court IDs',
     type: [String]
   })
@@ -359,17 +362,17 @@ export class CourtDtoHelpers {
    */
   static calculateHours(startTime: string, endTime: string): number {
     if (!startTime || !endTime) return 0;
-    
+
     const [startHour, startMin] = startTime.split(':').map(Number);
     const [endHour, endMin] = endTime.split(':').map(Number);
-    
+
     const startTotalMinutes = startHour * 60 + startMin;
     const endTotalMinutes = endHour * 60 + endMin;
-    
+
     if (endTotalMinutes <= startTotalMinutes) {
       throw new Error('End time must be after start time');
     }
-    
+
     return (endTotalMinutes - startTotalMinutes) / 60;
   }
 
@@ -377,26 +380,26 @@ export class CourtDtoHelpers {
    * Validates court selection against sport requirements
    */
   static validateCourtSelection(
-    sportType: SportType, 
-    selectedCourtIds: string[], 
+    sportType: SportType,
+    selectedCourtIds: string[],
     courtsNeeded: number
   ): { isValid: boolean; errors?: string[] } {
     const errors: string[] = [];
-    
+
     if (!selectedCourtIds || selectedCourtIds.length === 0) {
       errors.push('At least one court must be selected');
     }
-    
+
     if (selectedCourtIds.length !== courtsNeeded) {
       errors.push(`Number of selected courts (${selectedCourtIds.length}) must match courts needed (${courtsNeeded})`);
     }
-    
+
     // Check for duplicate court selections
     const uniqueCourtIds = new Set(selectedCourtIds);
     if (uniqueCourtIds.size !== selectedCourtIds.length) {
       errors.push('Duplicate courts selected');
     }
-    
+
     return {
       isValid: errors.length === 0,
       errors: errors.length > 0 ? errors : undefined
@@ -420,7 +423,7 @@ export class CourtDtoHelpers {
     const dayOfWeek = tournamentDate.getDay();
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     const weekendMultiplier = isWeekend ? 1.2 : 1.0;
-    
+
     return courts.reduce((total, court) => {
       const basePrice = court.pricingOverride?.basePrice || court.field?.basePrice || 100000;
       const courtCost = basePrice * hours * weekendMultiplier;
@@ -467,14 +470,14 @@ export class CourtDtoHelpers {
     requestedEndTime: string
   ): { isAvailable: boolean; conflicts?: Array<{ start: string; end: string }> } {
     const conflicts: Array<{ start: string; end: string }> = [];
-    
+
     for (const reservation of existingReservations) {
       if (reservation.status !== 'cancelled' && reservation.status !== 'released') {
         const resStart = this.timeToMinutes(reservation.startTime);
         const resEnd = this.timeToMinutes(reservation.endTime);
         const reqStart = this.timeToMinutes(requestedStartTime);
         const reqEnd = this.timeToMinutes(requestedEndTime);
-        
+
         // Check for overlap
         if (reqStart < resEnd && reqEnd > resStart) {
           conflicts.push({
@@ -484,7 +487,7 @@ export class CourtDtoHelpers {
         }
       }
     }
-    
+
     return {
       isAvailable: conflicts.length === 0,
       conflicts: conflicts.length > 0 ? conflicts : undefined

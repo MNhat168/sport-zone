@@ -465,7 +465,7 @@ export class CleanupService {
       throw new Error(`Cannot extend transaction ${paymentId}`);
     }
 
-    // ✅ CRITICAL: Use getCurrentVietnamTimeForDB() to match how createdAt is stored (UTC+8)
+    // ✅ CRITICAL: Use getCurrentVietnamTimeForDB() to match how createdAt is stored (UTC+7)
     const nowVN = getCurrentVietnamTimeForDB();
     const extensions = ((payment as any).metadata?.extensions || 0) + 1;
     const totalExtendedMinutes = ((payment as any).metadata?.totalExtendedMinutes || 0) + additionalMinutes;
@@ -514,12 +514,12 @@ export class CleanupService {
 
     const metadata = (payment as any).metadata || {};
 
-    // If payment has been extended, use extended expiration time (stored in UTC+8)
+    // If payment has been extended, use extended expiration time (stored in UTC+7)
     if (metadata.extendedExpirationTime) {
       return new Date(metadata.extendedExpirationTime);
     }
 
-    // Otherwise, use original expiration (createdAt + 5 minutes in UTC+8 timezone)
+    // Otherwise, use original expiration (createdAt + 5 minutes in UTC+7 timezone)
     const createdAtVN = new Date(payment.createdAt);
     const originalExpirationUTC8 = new Date(createdAtVN);
     originalExpirationUTC8.setMinutes(
