@@ -109,6 +109,7 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'Favourite sports cleared' })
   async removeAllFavouriteSports(@Request() req) {
     const userEmail = req.user.email;
+    const user = await this.usersService.findByEmail(userEmail);
     if (!user) {
       throw new BadRequestException('User not found');
     }
