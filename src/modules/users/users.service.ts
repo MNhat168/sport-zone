@@ -229,6 +229,26 @@ export class UsersService {
     return user;
   }
 
+  /**
+   * Remove all favourite sports for the current user
+   * @param email - user email
+   * @returns updated user document
+   */
+  async removeAllFavouriteSports(email: string) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (!Array.isArray(user.favouriteSports) || user.favouriteSports.length === 0) {
+      throw new BadRequestException('No favourite sports to remove');
+    }
+
+    user.favouriteSports = [];
+    await user.save();
+    return user;
+  }
+
   async removeFavouriteFields(email: string, fieldIds: string[]) {
     const user = await this.userModel.findOne({ email });
     if (!user) {
