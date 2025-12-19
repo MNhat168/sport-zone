@@ -15,6 +15,13 @@ export class LessonTypesService {
 	}
 
 	/**
+	 * Get a lesson type by id. Returns the raw document (may contain ObjectId refs).
+	 */
+	async getLessonTypeById(id: string): Promise<LessonType | null> {
+		return this.lessonTypeModel.findById(id).lean().exec();
+	}
+
+	/**
 	 * Delete a lesson type by id. Ensures the requesting user owns the lesson type.
 	 */
 	async deleteLessonType(id: string, userId: string): Promise<void> {
