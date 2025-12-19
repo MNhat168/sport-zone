@@ -131,7 +131,11 @@ export class UsersService {
     );
 
     if (newSports.length === 0) {
-      throw new BadRequestException('All favourite sports already set');
+      // Nothing to add - make this operation idempotent by returning the current user
+      // instead of treating it as an error. This avoids forcing callers to special-case
+      // duplicate submissions and prevents client-side flows (like the favorite-sports
+      // modal) from misbehaving when the selection hasn't changed.
+      return user;
     }
 
     user.favouriteSports.push(...newSports);
