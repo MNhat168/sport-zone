@@ -1588,6 +1588,20 @@ export class BookingsService {
     return this.sessionBookingService.declineCoachRequest(coachId, bookingId, reason);
   }
 
+  async completeCoachBooking(
+    coachId: string,
+    bookingId: string,
+  ): Promise<Booking> {
+    return this.sessionBookingService.completeCoachBooking(coachId, bookingId);
+  }
+
+  async cancelCoachBooking(
+    coachId: string,
+    bookingId: string,
+  ): Promise<Booking> {
+    return this.sessionBookingService.cancelCoachBooking(coachId, bookingId);
+  }
+
   async getByRequestedCoachId(coachId: string): Promise<Booking[]> {
     return this.sessionBookingService.getByRequestedCoachId(coachId);
   }

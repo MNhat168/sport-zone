@@ -528,5 +528,86 @@ export class CleanupService {
     return originalExpirationUTC8;
   }
 
+  @Cron(CronExpression.EVERY_10_MINUTES, {
+    name: 'auto-cancel-pending-coach-bookings',
+  })
+  async autoCancelPendingCoachBookings(): Promise<void> {
+    const nowVN = getCurrentVietnamTimeForDB()
+
+    try {
+      const pendingCoachBookings = await this.bookingModel.find({
+        type: 'coach',
+        coachStatus: 'pending',
+      })
+
+      for (const booking of pendingCoachBookings) {
+        const shouldCancel = this.shouldAutoCancelCoachBooking(booking, nowVN)
+
+        if (!shouldCancel) {
+          continue
+        }
+
+        await this.bookingModel.findByIdAndUpdate(
+          booking._id,
+          {
+            coachStatus: 'declined',
+            cancellationReason:
+              'Automatically cancelled due to no coach response within allowed time',
+          }
+        )
+
+        this.eventEmitter.emit('coach.booking.autoCancelled', {
+          bookingId: booking.id.toString(),
+          userId: booking.user.toString(),
+          coachId: booking.requestedCoach?.toString(),
+          date: booking.date,
+          startTime: booking.startTime,
+          cancelledAt: nowVN,
+        })
+      }
+    } catch (error) {
+      this.logger.error(
+        '[Coach Auto-Cancel] Error auto-cancelling pending coach bookings:',
+        error
+      )
+    }
+  }
+
+  private getBookingStartDateTime(booking: Booking): Date {
+    const [hour, minute] = booking.startTime.split(':').map(Number)
+    const start = new Date(booking.date)
+    start.setHours(hour, minute, 0, 0)
+    return start
+  }
+
+  private shouldAutoCancelCoachBooking(
+    booking: Booking,
+    nowVN: Date
+  ): boolean {
+    if (
+      booking.type !== 'coach' ||
+      booking.coachStatus !== 'pending'
+    ) {
+      return false
+    }
+
+    const startDateTime = this.getBookingStartDateTime(booking)
+
+    const createdAt = new Date(booking.createdAt)
+
+    const isSameDay =
+      createdAt.toDateString() === startDateTime.toDateString()
+
+    const diffMs = startDateTime.getTime() - nowVN.getTime()
+
+    // Same-day → 5 minutes
+    if (isSameDay) {
+      return diffMs <= 5 * 60 * 1000
+    }
+
+    // Previous-day → 4 hours
+    return diffMs <= 4 * 60 * 60 * 1000
+  }
+
 }
 
