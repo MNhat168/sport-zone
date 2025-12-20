@@ -41,6 +41,11 @@ export class ReviewsService {
 
     let bookingId = data.booking;
 
+    // Normalize empty bookingId to undefined to avoid storing empty strings
+    if (typeof bookingId === 'string' && bookingId.trim() === '') {
+      bookingId = undefined as any;
+    }
+
     // If bookingId is not provided, try to auto-attach the latest booking for this user and coach
     if (!bookingId) {
       const latestBooking = await this.bookingModel.findOne({
@@ -81,7 +86,7 @@ export class ReviewsService {
           {
             user: data.user,
             coach: data.coach,
-            booking: bookingId,
+            ...(bookingId ? { booking: bookingId } : {}),
             type: ReviewType.COACH,
             rating: data.rating,
             comment: trimmedComment,

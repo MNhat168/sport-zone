@@ -64,6 +64,7 @@ export class CoachesService {
           isVerified: user.isVerified,
           sports: profile.sports,
           certification: profile.certification,
+          rank: profile.rank ?? undefined,
           hourlyRate: profile.hourlyRate,
           bio: profile.bio,
           rating: profile.rating,
@@ -90,6 +91,7 @@ export class CoachesService {
     return result.map(({ location, ...coach }) => coach); // Remove location from final result
   }
 
+
   async getAllCoaches(): Promise<any[]> {
     const users = await this.userModel.find({ role: UserRole.COACH }).lean();
     const profiles = await this.coachProfileModel
@@ -110,6 +112,7 @@ export class CoachesService {
         rating: profile?.rating ?? 0,
         totalReviews: profile?.totalReviews ?? 0, // TODO: fetch recent reviews
         price: profile?.hourlyRate ?? 0,
+        rank: profile?.rank ?? undefined,
         nextAvailability: null, // TODO: fetch next available slot
       };
     });
@@ -163,16 +166,18 @@ export class CoachesService {
       locationData: profile?.location && typeof profile.location === 'object' 
         ? profile.location 
         : null, // Return full location object with geo coordinates
-      level: profile?.certification ?? '',
+      level: profile?.rank ?? profile?.certification ?? '',
       completedSessions: profile?.completedSessions ?? 0,
       memberSince: (profile as any)?.createdAt ?? '',
       availableSlots,
       lessonTypes,
       price: profile?.hourlyRate ?? 0,
+      sports: profile?.sports ?? [],
       rank: profile?.rank ?? 'novice',
       coachingDetails: {
         experience: profile?.experience ?? '',
         certification: profile?.certification ?? '',
+        sports: profile?.sports ?? [],
       },
       bankAccount: bankAccount ? {
         accountName: bankAccount.accountName,
@@ -181,6 +186,27 @@ export class CoachesService {
         qrCodeUrl: bankAccount.qrCodeUrl,
       } : null,
     };
+  }
+
+  async updateCoach(id: string, payload: Partial<any>): Promise<any> {
+    // Validate coach user exists
+    const user = await this.userModel.findOne({ _id: id, role: UserRole.COACH });
+    if (!user) throw new NotFoundException('Coach not found');
+
+    // Update coach profile
+    const profileUpdates: any = {};
+    if (payload.bio !== undefined) profileUpdates.bio = payload.bio;
+    if (payload.sports !== undefined) profileUpdates.sports = payload.sports;
+    if (payload.certification !== undefined) profileUpdates.certification = payload.certification;
+    if (payload.rank !== undefined) profileUpdates.rank = payload.rank;
+    if (payload.experience !== undefined) profileUpdates.experience = payload.experience;
+
+    if (Object.keys(profileUpdates).length > 0) {
+      await this.coachProfileModel.updateOne({ user: user._id }, { $set: profileUpdates }).exec();
+    }
+
+    // Return updated record
+    return this.getCoachById(id);
   }
 
   /**

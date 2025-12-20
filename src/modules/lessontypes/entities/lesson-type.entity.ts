@@ -13,6 +13,12 @@ export class LessonType extends Document {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   user: Types.ObjectId;
   
+  @Prop({ type: Types.ObjectId, ref: 'Field', required: true })
+  field: Types.ObjectId;
+  
+  @Prop({ required: true, type: Number })
+  lessonPrice: number;
+  
   @Prop({ required: true })
   type: string; // e.g. 'single', 'pair', 'group'
 

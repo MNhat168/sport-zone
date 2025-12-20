@@ -104,6 +104,24 @@ export class UsersController {
   }
 
   @UseGuards(JwtAccessTokenGuard)
+  @Delete('favourite-sports')
+  @ApiOperation({ summary: 'Remove all favourite sports for current user' })
+  @ApiResponse({ status: 200, description: 'Favourite sports cleared' })
+  async removeAllFavouriteSports(@Request() req) {
+    const userEmail = req.user.email;
+    const user = await this.usersService.findByEmail(userEmail);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (user.role !== UserRole.USER) {
+      throw new BadRequestException('Only users with role USER can remove favourite sports');
+    }
+
+    return this.usersService.removeAllFavouriteSports(userEmail);
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
   @Post('favourite-coaches')
   async setFavouriteCoaches(
     @Request() req,

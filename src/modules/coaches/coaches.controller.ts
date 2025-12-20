@@ -1,7 +1,9 @@
-import { Controller, Get, Param, Query, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Param, Query, BadRequestException, Put, Body, NotFoundException } from '@nestjs/common';
 import { CoachesService } from './coaches.service';
 import { CoachesDto } from './dtos/coaches.dto';
 import { SportType } from 'src/common/enums/sport-type.enum';
+import { UpdateCoachDto } from './dtos/update-coach.dto';
+import { ApiOperation, ApiResponse } from '@nestjs/swagger';
 
 @Controller('coaches')
 export class CoachesController {
@@ -32,6 +34,16 @@ export class CoachesController {
   @Get(':id')
   async getCoachById(@Param('id') coachId: string): Promise<CoachesDto> {
     return this.coachesService.getCoachById(coachId);
+  }
+
+  @Put(':id')
+  @ApiOperation({ summary: 'Update coach information' })
+  @ApiResponse({ status: 200, description: 'Coach updated successfully' })
+  async updateCoach(@Param('id') coachId: string, @Body() body: UpdateCoachDto): Promise<any> {
+    // Delegates to service
+    const updated = await this.coachesService.updateCoach(coachId, body);
+    if (!updated) throw new NotFoundException('Coach not found');
+    return updated;
   }
 
   // GET /coaches/:id/bank-account

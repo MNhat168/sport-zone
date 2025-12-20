@@ -131,7 +131,11 @@ export class UsersService {
     );
 
     if (newSports.length === 0) {
-      throw new BadRequestException('All favourite sports already set');
+      // Nothing to add - make this operation idempotent by returning the current user
+      // instead of treating it as an error. This avoids forcing callers to special-case
+      // duplicate submissions and prevents client-side flows (like the favorite-sports
+      // modal) from misbehaving when the selection hasn't changed.
+      return user;
     }
 
     user.favouriteSports.push(...newSports);
@@ -221,6 +225,26 @@ export class UsersService {
       throw new BadRequestException('None of the provided coach IDs were in favourites');
     }
 
+    await user.save();
+    return user;
+  }
+
+  /**
+   * Remove all favourite sports for the current user
+   * @param email - user email
+   * @returns updated user document
+   */
+  async removeAllFavouriteSports(email: string) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (!Array.isArray(user.favouriteSports) || user.favouriteSports.length === 0) {
+      throw new BadRequestException('No favourite sports to remove');
+    }
+
+    user.favouriteSports = [];
     await user.save();
     return user;
   }
