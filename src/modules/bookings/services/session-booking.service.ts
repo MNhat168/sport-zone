@@ -24,7 +24,7 @@ export class SessionBookingService {
     private readonly eventEmitter: EventEmitter2,
     private readonly coachesService: CoachesService,
     private readonly fieldsService: FieldsService,
-  ) {}
+  ) { }
 
   /**
    * Get bookings by requested coach ID
@@ -65,7 +65,7 @@ export class SessionBookingService {
     if (!booking) {
       throw new NotFoundException('Booking not found or not assigned to this coach');
     }
-    
+
     if (booking.coachStatus !== 'pending') {
       throw new BadRequestException('Booking already responded');
     }
@@ -236,5 +236,113 @@ export class SessionBookingService {
     await coachBooking.save();
 
     return { fieldBooking, coachBooking };
+  }
+
+  //complete a booking 
+  async completeCoachBooking(
+    coachId: string,
+    bookingId: string,
+  ): Promise<Booking> {
+    if (!coachId || !Types.ObjectId.isValid(coachId)) {
+      throw new BadRequestException(
+        `Invalid coach ID format: "${coachId}".`,
+      );
+    }
+
+    if (!bookingId || !Types.ObjectId.isValid(bookingId)) {
+      throw new BadRequestException(
+        `Invalid booking ID format: "${bookingId}".`,
+      );
+    }
+
+    const booking = await this.bookingModel.findOne({
+      _id: new Types.ObjectId(bookingId),
+      requestedCoach: new Types.ObjectId(coachId),
+    });
+
+    if (!booking) {
+      throw new NotFoundException(
+        'Booking not found or not assigned to this coach',
+      );
+    }
+
+    if (booking.coachStatus !== 'accepted') {
+      throw new BadRequestException(
+        'Only accepted bookings can be completed',
+      );
+    }
+
+    if (booking.status === BookingStatus.COMPLETED) {
+      throw new BadRequestException('Booking already completed');
+    }
+
+    try {
+      booking.status = BookingStatus.COMPLETED;
+      await booking.save();
+    } catch (err) {
+      this.logger.error(
+        `Failed to complete booking ${bookingId}`,
+        err,
+      );
+      throw new InternalServerErrorException(
+        'Failed to complete booking',
+      );
+    }
+
+    return booking;
+  }
+
+  //cancel booking request
+  async cancelCoachBooking(
+    coachId: string,
+    bookingId: string,
+  ): Promise<Booking> {
+    if (!coachId || !Types.ObjectId.isValid(coachId)) {
+      throw new BadRequestException(
+        `Invalid coach ID format: "${coachId}".`,
+      );
+    }
+
+    if (!bookingId || !Types.ObjectId.isValid(bookingId)) {
+      throw new BadRequestException(
+        `Invalid booking ID format: "${bookingId}".`,
+      );
+    }
+
+    const booking = await this.bookingModel.findOne({
+      _id: new Types.ObjectId(bookingId),
+      requestedCoach: new Types.ObjectId(coachId),
+    });
+
+    if (!booking) {
+      throw new NotFoundException(
+        'Booking not found or not assigned to this coach',
+      );
+    }
+
+    if (booking.coachStatus !== 'accepted') {
+      throw new BadRequestException(
+        'Only accepted bookings can be cancelled',
+      );
+    }
+
+    if (booking.status === BookingStatus.CANCELLED) {
+      throw new BadRequestException('Booking already cancelled');
+    }
+
+    try {
+      booking.status = BookingStatus.CANCELLED;
+      await booking.save();
+    } catch (err) {
+      this.logger.error(
+        `Failed to cancel booking ${bookingId}`,
+        err,
+      );
+      throw new InternalServerErrorException(
+        'Failed to cancel booking',
+      );
+    }
+
+    return booking;
   }
 }
