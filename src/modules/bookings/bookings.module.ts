@@ -28,6 +28,11 @@ import { FieldBookingService } from './services/field-booking.service';
 import { SessionBookingService } from './services/session-booking.service';
 import { PaymentHandlerService } from './services/payment-handler.service';
 import { BookingEmailService } from './services/booking-email.service';
+import { CoachBookingService } from './services/coach-booking.service';
+import { OwnerBookingService } from './services/owner-booking.service';
+import { BookingQueryService } from './services/booking-query.service';
+import { BookingCancellationService } from './services/booking-cancellation.service';
+import { PaymentProofService } from './services/payment-proof.service';
 
 /**
  * Bookings Module with Pure Lazy Creation pattern
@@ -68,6 +73,11 @@ import { BookingEmailService } from './services/booking-email.service';
     SessionBookingService,
     PaymentHandlerService,
     BookingEmailService,
+    CoachBookingService,
+    OwnerBookingService,
+    BookingQueryService,
+    BookingCancellationService,
+    PaymentProofService,
   ],
   exports: [
     BookingsService,
