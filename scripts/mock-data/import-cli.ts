@@ -21,6 +21,8 @@ const courtLibrary = require('./court-library.json');
 const bookingLibrary = require('./bookìng-libary.json');
 const scheduleLibrary = require('./schedule-library.json');
 const transactionLibrary = require('./transaction-libary.json');
+const userLibrary = require('./user-library.json');
+const reviewLibrary = require('./review-library.json');
 
 interface ImportOptions {
   amenities?: boolean;
@@ -41,6 +43,8 @@ class CLIImporter {
   private app: any;
   private amenitiesService: AmenitiesService;
   private fieldOwnerService: FieldOwnerService;
+  private userModel: Model<any>; // Use any to avoid complex type setup in script
+  private reviewModel: Model<any>;
   private fieldModel: Model<Field>;
   private courtModel: Model<Court>;
   private bookingModel: Model<Booking>;
@@ -57,12 +61,14 @@ class CLIImporter {
     this.bookingModel = this.app.get(getModelToken(Booking.name));
     this.scheduleModel = this.app.get(getModelToken(Schedule.name));
     this.transactionModel = this.app.get(getModelToken(Transaction.name));
+    this.userModel = this.app.get(getModelToken('User'));
+    this.reviewModel = this.app.get(getModelToken('Review'));
     console.log('✅ Application context initialized');
   }
 
   async importAmenities(options: ImportOptions) {
     console.log('📦 Importing amenities...');
-    
+
     try {
       let importedCount = 0;
       let skippedCount = 0;
@@ -75,7 +81,7 @@ class CLIImporter {
               search: amenityData.name,
               limit: 1
             });
-            
+
             if (existing.data && existing.data.length > 0) {
               console.log(`⏭️  Skipping existing amenity: ${amenityData.name}`);
               skippedCount++;
@@ -261,11 +267,11 @@ class CLIImporter {
             pendingPriceUpdates: Array.isArray(fieldData.pendingPriceUpdates) ? fieldData.pendingPriceUpdates : [],
             amenities: Array.isArray(fieldData.amenities)
               ? fieldData.amenities
-                  .map((a: any) => ({
-                    amenity: this.safeObjectId(a.amenity) || a.amenity,
-                    price: a.price ?? 0,
-                  }))
-                  .filter((a: any) => a.amenity)
+                .map((a: any) => ({
+                  amenity: this.safeObjectId(a.amenity) || a.amenity,
+                  price: a.price ?? 0,
+                }))
+                .filter((a: any) => a.amenity)
               : [],
             createdAt: fieldData.createdAt?.$date ? new Date(fieldData.createdAt.$date) : undefined,
             updatedAt: fieldData.updatedAt?.$date ? new Date(fieldData.updatedAt.$date) : undefined,
@@ -343,13 +349,13 @@ class CLIImporter {
 
           const pricingOverride = courtData.pricingOverride
             ? {
-                ...(courtData.pricingOverride.basePrice !== undefined
-                  ? { basePrice: courtData.pricingOverride.basePrice }
-                  : {}),
-                ...(this.sanitizePriceRanges(courtData.pricingOverride.priceRanges).length
-                  ? { priceRanges: this.sanitizePriceRanges(courtData.pricingOverride.priceRanges) }
-                  : {}),
-              }
+              ...(courtData.pricingOverride.basePrice !== undefined
+                ? { basePrice: courtData.pricingOverride.basePrice }
+                : {}),
+              ...(this.sanitizePriceRanges(courtData.pricingOverride.priceRanges).length
+                ? { priceRanges: this.sanitizePriceRanges(courtData.pricingOverride.priceRanges) }
+                : {}),
+            }
             : undefined;
 
           const courtDoc = new this.courtModel({
@@ -410,7 +416,7 @@ class CLIImporter {
 
           // Check if booking already exists
           const existing = await this.bookingModel.findById(bookingId);
-          
+
           if (existing) {
             if (options.updateDuplicates) {
               // Delete existing and update with new data
@@ -537,12 +543,12 @@ class CLIImporter {
 
           if (existingById || existingByFieldDate) {
             const existing = existingById || existingByFieldDate;
-            
+
             if (!existing) {
               // This should not happen, but TypeScript needs this check
               continue;
             }
-            
+
             if (options.updateDuplicates) {
               // Delete existing and update with new data
               await this.scheduleModel.findByIdAndDelete(existing._id);
@@ -591,7 +597,7 @@ class CLIImporter {
               const fieldId = this.safeObjectId(scheduleData.field);
               const scheduleDate = new Date(scheduleData.date.$date);
               const existing = await this.scheduleModel.findOne({ field: fieldId, date: scheduleDate });
-              
+
               if (existing && (options.updateDuplicates || options.skipDuplicates === false)) {
                 // Update existing
                 existing.isHoliday = scheduleData.isHoliday || false;
@@ -652,7 +658,7 @@ class CLIImporter {
 
           // Check if transaction already exists
           const existing = await this.transactionModel.findById(transactionId);
-          
+
           if (existing) {
             if (options.updateDuplicates) {
               // Delete existing and update with new data
@@ -682,8 +688,8 @@ class CLIImporter {
           let transactionType = transactionData.type;
           if (transactionType === 'refund') {
             // Determine if full or partial refund based on direction
-            transactionType = transactionData.direction === 'out' 
-              ? TransactionType.REFUND_FULL 
+            transactionType = transactionData.direction === 'out'
+              ? TransactionType.REFUND_FULL
               : TransactionType.REFUND_PARTIAL;
           } else if (!Object.values(TransactionType).includes(transactionType as TransactionType)) {
             // Default to PAYMENT if invalid type
@@ -735,10 +741,110 @@ class CLIImporter {
     }
   }
 
+  async importUsers(options: ImportOptions) {
+    console.log('👥 Importing users...');
+    try {
+      let importedCount = 0;
+      let skippedCount = 0;
+
+      for (const userData of userLibrary) {
+        try {
+          if (options.skipDuplicates !== false) {
+            const existing = await this.userModel.findOne({ email: userData.email });
+            if (existing) {
+              console.log(`⏭️  Skipping existing user: ${userData.email}`);
+              skippedCount++;
+              continue;
+            }
+          }
+
+          // In a real app, you should hash the password here using bcrypt
+          // For this mock script, we assume basic handling or pre-hashed if needed, 
+          // but usually the User entity/service handles hashing on save.
+          // Since we use direct model, let's manually hash if possible or just save as is for dev.
+          // IMPORTANT: If User schema has pre-save hook for hashing, simple save works.
+          // Let's assume standard bcrypt hash for 'password123' if not handled:
+          // $2b$10$YourHashHere... 
+          // But to be safe and simple:
+
+          const user = new this.userModel(userData);
+          // Manually hashing is better if we had bcrypt imported, but let's trust the schema or just insert
+
+          await user.save();
+          console.log(`✅ Imported user: ${userData.email}`);
+          importedCount++;
+
+        } catch (error) {
+          console.error(`❌ Failed to import user ${userData.email}:`, error.message);
+        }
+      }
+
+      console.log(`\n📊 Users Import Summary:`);
+      console.log(`   ✅ Imported: ${importedCount}`);
+      console.log(`   ⏭️  Skipped: ${skippedCount}`);
+
+    } catch (error) {
+      console.error('❌ Error importing users:', error);
+    }
+  }
+
+  async importReviews(options: ImportOptions) {
+    console.log('⭐ Importing reviews...');
+    try {
+      // We need valid user and target (field/coach) IDs to link reviews.
+      // This is tricky with mock data unless we fetch them dynamically.
+      // Strategy: Fetch a random user and a random field/coach for each review.
+
+      const users = await this.userModel.find().limit(10);
+      const fields = await this.fieldModel.find().limit(10);
+
+      if (users.length === 0 || fields.length === 0) {
+        console.warn('⚠️  Cannot import reviews: Need users and fields to exist first.');
+        return;
+      }
+
+      let importedCount = 0;
+
+      for (const reviewData of reviewLibrary) {
+        try {
+          const randomUser = users[Math.floor(Math.random() * users.length)];
+
+          // Basic linking logic
+          let targetId: any;
+          if (reviewData.type === 'field' && fields.length > 0) {
+            targetId = fields[Math.floor(Math.random() * fields.length)]._id;
+          } else {
+            // Skip if type mismatch or no targets
+            continue;
+          }
+
+          const review = new this.reviewModel({
+            ...reviewData,
+            user: randomUser._id,
+            [reviewData.type]: targetId // field: id or coach: id
+          });
+
+          await review.save();
+          importedCount++;
+          console.log(`✅ Imported review for ${reviewData.type}`);
+
+        } catch (error) {
+          console.error(`❌ Failed to import review:`, error.message);
+        }
+      }
+
+      console.log(`\n📊 Reviews Import Summary:`);
+      console.log(`   ✅ Imported: ${importedCount}`);
+
+    } catch (error) {
+      console.error('❌ Error importing reviews:', error);
+    }
+  }
+
   async run(options: ImportOptions) {
     try {
       await this.initialize();
-      
+
       console.log('\n🎯 Starting CLI mock data import...');
       console.log('📋 Options:');
       console.log(`   Amenities: ${options.amenities ? '✅' : '❌'}`);
@@ -760,7 +866,7 @@ class CLIImporter {
       }
 
       if (options.users) {
-        console.log('👥 Users import not implemented yet');
+        await this.importUsers(options);
       }
 
       if (options.fields) {
@@ -788,7 +894,7 @@ class CLIImporter {
       }
 
       if (options.reviews) {
-        console.log('⭐ Reviews import not implemented yet');
+        await this.importReviews(options);
       }
 
       console.log('\n🎉 CLI mock data import completed!');

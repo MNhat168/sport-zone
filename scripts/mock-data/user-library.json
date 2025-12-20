@@ -1,0 +1,38 @@
+[
+  {
+    "fullName": "Admin User",
+    "email": "admin@gmail.com",
+    "password": "1",
+    "role": "admin",
+    "isActive": true,
+    "isVerified": true,
+    "phone": "0900000001"
+  },
+  {
+    "fullName": "Field Owner",
+    "email": "owner@sportzone.com",
+    "password": "1",
+    "role": "field_owner",
+    "isActive": true,
+    "isVerified": true,
+    "phone": "0900000002"
+  },
+  {
+    "fullName": "John Doe",
+    "email": "exp@gmail.com",
+    "password": "1",
+    "role": "user",
+    "isActive": true,
+    "isVerified": true,
+    "phone": "0900000003"
+  },
+  {
+    "fullName": "Jane Smith",
+    "email": "abc@gmail.com",
+    "password": "abc",
+    "role": "coach",
+    "isActive": true,
+    "isVerified": true,
+    "phone": "0900000004"
+  }
+]

@@ -1,0 +1,20 @@
+[
+    {
+        "type": "field",
+        "rating": 5,
+        "comment": "Great field, very clean and well maintained!",
+        "isModerated": true
+    },
+    {
+        "type": "field",
+        "rating": 4,
+        "comment": "Good location but a bit expensive.",
+        "isModerated": true
+    },
+    {
+        "type": "coach",
+        "rating": 5,
+        "comment": "Excellent coach, improved my skills significantly.",
+        "isModerated": true
+    }
+]
