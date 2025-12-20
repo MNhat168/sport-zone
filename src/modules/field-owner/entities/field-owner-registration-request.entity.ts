@@ -29,9 +29,8 @@ export class FieldOwnerRegistrationRequest extends BaseEntity {
   // Business documents (e.g. business license). Identity docs are handled by eKYC.
   @Prop({
     type: {
-      businessLicense: { type: String, required: false },
+      businessLicense: { type: String },
     },
-    required: false,
     _id: false,
   })
   documents?: {
@@ -58,7 +57,6 @@ export class FieldOwnerRegistrationRequest extends BaseEntity {
       dateOfBirth: { type: String }, // Store as string or Date? User requirements said "dateOfBirth", often string from OCR. I'll use String for OCR data.
       expirationDate: { type: String },
     },
-    required: false,
     _id: false,
   })
   ekycData?: {
@@ -110,4 +108,3 @@ export const FieldOwnerRegistrationRequestSchema = SchemaFactory.createForClass(
 // Indexes
 FieldOwnerRegistrationRequestSchema.index({ userId: 1, status: 1 });
 FieldOwnerRegistrationRequestSchema.index({ status: 1, submittedAt: -1 });
-

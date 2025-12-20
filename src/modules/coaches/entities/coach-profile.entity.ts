@@ -40,20 +40,17 @@ export class CoachProfile extends BaseEntity {
   @Prop({
     _id: false,
     type: {
-      address: { type: String, required: false },
+      address: { type: String },
       geo: {
         type: {
           type: String,
           enum: ['Point'],
-          required: false,
         },
         coordinates: {
           type: [Number],
-          required: false,
         },
       },
     },
-    required: false,
   })
   location?: {
     address?: string;
@@ -67,7 +64,7 @@ export class CoachProfile extends BaseEntity {
   @Prop({ type: Boolean, default: false })
   bankVerified?: boolean;
 
-  @Prop({ type: Date, required: false })
+  @Prop({ type: Date })
   bankVerifiedAt?: Date;
 }
 
