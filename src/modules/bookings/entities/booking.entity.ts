@@ -14,7 +14,7 @@ export class Booking extends BaseEntity {
 
   // Pure Lazy Creation: Remove schedule reference, use fieldId + date instead
   // Field is optional for coach bookings (can be null)
-  @Prop({ type: Types.ObjectId, ref: 'Field', required: false })
+  @Prop({ type: Types.ObjectId, ref: 'Field' })
   field?: Types.ObjectId;
 
   // Add date field for tracing and easier queries (replaces schedule dependency)
@@ -28,7 +28,7 @@ export class Booking extends BaseEntity {
   requestedCoach?: Types.ObjectId;
 
   // Specific court for field bookings (required for field bookings, optional for coach bookings)
-  @Prop({ type: Types.ObjectId, ref: 'Court', required: false })
+  @Prop({ type: Types.ObjectId, ref: 'Court' })
   court?: Types.ObjectId;
 
   @Prop({
@@ -65,10 +65,10 @@ export class Booking extends BaseEntity {
   /**
    * New, explicit status dimensions (Stage 1: fields only, no behavior change)
    */
-  @Prop({ type: String, enum: ['unpaid', 'paid', 'refunded'], required: false })
+  @Prop({ type: String, enum: ['unpaid', 'paid', 'refunded'] })
   paymentStatus?: 'unpaid' | 'paid' | 'refunded';
 
-  @Prop({ type: String, enum: ['pending', 'approved', 'rejected'], required: false })
+  @Prop({ type: String, enum: ['pending', 'approved', 'rejected'] })
   approvalStatus?: 'pending' | 'approved' | 'rejected';
 
   // New price structure: bookingAmount + platformFee = totalAmount
@@ -79,7 +79,7 @@ export class Booking extends BaseEntity {
   platformFee: number; // System/platform fee (5% of bookingAmount)
 
   // @deprecated Use bookingAmount + platformFee instead. Kept for backward compatibility
-  @Prop({ required: false, min: 0 })
+  @Prop({ min: 0 })
   totalPrice?: number;
 
   @Prop({ type: Types.ObjectId, ref: 'Transaction' })
@@ -152,13 +152,13 @@ BookingSchema.pre('save', function (next) {
       this.totalPrice = this.bookingAmount + this.platformFee;
     }
   }
-  
+
   // ✅ Cleanup: Only coach bookings should have coachStatus
   // Remove coachStatus from field bookings (type: BookingType.FIELD)
   if (this.type === BookingType.FIELD && this.coachStatus !== undefined) {
     this.coachStatus = undefined;
   }
-  
+
   next();
 });
 

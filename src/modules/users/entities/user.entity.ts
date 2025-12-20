@@ -13,13 +13,13 @@ export class User extends BaseEntity {
   @Prop({ required: true, unique: true })
   email: string;
 
-  @Prop({ required: false })
+  @Prop()
   phone: string;
 
-  @Prop({ required: false, type: Date })
+  @Prop({ type: Date })
   date_of_birth?: Date;
 
-  @Prop({ required: false })
+  @Prop()
   password: string;
 
   @Prop({ type: String, enum: UserRole, default: UserRole.USER })

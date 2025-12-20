@@ -14,6 +14,8 @@ import {
   LessonTypeSchema,
 } from 'src/modules/lessontypes/entities/lesson-type.entity';
 import { BankAccount, BankAccountSchema } from '../field-owner/entities/bank-account.entity';
+import { CoachRegistrationRequest, CoachRegistrationRequestSchema } from './entities/coach-registration-request.entity';
+import { EmailService } from 'src/modules/email/email.service';
 
 @Module({
   imports: [
@@ -23,10 +25,11 @@ import { BankAccount, BankAccountSchema } from '../field-owner/entities/bank-acc
       { name: Schedule.name, schema: ScheduleSchema },
       { name: LessonType.name, schema: LessonTypeSchema },
       { name: BankAccount.name, schema: BankAccountSchema },
+      { name: CoachRegistrationRequest.name, schema: CoachRegistrationRequestSchema },
     ]),
   ],
   controllers: [CoachesController],
-  providers: [CoachesService, CoachScheduleService],
+  providers: [CoachesService, CoachScheduleService, EmailService],
   exports: [CoachesService, CoachScheduleService],
 })
 export class CoachesModule { }

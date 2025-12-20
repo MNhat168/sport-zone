@@ -386,6 +386,40 @@ export class EmailService {
 		});
 	}
 
+	// ==================== Coach Registration Emails ====================
+
+	/**
+	 * Send email when coach registration is submitted
+	 */
+	async sendCoachRegistrationSubmitted(email: string, fullName: string) {
+		const template = await this.renderTemplate('coach-registration-submitted.hbs', {
+			fullName,
+		});
+
+		await this.sendMail({
+			to: email,
+			subject: 'Đã nhận đơn đăng ký Huấn Luyện Viên - SportZone',
+			html: template,
+		});
+	}
+
+	/**
+	 * Send email when coach registration is approved
+	 */
+	async sendCoachRegistrationApproved(email: string, fullName: string) {
+		const template = await this.renderTemplate('coach-registration-approved.hbs', {
+			fullName,
+		});
+
+		await this.sendMail({
+			to: email,
+			subject: 'Chúc mừng! Đơn đăng ký Huấn Luyện Viên đã được duyệt - SportZone',
+			html: template,
+		});
+	}
+
+	// ==================== Bank Account Emails ====================
+
 	/**
 	 * Send email when bank account is submitted
 	 */

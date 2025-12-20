@@ -4,11 +4,11 @@ import { BaseEntity } from 'src/common/entities/base.entity';
 
 @Schema()
 export class Schedule extends BaseEntity {
-  @Prop({ type: Types.ObjectId, ref: 'Field', required: false }) // Optional for coach schedules without field
+  @Prop({ type: Types.ObjectId, ref: 'Field' }) // Optional for coach schedules without field
   field?: Types.ObjectId;
 
   // Specific court for field schedules (required for field schedules, optional for coach schedules)
-  @Prop({ type: Types.ObjectId, ref: 'Court', required: false })
+  @Prop({ type: Types.ObjectId, ref: 'Court' })
   court?: Types.ObjectId;
 
   @Prop({ type: Types.ObjectId, ref: 'CoachProfile' })
