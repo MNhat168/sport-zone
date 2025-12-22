@@ -9,7 +9,7 @@ export class JwtAccessTokenGuard extends AuthGuard('jwt') {
 	constructor(private reflector: Reflector) {
 		super();
 	}
-	
+
 	canActivate(
 		context: ExecutionContext,
 	): boolean | Promise<boolean> | Observable<boolean> {
@@ -18,11 +18,11 @@ export class JwtAccessTokenGuard extends AuthGuard('jwt') {
 			context.getHandler(),
 			context.getClass(),
 		]);
-		
+
 		if (isPublic) {
 			return true;
 		}
-		
+
 		// Debug: Log request info để kiểm tra cookie
 		console.log('🔍 [JwtAccessTokenGuard] Request:', {
 			path: req.path,
@@ -31,7 +31,7 @@ export class JwtAccessTokenGuard extends AuthGuard('jwt') {
 			hasCookies: !!req.cookies && Object.keys(req.cookies).length > 0,
 			cookieHeader: req.headers?.cookie ? 'exists' : 'missing',
 		});
-		
+
 		return super.canActivate(context);
 	}
 
@@ -46,7 +46,7 @@ export class JwtAccessTokenGuard extends AuthGuard('jwt') {
 					statusCode: 401
 				});
 			}
-			
+
 			// Check if token is invalid
 			if (info && info.name === 'JsonWebTokenError') {
 				throw new UnauthorizedException({
@@ -55,7 +55,7 @@ export class JwtAccessTokenGuard extends AuthGuard('jwt') {
 					statusCode: 401
 				});
 			}
-			
+
 			// Check if no token provided
 			if (info && info.message === 'No auth token') {
 				throw new UnauthorizedException({
@@ -64,7 +64,7 @@ export class JwtAccessTokenGuard extends AuthGuard('jwt') {
 					statusCode: 401
 				});
 			}
-			
+
 			// Generic authentication error
 			throw new UnauthorizedException({
 				message: 'Xác thực thất bại. Vui lòng đăng nhập lại.',
@@ -72,7 +72,7 @@ export class JwtAccessTokenGuard extends AuthGuard('jwt') {
 				statusCode: 401
 			});
 		}
-		
+
 		return user;
 	}
 }

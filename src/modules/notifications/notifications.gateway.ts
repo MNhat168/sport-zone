@@ -10,7 +10,17 @@ import { Injectable, Logger } from '@nestjs/common';
 @Injectable()
 @WebSocketGateway({
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      const allowedPatterns = [
+        /^https:\/\/sport-zone-fe-deploy\.vercel\.app$/,
+        /^https:\/\/.*\.vercel\.app$/,
+        /^http:\/\/localhost:\d+$/,
+      ];
+      const isAllowed = allowedPatterns.some(pattern => pattern.test(origin));
+      if (isAllowed) return callback(null, true);
+      return callback(new Error('Not allowed by WebSocket CORS'));
+    },
     credentials: true,
   },
   namespace: '/notifications',

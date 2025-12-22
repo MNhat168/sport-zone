@@ -91,6 +91,39 @@ export class ChatService {
     return populatedChat;
   }
 
+  // Resolve FieldOwnerProfile ID -> owning User ID (string)
+  async getFieldOwnerUserId(fieldOwnerProfileId: string): Promise<string | null> {
+    try {
+      if (!fieldOwnerProfileId || !Types.ObjectId.isValid(fieldOwnerProfileId)) {
+        return null;
+      }
+      const profile = await this.fieldOwnerProfileModel
+        .findById(fieldOwnerProfileId)
+        .select('user')
+        .lean();
+      // profile?.user may be ObjectId; normalize to string
+      // @ts-ignore
+      return profile?.user ? profile.user.toString() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Resolve User ID -> FieldOwnerProfile ID (string)
+  private async getFieldOwnerProfileIdByUser(userId: string): Promise<string | null> {
+    try {
+      if (!userId || !Types.ObjectId.isValid(userId)) return null;
+      const profile = await this.fieldOwnerProfileModel
+        .findOne({ user: new Types.ObjectId(userId) })
+        .select('_id')
+        .lean();
+      // @ts-ignore
+      return profile?._id ? profile._id.toString() : null;
+    } catch {
+      return null;
+    }
+  }
+
   // Modified to accept room creation if it doesn't exist
   async sendMessageWithAutoCreate(
     userId: string,
@@ -126,11 +159,15 @@ export class ChatService {
     const chatRoom = await this.chatModel.findById(chatRoomId);
     if (!chatRoom) throw new NotFoundException('Chat room not found');
 
-    // Verify sender is either user or field owner
-    if (
-      chatRoom.user.toString() !== senderId &&
-      chatRoom.fieldOwner.toString() !== senderId
-    ) {
+    // Verify sender is either the customer (user) or the owning field owner (map user -> field owner profile)
+    let isParticipant = chatRoom.user.toString() === senderId;
+    if (!isParticipant) {
+      const ownerProfileId = await this.getFieldOwnerProfileIdByUser(senderId);
+      if (ownerProfileId && chatRoom.fieldOwner.toString() === ownerProfileId) {
+        isParticipant = true;
+      }
+    }
+    if (!isParticipant) {
       throw new ForbiddenException('You are not a participant in this chat');
     }
 
@@ -169,45 +206,45 @@ export class ChatService {
       .exec();
   }
 
-// In chat.service.ts, update getChatRoomsForFieldOwner:
-async getChatRoomsForFieldOwner(fieldOwnerUserId: string): Promise<ChatRoom[]> {
+  // In chat.service.ts, update getChatRoomsForFieldOwner:
+  async getChatRoomsForFieldOwner(fieldOwnerUserId: string): Promise<ChatRoom[]> {
     // First, find the field owner profile linked to this user
     const fieldOwnerProfile = await this.fieldOwnerProfileModel.findOne({
-        user: new Types.ObjectId(fieldOwnerUserId)
+      user: new Types.ObjectId(fieldOwnerUserId)
     });
 
     if (!fieldOwnerProfile) {
-        // If no profile found, try to find by ID directly
-        // Check if the ID is already a field owner profile ID
-        const existingProfile = await this.fieldOwnerProfileModel.findById(fieldOwnerUserId);
-        if (existingProfile) {
-            // Use it directly
-            return this.chatModel
-                .find({
-                    fieldOwner: existingProfile._id,
-                    status: ChatStatus.ACTIVE,
-                })
-                .populate('user', 'fullName avatarUrl phone')
-                .populate('fieldOwner', 'facilityName contactPhone')
-                .populate('field', 'name images sportType')
-                .sort({ lastMessageAt: -1 })
-                .exec();
-        }
-        throw new NotFoundException('Field owner profile not found');
+      // If no profile found, try to find by ID directly
+      // Check if the ID is already a field owner profile ID
+      const existingProfile = await this.fieldOwnerProfileModel.findById(fieldOwnerUserId);
+      if (existingProfile) {
+        // Use it directly
+        return this.chatModel
+          .find({
+            fieldOwner: existingProfile._id,
+            status: ChatStatus.ACTIVE,
+          })
+          .populate('user', 'fullName avatarUrl phone')
+          .populate('fieldOwner', 'facilityName contactPhone')
+          .populate('field', 'name images sportType')
+          .sort({ lastMessageAt: -1 })
+          .exec();
+      }
+      throw new NotFoundException('Field owner profile not found');
     }
 
     // Use the field owner profile ID to find chat rooms
     return this.chatModel
-        .find({
-            fieldOwner: fieldOwnerProfile._id,
-            status: ChatStatus.ACTIVE,
-        })
-        .populate('user', 'fullName avatarUrl phone')
-        .populate('fieldOwner', 'facilityName contactPhone')
-        .populate('field', 'name images sportType')
-        .sort({ lastMessageAt: -1 })
-        .exec();
-}
+      .find({
+        fieldOwner: fieldOwnerProfile._id,
+        status: ChatStatus.ACTIVE,
+      })
+      .populate('user', 'fullName avatarUrl phone')
+      .populate('fieldOwner', 'facilityName contactPhone')
+      .populate('field', 'name images sportType')
+      .sort({ lastMessageAt: -1 })
+      .exec();
+  }
 
   async getChatRoomMessages(chatRoomId: string, userId: string): Promise<ChatRoom> {
     // Validate IDs
@@ -228,11 +265,15 @@ async getChatRoomsForFieldOwner(fieldOwnerUserId: string): Promise<ChatRoom[]> {
 
     if (!chatRoom) throw new NotFoundException('Chat room not found');
 
-    // Verify access
-    if (
-      chatRoom.user._id.toString() !== userId &&
-      chatRoom.fieldOwner._id.toString() !== userId
-    ) {
+    // Verify access: allow room user OR owning field owner user
+    const ownerProfileId = await this.getFieldOwnerProfileIdByUser(userId);
+    const chatOwnerId = (chatRoom.fieldOwner as any)?._id
+      ? (chatRoom.fieldOwner as any)._id.toString()
+      : (chatRoom.fieldOwner as any).toString();
+    const isParticipant =
+      chatRoom.user._id.toString() === userId ||
+      (!!ownerProfileId && chatOwnerId === ownerProfileId);
+    if (!isParticipant) {
       throw new ForbiddenException('Access denied');
     }
 
@@ -291,11 +332,12 @@ async getChatRoomsForFieldOwner(fieldOwnerUserId: string): Promise<ChatRoom[]> {
     const chatRoom = await this.chatModel.findById(chatRoomId);
     if (!chatRoom) throw new NotFoundException('Chat room not found');
 
-    // Verify user is part of the chat
-    if (
-      chatRoom.user.toString() !== userId &&
-      chatRoom.fieldOwner.toString() !== userId
-    ) {
+    // Verify user is part of the chat (either room user or owning field owner)
+    const ownerProfileId = await this.getFieldOwnerProfileIdByUser(userId);
+    const isParticipant =
+      chatRoom.user.toString() === userId ||
+      (!!ownerProfileId && chatRoom.fieldOwner.toString() === ownerProfileId);
+    if (!isParticipant) {
       throw new ForbiddenException('Access denied');
     }
 
