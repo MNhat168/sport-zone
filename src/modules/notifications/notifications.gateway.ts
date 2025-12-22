@@ -66,10 +66,7 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
   }
 
   emitToUser(userId: string, payload: any) {
-    const socketId = this.userSocketMap.get(userId);
-    if (!socketId) return;
-
-    this.server.to(socketId).emit('notification', payload);
+    this.server.to(`user:${userId}`).emit('notification', payload);
   }
 }
 

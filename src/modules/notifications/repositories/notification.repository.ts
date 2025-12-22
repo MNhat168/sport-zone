@@ -10,7 +10,7 @@ export class NotificationRepository implements NotificationRepositoryInterface {
     constructor(
         @InjectModel(Notification.name)
         private readonly notificationModel: Model<NotificationDocument>,
-    ) {}
+    ) { }
 
     async findAll(): Promise<Notification[]> {
         return this.notificationModel.find().exec();
@@ -31,6 +31,10 @@ export class NotificationRepository implements NotificationRepositoryInterface {
 
     async update(id: string, data: Partial<Notification>): Promise<Notification | null> {
         return this.notificationModel.findByIdAndUpdate(id, data, { new: true }).exec();
+    }
+
+    async updateMany(condition: FilterQuery<Notification>, data: Partial<Notification>): Promise<any> {
+        return this.notificationModel.updateMany(condition, data).exec();
     }
 
     async delete(id: string): Promise<Notification | null> {
