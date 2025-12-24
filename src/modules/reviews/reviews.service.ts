@@ -139,6 +139,7 @@ export class ReviewsService {
     if (data.rating < 1 || data.rating > 5) {
       throw new BadRequestException('Rating must be between 1 and 5');
     }
+
     // Trim comment before validation
     const trimmedComment = data.comment ? data.comment.trim() : '';
     if (!trimmedComment) {
@@ -183,65 +184,94 @@ export class ReviewsService {
       }
     }
 
-    const review = new this.reviewModel({
-      user: data.user,
-      field: data.field,
-      booking: bookingId && bookingId.trim() !== '' ? bookingId : undefined,
-      type: ReviewType.FIELD,
-      rating: data.rating,
-      comment: trimmedComment,
-      title: data.title?.trim(),
-    });
-    await review.save();
-    // Update aggregated stats for the field after creating the review
+    // Use a transaction to create review and update field stats atomically
+    const session: ClientSession = await this.reviewModel.db.startSession();
+    session.startTransaction();
     try {
-      await this.recomputeFieldStats(data.field);
+      const created = await this.reviewModel.create(
+        [
+          {
+            user: data.user,
+            field: data.field,
+            ...(bookingId && bookingId.trim() !== '' ? { booking: bookingId } : {}),
+            type: ReviewType.FIELD,
+            rating: data.rating,
+            comment: trimmedComment,
+            title: data.title?.trim(),
+          },
+        ],
+        { session },
+      );
+
+      // Update field aggregated counters and rating inside the transaction
+      if (data.field) {
+        const fieldDoc: any = await this.fieldModel.findById(data.field).session(session).exec();
+        if (fieldDoc) {
+          const oldCount = (fieldDoc.totalReviews ?? 0);
+          const oldAvg = (fieldDoc.rating ?? 0);
+          const newCount = oldCount + 1;
+          const newAvg = (oldAvg * oldCount + data.rating) / newCount;
+
+          await this.fieldModel.findByIdAndUpdate(
+            data.field,
+            {
+              $inc: { totalReviews: 1 },
+              $set: { rating: newAvg },
+            },
+            { session },
+          ).exec();
+        }
+      }
+
+      await session.commitTransaction();
+      session.endSession();
+      return created[0];
     } catch (err) {
-      // Don't block the review creation on stats update; log silently
-      console.error('Failed to update field stats after review create', err);
+      await session.abortTransaction();
+      session.endSession();
+      throw err;
     }
-    return review;
   }
 
-  // Respond to review service *
-  async respondToReview(data: {
-    reviewId: string;
-    userId: string;
-    userRole: string;
-    response: string;
-  }) {
-    // Find review
-    const review = await this.reviewModel.findById(data.reviewId);
-    if (!review) {
-      throw new BadRequestException('Review not found');
-    }
-    // Only coach can respond to coach review, only field_owner to field review
-    if (review.type === ReviewType.COACH) {
-      if (
-        data.userRole !== 'coach' ||
-        String(review.coach) !== String(data.userId)
-      ) {
-        throw new BadRequestException(
-          'You are not authorized to respond to this coach review',
-        );
-      }
-    } else if (review.type === ReviewType.FIELD) {
-      if (
-        data.userRole !== 'field_owner' ||
-        String(review.field) !== String(data.userId)
-      ) {
-        throw new BadRequestException(
-          'You are not authorized to respond to this field review',
-        );
-      }
-    } else {
-      throw new BadRequestException('Invalid review type');
-    }
-    // Save response
-    review.response = data.response;
-    await review.save();
-    return review;
-  }
+  // // Respond to review service *
+  // async respondToReview(data: {
+  //   reviewId: string;
+  //   userId: string;
+  //   userRole: string;
+  //   response: string;
+  // }) {
+  //   // Find review
+  //   const review = await this.reviewModel.findById(data.reviewId);
+  //   if (!review) {
+  //     throw new BadRequestException('Review not found');
+  //   }
+  //   // Only coach can respond to coach review, only field_owner to field review
+  //   if (review.type === ReviewType.COACH) {
+  //     if (
+  //       data.userRole !== 'coach' ||
+  //       String(review.coach) !== String(data.userId)
+  //     ) {
+  //       throw new BadRequestException(
+  //         'You are not authorized to respond to this coach review',
+  //       );
+  //     }
+  //   } else if (review.type === ReviewType.FIELD) {
+  //     if (
+  //       data.userRole !== 'field_owner' ||
+  //       String(review.field) !== String(data.userId)
+  //     ) {
+  //       throw new BadRequestException(
+  //         'You are not authorized to respond to this field review',
+  //       );
+  //     }
+  //   } else {
+  //     throw new BadRequestException('Invalid review type');
+  //   }
+  //   // Save response
+  //   review.response = data.response;
+  //   await review.save();
+  //   return review;
+  // }
 
   // // Moderate review service (admin only) *
   // async moderateReview(data: { reviewId: string; isModerated: boolean }) {
@@ -376,8 +406,9 @@ export class ReviewsService {
       throw new BadRequestException('Invalid coachId');
     }
 
+    // Match reviews where `coach` may be stored as an ObjectId or as a string
     const agg = await this.reviewModel.aggregate([
-      { $match: { coach: objectId, type: ReviewType.COACH } },
+      { $match: { type: ReviewType.COACH, $or: [{ coach: objectId }, { coach: coachId }] } },
       { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } },
     ]).exec();
 
