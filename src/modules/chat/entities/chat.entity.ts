@@ -34,8 +34,11 @@ export class ChatRoom extends BaseEntity {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   user: Types.ObjectId; // Customer
 
-  @Prop({ type: Types.ObjectId, ref: 'FieldOwnerProfile', required: true })
-  fieldOwner: Types.ObjectId; // Field owner
+  @Prop({ type: Types.ObjectId, ref: 'FieldOwnerProfile', required: false })
+  fieldOwner?: Types.ObjectId; // Field owner (optional for coach chats)
+
+  @Prop({ type: Types.ObjectId, ref: 'CoachProfile', required: false })
+  coach?: Types.ObjectId; // Coach participant (optional)
 
   @Prop({ type: Types.ObjectId, ref: 'Field' })
   field?: Types.ObjectId; // Related field (optional)
@@ -60,7 +63,17 @@ export class ChatRoom extends BaseEntity {
 }
 
 export const ChatRoomSchema = SchemaFactory.createForClass(ChatRoom);
-ChatRoomSchema.index({ user: 1, fieldOwner: 1, field: 1 }, { unique: true });
+// Unique constraints per chat type with partial filters
+ChatRoomSchema.index(
+  { user: 1, fieldOwner: 1, field: 1 },
+  { unique: true, partialFilterExpression: { fieldOwner: { $exists: true } } }
+);
+ChatRoomSchema.index(
+  { user: 1, coach: 1 },
+  { unique: true, partialFilterExpression: { coach: { $exists: true } } }
+);
+// Common indices
 ChatRoomSchema.index({ lastMessageAt: -1 });
 ChatRoomSchema.index({ user: 1, status: 1 });
-ChatRoomSchema.index({ fieldOwner: 1, status: 1 });
+ChatRoomSchema.index({ fieldOwner: 1, status: 1 }, { partialFilterExpression: { fieldOwner: { $exists: true } } });
+ChatRoomSchema.index({ coach: 1, status: 1 }, { partialFilterExpression: { coach: { $exists: true } } });
