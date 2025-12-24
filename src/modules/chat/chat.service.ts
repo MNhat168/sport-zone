@@ -6,6 +6,7 @@ import { ChatStatus, MessageType } from '@common/enums/chat.enum';
 import { User } from '../users/entities/user.entity';
 import { FieldOwnerProfile } from '../field-owner/entities/field-owner-profile.entity';
 import { Field } from '../fields/entities/field.entity';
+import { CoachProfile } from '../coaches/entities/coach-profile.entity';
 
 @Injectable()
 export class ChatService {
@@ -14,6 +15,7 @@ export class ChatService {
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(FieldOwnerProfile.name) private fieldOwnerProfileModel: Model<FieldOwnerProfile>,
     @InjectModel(Field.name) private fieldModel: Model<Field>,
+    @InjectModel(CoachProfile.name) private coachProfileModel: Model<CoachProfile>,
   ) { }
 
   async createOrGetChatRoom(
@@ -91,6 +93,62 @@ export class ChatService {
     return populatedChat;
   }
 
+  async createOrGetCoachChatRoom(
+    userId: string,
+    coachId: string,
+    fieldId?: string,
+  ): Promise<ChatRoom> {
+    // Validate user
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    // Validate coach profile
+    const coach = await this.coachProfileModel.findById(coachId);
+    if (!coach) throw new NotFoundException('Coach not found');
+
+    // Optional validate field exists if provided
+    if (fieldId) {
+      const field = await this.fieldModel.findById(fieldId);
+      if (!field) throw new NotFoundException('Field not found');
+    }
+
+    const query: any = {
+      user: new Types.ObjectId(userId),
+      coach: new Types.ObjectId(coachId),
+      status: ChatStatus.ACTIVE,
+    };
+
+    // For coach chat, field is optional context; do not enforce uniqueness by field
+    const existingChat = await this.chatModel
+      .findOne(query)
+      .populate('user', 'fullName avatarUrl')
+      .populate('coach', 'hourlyRate')
+      .populate('field', 'name images sportType')
+      .exec();
+
+    if (existingChat) return existingChat;
+
+    const newChat = new this.chatModel({
+      user: new Types.ObjectId(userId),
+      coach: new Types.ObjectId(coachId),
+      field: fieldId ? new Types.ObjectId(fieldId) : undefined,
+      messages: [],
+      status: ChatStatus.ACTIVE,
+      lastMessageAt: new Date(),
+      hasUnread: false,
+    });
+
+    const saved = await newChat.save();
+    const populated = await this.chatModel
+      .findById(saved._id)
+      .populate('user', 'fullName avatarUrl')
+      .populate('coach', 'hourlyRate')
+      .populate('field', 'name images sportType')
+      .exec();
+    if (!populated) throw new NotFoundException('Chat room not found after creation');
+    return populated;
+  }
+
   // Resolve FieldOwnerProfile ID -> owning User ID (string)
   async getFieldOwnerUserId(fieldOwnerProfileId: string): Promise<string | null> {
     try {
@@ -109,11 +167,43 @@ export class ChatService {
     }
   }
 
+  // Resolve CoachProfile ID -> owning User ID (string)
+  async getCoachUserId(coachProfileId: string): Promise<string | null> {
+    try {
+      if (!coachProfileId || !Types.ObjectId.isValid(coachProfileId)) {
+        return null;
+      }
+      const profile = await this.coachProfileModel
+        .findById(coachProfileId)
+        .select('user')
+        .lean();
+      // @ts-ignore
+      return profile?.user ? profile.user.toString() : null;
+    } catch {
+      return null;
+    }
+  }
+
   // Resolve User ID -> FieldOwnerProfile ID (string)
   private async getFieldOwnerProfileIdByUser(userId: string): Promise<string | null> {
     try {
       if (!userId || !Types.ObjectId.isValid(userId)) return null;
       const profile = await this.fieldOwnerProfileModel
+        .findOne({ user: new Types.ObjectId(userId) })
+        .select('_id')
+        .lean();
+      // @ts-ignore
+      return profile?._id ? profile._id.toString() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Resolve User ID -> CoachProfile ID (string)
+  private async getCoachProfileIdByUser(userId: string): Promise<string | null> {
+    try {
+      if (!userId || !Types.ObjectId.isValid(userId)) return null;
+      const profile = await this.coachProfileModel
         .findOne({ user: new Types.ObjectId(userId) })
         .select('_id')
         .lean();
@@ -159,11 +249,17 @@ export class ChatService {
     const chatRoom = await this.chatModel.findById(chatRoomId);
     if (!chatRoom) throw new NotFoundException('Chat room not found');
 
-    // Verify sender is either the customer (user) or the owning field owner (map user -> field owner profile)
+    // Verify sender is a participant: customer, field owner, or coach
     let isParticipant = chatRoom.user.toString() === senderId;
-    if (!isParticipant) {
+    if (!isParticipant && chatRoom.fieldOwner) {
       const ownerProfileId = await this.getFieldOwnerProfileIdByUser(senderId);
       if (ownerProfileId && chatRoom.fieldOwner.toString() === ownerProfileId) {
+        isParticipant = true;
+      }
+    }
+    if (!isParticipant && chatRoom.coach) {
+      const coachProfileId = await this.getCoachProfileIdByUser(senderId);
+      if (coachProfileId && chatRoom.coach.toString() === coachProfileId) {
         isParticipant = true;
       }
     }
@@ -183,7 +279,8 @@ export class ChatService {
     chatRoom.messages.push(newMessage);
     chatRoom.lastMessageAt = new Date();
     chatRoom.lastMessageBy = new Types.ObjectId(senderId);
-    chatRoom.hasUnread = chatRoom.user.toString() !== senderId; // Mark as unread for receiver
+    // Mark as unread for receiver: if sender is user, mark unread for owner/coach; if sender is owner/coach, mark unread for user
+    chatRoom.hasUnread = chatRoom.user.toString() !== senderId;
 
     await chatRoom.save();
 
@@ -246,6 +343,35 @@ export class ChatService {
       .exec();
   }
 
+  // Get chat rooms for coach (by coach user ID)
+  async getChatRoomsForCoach(coachUserId: string): Promise<ChatRoom[]> {
+    // Find coach profile linked to this user
+    const coachProfile = await this.coachProfileModel.findOne({ user: new Types.ObjectId(coachUserId) });
+
+    if (!coachProfile) {
+      // If no profile, try direct ID usage
+      const existingProfile = await this.coachProfileModel.findById(coachUserId);
+      if (existingProfile) {
+        return this.chatModel
+          .find({ coach: existingProfile._id, status: ChatStatus.ACTIVE })
+          .populate('user', 'fullName avatarUrl phone')
+          .populate('coach', 'hourlyRate')
+          .populate('field', 'name images sportType')
+          .sort({ lastMessageAt: -1 })
+          .exec();
+      }
+      throw new NotFoundException('Coach profile not found');
+    }
+
+    return this.chatModel
+      .find({ coach: coachProfile._id, status: ChatStatus.ACTIVE })
+      .populate('user', 'fullName avatarUrl phone')
+      .populate('coach', 'hourlyRate')
+      .populate('field', 'name images sportType')
+      .sort({ lastMessageAt: -1 })
+      .exec();
+  }
+
   async getChatRoomMessages(chatRoomId: string, userId: string): Promise<ChatRoom> {
     // Validate IDs
     if (!chatRoomId || !Types.ObjectId.isValid(chatRoomId)) {
@@ -260,6 +386,7 @@ export class ChatService {
       .findById(chatRoomId)
       .populate('user', 'fullName avatarUrl phone')
       .populate('fieldOwner', 'facilityName contactPhone')
+      .populate('coach', 'hourlyRate')
       .populate('field', 'name images sportType location')
       .exec();
 
@@ -267,12 +394,17 @@ export class ChatService {
 
     // Verify access: allow room user OR owning field owner user
     const ownerProfileId = await this.getFieldOwnerProfileIdByUser(userId);
-    const chatOwnerId = (chatRoom.fieldOwner as any)?._id
-      ? (chatRoom.fieldOwner as any)._id.toString()
-      : (chatRoom.fieldOwner as any).toString();
+    const coachProfileId = await this.getCoachProfileIdByUser(userId);
+    const chatOwnerId = chatRoom.fieldOwner
+      ? ((chatRoom.fieldOwner as any)?._id ? (chatRoom.fieldOwner as any)._id.toString() : (chatRoom.fieldOwner as any).toString())
+      : null;
+    const chatCoachId = chatRoom.coach
+      ? ((chatRoom.coach as any)?._id ? (chatRoom.coach as any)._id.toString() : (chatRoom.coach as any).toString())
+      : null;
     const isParticipant =
       chatRoom.user._id.toString() === userId ||
-      (!!ownerProfileId && chatOwnerId === ownerProfileId);
+      (!!ownerProfileId && !!chatOwnerId && chatOwnerId === ownerProfileId) ||
+      (!!coachProfileId && !!chatCoachId && chatCoachId === coachProfileId);
     if (!isParticipant) {
       throw new ForbiddenException('Access denied');
     }
@@ -334,9 +466,11 @@ export class ChatService {
 
     // Verify user is part of the chat (either room user or owning field owner)
     const ownerProfileId = await this.getFieldOwnerProfileIdByUser(userId);
+    const coachProfileId = await this.getCoachProfileIdByUser(userId);
     const isParticipant =
       chatRoom.user.toString() === userId ||
-      (!!ownerProfileId && chatRoom.fieldOwner.toString() === ownerProfileId);
+      (!!ownerProfileId && chatRoom.fieldOwner?.toString() === ownerProfileId) ||
+      (!!coachProfileId && chatRoom.coach?.toString() === coachProfileId);
     if (!isParticipant) {
       throw new ForbiddenException('Access denied');
     }
@@ -368,24 +502,31 @@ export class ChatService {
   }
 
   async getUnreadCount(userId: string): Promise<number> {
-    return this.chatModel.countDocuments({
-      $or: [
-        { user: new Types.ObjectId(userId), hasUnread: true },
-        { fieldOwner: new Types.ObjectId(userId), hasUnread: true },
-      ],
-      status: ChatStatus.ACTIVE,
-    });
+    // Include unread where current user is customer OR field owner user OR coach user
+    const ownerProfileId = await this.getFieldOwnerProfileIdByUser(userId);
+    const coachProfileId = await this.getCoachProfileIdByUser(userId);
+    const orFilters: any[] = [{ user: new Types.ObjectId(userId), hasUnread: true }];
+    if (ownerProfileId) {
+      orFilters.push({ fieldOwner: new Types.ObjectId(ownerProfileId), hasUnread: true });
+    }
+    if (coachProfileId) {
+      orFilters.push({ coach: new Types.ObjectId(coachProfileId), hasUnread: true });
+    }
+    return this.chatModel.countDocuments({ $or: orFilters, status: ChatStatus.ACTIVE });
   }
 
   async updateChatStatus(chatRoomId: string, userId: string, status: ChatStatus): Promise<void> {
     const chatRoom = await this.chatModel.findById(chatRoomId);
     if (!chatRoom) throw new NotFoundException('Chat room not found');
 
-    // Verify user is part of the chat
-    if (
-      chatRoom.user.toString() !== userId &&
-      chatRoom.fieldOwner.toString() !== userId
-    ) {
+    // Verify user is part of the chat (customer, field owner, or coach)
+    const ownerProfileId = await this.getFieldOwnerProfileIdByUser(userId);
+    const coachProfileId = await this.getCoachProfileIdByUser(userId);
+    const isParticipant =
+      chatRoom.user.toString() === userId ||
+      (!!ownerProfileId && chatRoom.fieldOwner?.toString() === ownerProfileId) ||
+      (!!coachProfileId && chatRoom.coach?.toString() === coachProfileId);
+    if (!isParticipant) {
       throw new ForbiddenException('Access denied');
     }
 
@@ -399,10 +540,12 @@ export class ChatService {
   async canAccessChat(chatRoomId: string, userId: string): Promise<boolean> {
     const chatRoom = await this.chatModel.findById(chatRoomId);
     if (!chatRoom) return false;
-
+    const ownerProfileId = await this.getFieldOwnerProfileIdByUser(userId);
+    const coachProfileId = await this.getCoachProfileIdByUser(userId);
     return (
       chatRoom.user.toString() === userId ||
-      chatRoom.fieldOwner.toString() === userId
+      (!!ownerProfileId && chatRoom.fieldOwner?.toString() === ownerProfileId) ||
+      (!!coachProfileId && chatRoom.coach?.toString() === coachProfileId)
     );
   }
 
@@ -457,11 +600,14 @@ export class ChatService {
     const chatRoom = await this.chatModel.findById(chatRoomId);
     if (!chatRoom) throw new NotFoundException('Chat room not found');
 
-    // Verify user is part of the chat
-    if (
-      chatRoom.user.toString() !== userId &&
-      chatRoom.fieldOwner.toString() !== userId
-    ) {
+    // Verify user is part of the chat (customer, field owner, or coach)
+    const ownerProfileId = await this.getFieldOwnerProfileIdByUser(userId);
+    const coachProfileId = await this.getCoachProfileIdByUser(userId);
+    const isParticipant =
+      chatRoom.user.toString() === userId ||
+      (!!ownerProfileId && chatRoom.fieldOwner?.toString() === ownerProfileId) ||
+      (!!coachProfileId && chatRoom.coach?.toString() === coachProfileId);
+    if (!isParticipant) {
       throw new ForbiddenException('Access denied');
     }
 

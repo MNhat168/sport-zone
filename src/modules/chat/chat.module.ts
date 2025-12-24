@@ -10,6 +10,7 @@ import { FieldsModule } from '../fields/fields.module';
 import { User, UserSchema } from '../users/entities/user.entity';
 import { Field, FieldSchema } from '../fields/entities/field.entity';
 import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entities/field-owner-profile.entity';
+import { CoachProfile, CoachProfileSchema } from '../coaches/entities/coach-profile.entity';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entit
       { name: User.name, schema: UserSchema },
       { name: Field.name, schema: FieldSchema },
       { name: FieldOwnerProfile.name, schema: FieldOwnerProfileSchema },
+      { name: CoachProfile.name, schema: CoachProfileSchema },
     ]),
     UsersModule,
     FieldsModule,
@@ -27,4 +29,4 @@ import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entit
   controllers: [ChatController],
   exports: [ChatService],
 })
-export class ChatModule {}
+export class ChatModule { }

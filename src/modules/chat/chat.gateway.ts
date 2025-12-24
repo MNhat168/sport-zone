@@ -46,8 +46,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) { }
 
   private isSocketInRoom(socketId: string, roomName: string): boolean {
-    const room = this.server.sockets.adapter.rooms.get(roomName);
-    return !!(room && socketId && room.has(socketId));
+    try {
+      const rooms: any = (this.server as any)?.sockets?.adapter?.rooms;
+      const room = rooms?.get?.(roomName);
+      return !!(room && socketId && room.has?.(socketId));
+    } catch {
+      // If adapter/rooms not ready, assume not in room to avoid errors
+      return false;
+    }
   }
 
   async handleConnection(client: Socket) {
