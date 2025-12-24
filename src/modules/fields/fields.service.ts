@@ -169,6 +169,106 @@ export class FieldsService {
         return mappedFields;
     }
 
+        /**
+         * Public paginated fields listing
+         */
+        async findPaginated(query?: {
+            name?: string;
+            location?: string;
+            sportType?: string;
+            sportTypes?: string[];
+            sortBy?: string;
+            sortOrder?: 'asc' | 'desc';
+            page?: number;
+            limit?: number;
+        }): Promise<{
+            fields: FieldsDto[];
+            pagination: {
+                total: number;
+                page: number;
+                limit: number;
+                totalPages: number;
+                hasNextPage: boolean;
+                hasPrevPage: boolean;
+            };
+        }> {
+            const filter: any = { isActive: true };
+            if (query?.name) filter.name = { $regex: query.name, $options: 'i' };
+
+            // Priority: sportTypes > sportType
+            if (query?.sportTypes && query.sportTypes.length > 0) {
+                filter.sportType = { $in: query.sportTypes.map(s => new RegExp(`^${s}$`, 'i')) };
+            } else if (query?.sportType) {
+                filter.sportType = new RegExp(`^${query.sportType}$`, 'i');
+            }
+
+            if (query?.location) filter['location.address'] = { $regex: query.location, $options: 'i' };
+
+            // Sorting
+            let sortOptions: any = {};
+            if (query?.sortBy === 'price' && query?.sortOrder) {
+                sortOptions.basePrice = query.sortOrder === 'asc' ? 1 : -1;
+            }
+
+            const page = query?.page || 1;
+            const limit = query?.limit || 10;
+            const skip = (page - 1) * limit;
+
+            const total = await this.fieldModel.countDocuments(filter);
+
+            const qb = this.fieldModel.find(filter).skip(skip).limit(limit);
+            if (Object.keys(sortOptions).length > 0) qb.sort(sortOptions);
+
+            const docs = await qb.lean().exec();
+
+            const fieldsDto: FieldsDto[] = docs.map(field => {
+                const price = this.priceFormatService.formatPrice(field.basePrice);
+                const validImages = (field.images || []).filter((img: string) => {
+                    if (!img || typeof img !== 'string') return false;
+                    if (img.includes('placeholder') || img.includes('placehold.co')) return false;
+                    return img.trim().length > 0;
+                });
+                return {
+                    id: field._id?.toString() || '',
+                    owner: field.owner?.toString() || '',
+                    name: field.name,
+                    sportType: field.sportType,
+                    description: field.description,
+                    location: field.location,
+                    images: validImages,
+                    operatingHours: field.operatingHours,
+                    slotDuration: field.slotDuration,
+                    minSlots: field.minSlots,
+                    maxSlots: field.maxSlots,
+                    priceRanges: field.priceRanges,
+                    basePrice: field.basePrice,
+                    price: price,
+                    isActive: field.isActive,
+                    isAdminVerify: field.isAdminVerify ?? false,
+                    maintenanceNote: field.maintenanceNote,
+                    maintenanceUntil: field.maintenanceUntil,
+                    rating: field.rating,
+                    totalReviews: field.totalReviews,
+                    createdAt: field.createdAt,
+                    updatedAt: field.updatedAt,
+                } as FieldsDto;
+            });
+
+            const totalPages = Math.ceil(total / limit);
+
+            return {
+                fields: fieldsDto,
+                pagination: {
+                    total,
+                    page,
+                    limit,
+                    totalPages,
+                    hasNextPage: page < totalPages,
+                    hasPrevPage: page > 1,
+                }
+            };
+        }
+
     /**
      * Lấy danh sách field của field-owner
      * @param ownerId - ID của field owner

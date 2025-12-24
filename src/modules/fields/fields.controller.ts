@@ -79,6 +79,43 @@ export class FieldsController {
     });
   }
 
+  @Get('paginated')
+  @ApiOperation({ summary: 'Get paginated fields with filtering' })
+  @ApiResponse({ status: 200, description: 'Paginated fields retrieved successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid pagination parameters' })
+  async findPaginated(
+    @Query('name') name?: string,
+    @Query('location') location?: string,
+    @Query('sportType') sportType?: string,
+    @Query('sportTypes') sportTypes?: string | string[],
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const sportTypesArray = sportTypes
+      ? (Array.isArray(sportTypes) ? sportTypes : [sportTypes])
+      : undefined;
+
+    const p = page ? parseInt(page as any, 10) : 1;
+    const l = limit ? parseInt(limit as any, 10) : 10;
+
+    if (isNaN(p) || isNaN(l) || p <= 0 || l <= 0) {
+      throw new BadRequestException('page and limit must be positive integers');
+    }
+
+    return this.fieldsService.findPaginated({
+      name,
+      location,
+      sportType,
+      sportTypes: sportTypesArray,
+      sortBy,
+      sortOrder,
+      page: p,
+      limit: l,
+    });
+  }
+
   @Get('nearby')
   @ApiOperation({ summary: 'Find nearby fields within specified radius (Public)' })
   @ApiResponse({ status: 200, description: 'Nearby fields retrieved successfully' })
