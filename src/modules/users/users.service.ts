@@ -249,6 +249,37 @@ export class UsersService {
     return user;
   }
 
+  /**
+   * Remove a single favourite sport for the current user
+   * @param email - user email
+   * @param sportId - sport identifier to remove
+   */
+  async removeFavouriteSport(email: string, sportId: string) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (typeof sportId !== 'string' || sportId.trim() === '') {
+      throw new BadRequestException('Invalid sport id');
+    }
+
+    if (!Array.isArray(user.favouriteSports) || user.favouriteSports.length === 0) {
+      throw new BadRequestException('No favourite sports to remove');
+    }
+
+    const beforeCount = (user.favouriteSports || []).length;
+    user.favouriteSports = (user.favouriteSports || []).filter((s: any) => (s as any).toString() !== sportId);
+    const afterCount = (user.favouriteSports || []).length;
+
+    if (beforeCount === afterCount) {
+      throw new BadRequestException('Provided sport not found in favourites');
+    }
+
+    await user.save();
+    return user;
+  }
+
   async removeFavouriteFields(email: string, fieldIds: string[]) {
     const user = await this.userModel.findOne({ email });
     if (!user) {
