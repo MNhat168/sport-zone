@@ -50,6 +50,27 @@ export class ChatController {
   }
 
   @UseGuards(JwtAccessTokenGuard)
+  @Get('coach/rooms')
+  @ApiOperation({ summary: 'Get chat rooms for coach' })
+  async getCoachChatRooms(@Request() req) {
+    return this.chatService.getChatRoomsForCoach(req.user.userId);
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
+  @Post('coach/start')
+  @ApiOperation({ summary: 'Start or get existing chat room with coach' })
+  async startCoachChat(
+    @Request() req,
+    @Body() body: { coachId: string; fieldId?: string },
+  ) {
+    return this.chatService.createOrGetCoachChatRoom(
+      req.user.userId,
+      body.coachId,
+      body.fieldId,
+    );
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
   @Get('room/:id')
   @ApiOperation({ summary: 'Get chat room messages' })
   async getChatRoom(@Request() req, @Param('id') id: string) {

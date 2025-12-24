@@ -8,11 +8,11 @@ import { NotificationsGateway } from './notifications.gateway';
 
 @Injectable()
 export class NotificationsService {
-    constructor(
-        @Inject(NOTIFICATION_REPOSITORY)
+  constructor(
+    @Inject(NOTIFICATION_REPOSITORY)
     private readonly notificationRepository: NotificationRepositoryInterface,
     private readonly notificationsGateway: NotificationsGateway,
-  ) {}
+  ) { }
 
   async create(dto: CreateNotificationDto): Promise<Notification> {
     const notification = await this.notificationRepository.create(dto);
@@ -42,36 +42,51 @@ export class NotificationsService {
     return notification;
   }
 
-    async getUserNotifications(userId: string): Promise<Notification[]> {
-        const notifications = await this.notificationRepository.findByCondition({
-            recipient: new Types.ObjectId(userId)
-        });
-        // Sort by createdAt descending, handle undefined
-        return notifications.sort((a, b) => {
-            const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-            const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-            return bTime - aTime;
-        });
+  async getUserNotifications(userId: string): Promise<Notification[]> {
+    const notifications = await this.notificationRepository.findByCondition({
+      recipient: new Types.ObjectId(userId)
+    });
+    // Sort by createdAt descending, handle undefined
+    return notifications.sort((a, b) => {
+      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      return bTime - aTime;
+    });
+  }
+
+  async getUnreadCount(userId: string): Promise<number> {
+    const notifications = await this.notificationRepository.findByCondition({
+      recipient: new Types.ObjectId(userId),
+      isRead: false
+    });
+    return notifications.length;
+  }
+
+  async markAllAsRead(userId: string): Promise<void> {
+    await this.notificationRepository.updateMany(
+      { recipient: new Types.ObjectId(userId), isRead: false },
+      { isRead: true }
+    );
+  }
+
+  async markAsRead(notificationId: string): Promise<Notification> {
+    const notification = await this.notificationRepository.update(
+      notificationId,
+      { isRead: true }
+    );
+
+    if (!notification) {
+      throw new NotFoundException('Notification not found');
     }
 
-    async markAsRead(notificationId: string): Promise<Notification> {
-        const notification = await this.notificationRepository.update(
-            notificationId,
-            { isRead: true }
-        );
-        
-        if (!notification) {
-            throw new NotFoundException('Notification not found');
-        }
-        
-        return notification;
-    }
+    return notification;
+  }
 
-    async findById(id: string): Promise<Notification> {
-        const notification = await this.notificationRepository.findById(id);
-        if (!notification) {
-            throw new NotFoundException('Notification not found');
-        }
-        return notification;
+  async findById(id: string): Promise<Notification> {
+    const notification = await this.notificationRepository.findById(id);
+    if (!notification) {
+      throw new NotFoundException('Notification not found');
     }
+    return notification;
+  }
 }

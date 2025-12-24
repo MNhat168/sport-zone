@@ -29,7 +29,7 @@ import { EmailService } from '../email/email.service';
 @Injectable()
 export class FieldsService {
     private readonly logger = new Logger(FieldsService.name);
-    
+
     // Cache field configs for short periods to improve performance
     private fieldConfigCache = new Map<string, { field: Field; timestamp: number }>();
     private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -47,43 +47,41 @@ export class FieldsService {
         private priceFormatService: PriceFormatService,
         private awsS3Service: AwsS3Service,
         private emailService: EmailService,
-    ) {}
+    ) { }
 
 
 
-    // ============================================================================
-    // CRUD OPERATIONS
-    // ============================================================================
-
-    async findAll(query?: { 
-        name?: string; 
-        location?: string; 
+    async findAll(query?: {
+        name?: string;
+        location?: string;
         sportType?: string;
         sportTypes?: string[];
         sortBy?: string;
         sortOrder?: 'asc' | 'desc';
-    }): Promise<FieldsDto[]> {
+        page?: number;
+        limit?: number;
+    }): Promise<{ fields: FieldsDto[]; pagination: { page: number; limit: number; total: number; totalPages: number } } | FieldsDto[]> {
         // Lọc theo tên và loại thể thao
         const filter: any = { isActive: true };
         if (query?.name) filter.name = { $regex: query.name, $options: 'i' };
-        
+
         // Priority: sportTypes > sportType
         if (query?.sportTypes && query.sportTypes.length > 0) {
             // Filter by multiple sports using $in operator
-            filter.sportType = { 
+            filter.sportType = {
                 $in: query.sportTypes.map(s => new RegExp(`^${s}$`, 'i'))
             };
         } else if (query?.sportType) {
             // Backward compatible: single sport
             filter.sportType = new RegExp(`^${query.sportType}$`, 'i');
         }
-        
+
         if (query?.location) filter['location.address'] = { $regex: query.location, $options: 'i' };
 
         // Build sort options
         let sortOptions: any = {};
-        console.log('[FieldsService.findAll] Query params:', { sortBy: query?.sortBy, sortOrder: query?.sortOrder });
-        
+        console.log('[FieldsService.findAll] Query params:', { sortBy: query?.sortBy, sortOrder: query?.sortOrder, page: query?.page, limit: query?.limit });
+
         if (query?.sortBy === 'price' && query?.sortOrder) {
             sortOptions.basePrice = query.sortOrder === 'asc' ? 1 : -1;
             console.log(`[FieldsService.findAll] ✅ Sorting by price: ${query.sortOrder}, sortOptions:`, sortOptions);
@@ -91,7 +89,7 @@ export class FieldsService {
             console.log(`[FieldsService.findAll] ❌ No sorting applied. sortBy: ${query?.sortBy}, sortOrder: ${query?.sortOrder}`);
         }
 
-        // Only apply sort if sortOptions is not empty
+        // Build query
         const queryBuilder = this.fieldModel.find(filter);
         if (Object.keys(sortOptions).length > 0) {
             queryBuilder.sort(sortOptions);
@@ -100,12 +98,23 @@ export class FieldsService {
             console.log(`[FieldsService.findAll] ⚠️ No sort applied - sortOptions is empty`);
         }
 
+        // Handle pagination if page and limit are provided
+        const isPaginated = query?.page !== undefined && query?.limit !== undefined;
+        let total = 0;
+
+        if (isPaginated) {
+            total = await this.fieldModel.countDocuments(filter);
+            const skip = (query.page! - 1) * query.limit!;
+            queryBuilder.skip(skip).limit(query.limit!);
+            console.log(`[FieldsService.findAll] ✅ Pagination applied: page=${query.page}, limit=${query.limit}, skip=${skip}, total=${total}`);
+        }
+
         const fields = await queryBuilder.lean();
 
-        return fields.map(field => {
+        const mappedFields = fields.map(field => {
             // Format price for display using PriceFormatService
             const price = this.priceFormatService.formatPrice(field.basePrice);
-            
+
             // Filter out invalid/placeholder images
             const validImages = (field.images || []).filter((img: string) => {
                 if (!img || typeof img !== 'string') return false;
@@ -116,7 +125,7 @@ export class FieldsService {
                 // Filter out empty strings
                 return img.trim().length > 0;
             });
-            
+
             return {
                 id: field._id.toString(),
                 owner: field.owner?.toString() || '',
@@ -142,7 +151,123 @@ export class FieldsService {
                 updatedAt: field.updatedAt,
             };
         });
+
+        // Return paginated response if pagination was requested
+        if (isPaginated) {
+            return {
+                fields: mappedFields,
+                pagination: {
+                    page: query.page!,
+                    limit: query.limit!,
+                    total,
+                    totalPages: Math.ceil(total / query.limit!),
+                },
+            };
+        }
+
+        // Backward compatible: return just the array
+        return mappedFields;
     }
+
+        /**
+         * Public paginated fields listing
+         */
+        async findPaginated(query?: {
+            name?: string;
+            location?: string;
+            sportType?: string;
+            sportTypes?: string[];
+            sortBy?: string;
+            sortOrder?: 'asc' | 'desc';
+            page?: number;
+            limit?: number;
+        }): Promise<{
+            fields: FieldsDto[];
+            pagination: {
+                total: number;
+                page: number;
+                limit: number;
+                totalPages: number;
+                hasNextPage: boolean;
+                hasPrevPage: boolean;
+            };
+        }> {
+            const filter: any = { isActive: true };
+            if (query?.name) filter.name = { $regex: query.name, $options: 'i' };
+
+            // Priority: sportTypes > sportType
+            if (query?.sportTypes && query.sportTypes.length > 0) {
+                filter.sportType = { $in: query.sportTypes.map(s => new RegExp(`^${s}$`, 'i')) };
+            } else if (query?.sportType) {
+                filter.sportType = new RegExp(`^${query.sportType}$`, 'i');
+            }
+
+            if (query?.location) filter['location.address'] = { $regex: query.location, $options: 'i' };
+
+            // Sorting
+            let sortOptions: any = {};
+            if (query?.sortBy === 'price' && query?.sortOrder) {
+                sortOptions.basePrice = query.sortOrder === 'asc' ? 1 : -1;
+            }
+
+            const page = query?.page || 1;
+            const limit = query?.limit || 10;
+            const skip = (page - 1) * limit;
+
+            const total = await this.fieldModel.countDocuments(filter);
+
+            const qb = this.fieldModel.find(filter).skip(skip).limit(limit);
+            if (Object.keys(sortOptions).length > 0) qb.sort(sortOptions);
+
+            const docs = await qb.lean().exec();
+
+            const fieldsDto: FieldsDto[] = docs.map(field => {
+                const price = this.priceFormatService.formatPrice(field.basePrice);
+                const validImages = (field.images || []).filter((img: string) => {
+                    if (!img || typeof img !== 'string') return false;
+                    if (img.includes('placeholder') || img.includes('placehold.co')) return false;
+                    return img.trim().length > 0;
+                });
+                return {
+                    id: field._id?.toString() || '',
+                    owner: field.owner?.toString() || '',
+                    name: field.name,
+                    sportType: field.sportType,
+                    description: field.description,
+                    location: field.location,
+                    images: validImages,
+                    operatingHours: field.operatingHours,
+                    slotDuration: field.slotDuration,
+                    minSlots: field.minSlots,
+                    maxSlots: field.maxSlots,
+                    priceRanges: field.priceRanges,
+                    basePrice: field.basePrice,
+                    price: price,
+                    isActive: field.isActive,
+                    isAdminVerify: field.isAdminVerify ?? false,
+                    maintenanceNote: field.maintenanceNote,
+                    maintenanceUntil: field.maintenanceUntil,
+                    rating: field.rating,
+                    totalReviews: field.totalReviews,
+                    createdAt: field.createdAt,
+                    updatedAt: field.updatedAt,
+                } as FieldsDto;
+            });
+
+            const totalPages = Math.ceil(total / limit);
+
+            return {
+                fields: fieldsDto,
+                pagination: {
+                    total,
+                    page,
+                    limit,
+                    totalPages,
+                    hasNextPage: page < totalPages,
+                    hasPrevPage: page > 1,
+                }
+            };
+        }
 
     /**
      * Lấy danh sách field của field-owner
@@ -169,7 +294,7 @@ export class FieldsService {
     }> {
         try {
             // Build filter query
-            const filter: any = { 
+            const filter: any = {
                 owner: new Types.ObjectId(ownerId)
             };
 
@@ -189,7 +314,7 @@ export class FieldsService {
             if (user) {
                 // ownerId is User ID, find the corresponding FieldOwnerProfile
                 const userFieldOwnerProfile = await this.fieldOwnerProfileModel.findOne({ user: new Types.ObjectId(ownerId) }).exec();
-                
+
                 if (userFieldOwnerProfile) {
                     filter.owner = userFieldOwnerProfile._id;
                 }
@@ -205,7 +330,7 @@ export class FieldsService {
             const total = await this.fieldModel.countDocuments(filter);
 
             // Get fields with owner population
-        const fields = await this.fieldModel
+            const fields = await this.fieldModel
                 .find(filter)
                 .populate({
                     path: 'owner',
@@ -215,15 +340,15 @@ export class FieldsService {
                 .sort({ createdAt: -1, _id: -1 }) // Mới nhất trước
                 .skip(skip)
                 .limit(limit)
-            .exec();
+                .exec();
 
-        // Debug: inspect raw amenities array for each field
-        try {
-            console.log('[FieldsService.findByOwner] ownerId=', ownerId, 'fieldsCount=', fields.length);
-            fields.forEach((f: any, idx: number) => {
-                console.log(`[FieldsService.findByOwner] [${idx}] fieldId=`, f?._id?.toString?.(), 'amenitiesRaw=', f?.amenities);
-            });
-        } catch {}
+            // Debug: inspect raw amenities array for each field
+            try {
+                console.log('[FieldsService.findByOwner] ownerId=', ownerId, 'fieldsCount=', fields.length);
+                fields.forEach((f: any, idx: number) => {
+                    console.log(`[FieldsService.findByOwner] [${idx}] fieldId=`, f?._id?.toString?.(), 'amenitiesRaw=', f?.amenities);
+                });
+            } catch { }
 
             const totalPages = Math.ceil(total / limit);
 
@@ -231,7 +356,7 @@ export class FieldsService {
             const fieldsDto: FieldsDto[] = fields.map(field => {
                 // Format price for display using PriceFormatService
                 const price = this.priceFormatService.formatPrice(field.basePrice);
-                
+
                 // Filter out invalid/placeholder images
                 const validImages = (field.images || []).filter((img: string) => {
                     if (!img || typeof img !== 'string') return false;
@@ -242,7 +367,7 @@ export class FieldsService {
                     // Filter out empty strings
                     return img.trim().length > 0;
                 });
-                
+
                 return {
                     id: field._id?.toString() || '',
                     owner: (field.owner as any)?._id?.toString() || field.owner?.toString() || '',
@@ -310,7 +435,7 @@ export class FieldsService {
 
             // Lấy ngày hôm nay theo timezone Việt Nam (UTC+7)
             const vietnamTime = new Date();
-            const vietnamDate = new Date(vietnamTime.toLocaleString("en-US", {timeZone: "Asia/Ho_Chi_Minh"}));
+            const vietnamDate = new Date(vietnamTime.toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
             const todayString = vietnamDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
 
             // Bước 1: Kiểm tra user có tồn tại và có role field_owner không
@@ -318,7 +443,7 @@ export class FieldsService {
             if (!user) {
                 throw new NotFoundException('User not found');
             }
-            
+
             if (user.role !== 'field_owner') {
                 throw new UnauthorizedException('User is not a field owner');
             }
@@ -335,9 +460,9 @@ export class FieldsService {
 
             // Bước 3: Tìm tất cả fields của owner profile này
             const ownerFields = await this.fieldModel
-                .find({ 
+                .find({
                     owner: ownerProfile._id,
-                    isActive: true 
+                    isActive: true
                 })
                 .select('_id name')
                 .exec();
@@ -352,10 +477,10 @@ export class FieldsService {
             // Sử dụng date range để handle cả Date object và string
             const startOfDay = new Date(todayString + 'T00:00:00.000Z');
             const endOfDay = new Date(todayString + 'T23:59:59.999Z');
-            
+
             const bookingQuery = {
                 field: { $in: fieldIds },
-                date: { 
+                date: {
                     $gte: startOfDay,
                     $lte: endOfDay
                 },
@@ -448,7 +573,7 @@ export class FieldsService {
             if (!user) {
                 throw new NotFoundException('User not found');
             }
-            
+
             if (user.role !== 'field_owner') {
                 throw new UnauthorizedException('User is not a field owner');
             }
@@ -474,9 +599,9 @@ export class FieldsService {
             }
 
             // Bước 3: Tìm tất cả fields của owner profile này
-            const fieldFilter: any = { 
+            const fieldFilter: any = {
                 owner: ownerProfile._id,
-                isActive: true 
+                isActive: true
             };
 
             // Filter theo tên sân nếu có
@@ -538,9 +663,9 @@ export class FieldsService {
                     .select('_id')
                     .lean()
                     .exec();
-                
+
                 const transactionIds = transactions.map(t => t._id);
-                
+
                 // Filter bookings that have transactions with the specified status
                 if (transactionIds.length > 0) {
                     bookingFilter.transaction = { $in: transactionIds };
@@ -646,8 +771,8 @@ export class FieldsService {
      * @returns Array of nearby fields with distance information
      */
     async findNearbyFieldsPublic(
-        latitude: number, 
-        longitude: number, 
+        latitude: number,
+        longitude: number,
         radius: number = 10, // Default 10km radius
         limit: number = 20, // Default 20 results
         sportType?: string,
@@ -672,7 +797,7 @@ export class FieldsService {
     }>> {
         try {
             const radiusInMeters = radius * 1000; // Convert km to meters
-            
+
             // Build filter with geospatial query
             const filter: any = {
                 'location.geo': {
@@ -720,14 +845,14 @@ export class FieldsService {
                     }
 
                     const [fieldLongitude, fieldLatitude] = field.location.geo.coordinates;
-                    
+
                     // Skip invalid coordinates
                     if ((fieldLatitude === 0 && fieldLongitude === 0) ||
                         fieldLatitude < -90 || fieldLatitude > 90 ||
                         fieldLongitude < -180 || fieldLongitude > 180) {
                         return null;
                     }
-                    
+
                     // Calculate distance (Haversine formula)
                     const distance = this.calculateDistance(
                         latitude,
@@ -740,10 +865,10 @@ export class FieldsService {
                     const price = this.priceFormatService.formatPrice(field.basePrice || 0);
 
                     // Filter images efficiently
-                    const validImages = (field.images || []).filter((img: string) => 
-                        img && typeof img === 'string' && 
+                    const validImages = (field.images || []).filter((img: string) =>
+                        img && typeof img === 'string' &&
                         img.trim().length > 0 &&
-                        !img.includes('placeholder') && 
+                        !img.includes('placeholder') &&
                         !img.includes('placehold.co')
                     );
 
@@ -786,14 +911,14 @@ export class FieldsService {
      * @returns Array of nearby fields with distance information
      */
     async findNearbyFields(
-        latitude: number, 
-        longitude: number, 
+        latitude: number,
+        longitude: number,
         radius: number = 10, // Default 10km radius
         sportType?: string
     ): Promise<Array<FieldsDto & { distance: number }>> {
         try {
             const radiusInMeters = radius * 1000; // Convert km to meters
-            
+
             const filter: any = {
                 'location.geo': {
                     $near: {
@@ -826,7 +951,7 @@ export class FieldsService {
                     }
 
                     const [fieldLongitude, fieldLatitude] = field.location.geo.coordinates;
-                    
+
                     // Filter out fields with invalid coordinates (0,0 is default invalid)
                     if (fieldLatitude === 0 && fieldLongitude === 0) {
                         this.logger.warn(`Field ${field._id} has invalid coordinates [0, 0]`);
@@ -834,7 +959,7 @@ export class FieldsService {
                     }
 
                     // Validate coordinate ranges
-                    if (fieldLatitude < -90 || fieldLatitude > 90 || 
+                    if (fieldLatitude < -90 || fieldLatitude > 90 ||
                         fieldLongitude < -180 || fieldLongitude > 180) {
                         this.logger.warn(`Field ${field._id} has out-of-range coordinates`);
                         return false;
@@ -844,7 +969,7 @@ export class FieldsService {
                 })
                 .map(field => {
                     const [fieldLongitude, fieldLatitude] = field.location.geo.coordinates;
-                    
+
                     const distance = this.calculateDistance(
                         latitude,
                         longitude,
@@ -935,7 +1060,7 @@ export class FieldsService {
                     ownerName = facility.facilityName;
                     ownerPhone = facility.contactPhone || (profile as any).user?.phone;
                 }
-            } catch {}
+            } catch { }
         }
 
         // Performance: do not query by user; owner must be FieldOwnerProfile ObjectId
@@ -1001,10 +1126,10 @@ export class FieldsService {
         try {
             // Validate owner exists
             // TODO: Add owner validation if needed
-            
+
             // Validate and normalize location
             const validatedLocation = this.validateAndNormalizeLocation(createFieldDto.location);
-            
+
             // Process amenities if provided
             let amenities: Array<{ amenity: Types.ObjectId; price: number }> = [];
             if (createFieldDto.amenities && createFieldDto.amenities.length > 0) {
@@ -1043,7 +1168,7 @@ export class FieldsService {
             });
 
             const savedField = await newField.save();
-            
+
             return {
                 id: (savedField._id as Types.ObjectId).toString(),
                 owner: savedField.owner.toString(),
@@ -1097,7 +1222,7 @@ export class FieldsService {
             const minSlots = parseInt(createFieldDto.minSlots);
             const maxSlots = parseInt(createFieldDto.maxSlots);
             const basePrice = parseInt(createFieldDto.basePrice);
-            
+
             // Parse and validate location from form data
             let location;
             try {
@@ -1113,9 +1238,9 @@ export class FieldsService {
                     }
                 };
             }
-            
+
             const validatedLocation = this.validateAndNormalizeLocation(location);
-            
+
             // Parse amenities if provided
             let amenities: Array<{ amenity: Types.ObjectId; price: number }> = [];
             if (createFieldDto.amenities) {
@@ -1144,7 +1269,7 @@ export class FieldsService {
             if (!Array.isArray(operatingHours) || operatingHours.length === 0) {
                 throw new BadRequestException('Invalid operating hours format - must be array of day objects');
             }
-            
+
             // Validate each provided day has required fields
             const validDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
             for (const dayHours of operatingHours) {
@@ -1167,7 +1292,7 @@ export class FieldsService {
                         throw new BadRequestException(`Invalid price range for ${range.day} - missing start, end, or multiplier`);
                     }
                 }
-                
+
                 // Ensure all operating days have default pricing if no specific ranges provided
                 for (const dayHours of operatingHours) {
                     const dayRanges = priceRanges.filter(pr => pr.day === dayHours.day);
@@ -1216,7 +1341,7 @@ export class FieldsService {
             });
 
             const savedField = await newField.save();
-            
+
             return {
                 id: (savedField._id as Types.ObjectId).toString(),
                 owner: savedField.owner.toString(),
@@ -1253,7 +1378,7 @@ export class FieldsService {
     async update(fieldId: string, updateFieldDto: UpdateFieldDto, ownerId: string): Promise<FieldsDto> {
         try {
             const field = await this.fieldModel.findById(fieldId);
-            
+
             if (!field) {
                 throw new NotFoundException('Field not found');
             }
@@ -1337,7 +1462,7 @@ export class FieldsService {
     async delete(fieldId: string, ownerId: string): Promise<{ success: boolean; message: string }> {
         try {
             const field = await this.fieldModel.findById(fieldId);
-            
+
             if (!field) {
                 throw new NotFoundException('Field not found');
             }
@@ -1348,9 +1473,9 @@ export class FieldsService {
             }
 
             // TODO: Check if field has pending bookings before deletion
-            
+
             await this.fieldModel.findByIdAndDelete(fieldId);
-            
+
             return {
                 success: true,
                 message: 'Field deleted successfully'
@@ -1378,7 +1503,7 @@ export class FieldsService {
                 { $set: { isAdminVerify } },
                 { new: true }
             ).populate('amenities.amenity', 'name')
-            .exec();
+                .exec();
 
             if (!field) {
                 throw new NotFoundException('Field not found');
@@ -1409,7 +1534,7 @@ export class FieldsService {
                         ownerName = facility.facilityName;
                         ownerPhone = facility.contactPhone || (profile as any).user?.phone;
                     }
-                } catch {}
+                } catch { }
             }
 
             // Build amenities response
@@ -1485,7 +1610,7 @@ export class FieldsService {
     async getFieldAvailability(fieldId: string, startDate: Date, endDate: Date) {
         try {
             const field = await this.fieldModel.findById(fieldId);
-            
+
             if (!field) {
                 throw new NotFoundException('Field not found');
             }
@@ -1496,14 +1621,14 @@ export class FieldsService {
 
             const availability: any[] = [];
             const currentDate = new Date(startDate);
-            
+
             while (currentDate <= endDate) {
                 // Get day of week for the current date
                 const dayOfWeek = currentDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
-                
+
                 // Find operating hours for this day
                 const dayOperatingHours = field.operatingHours.find(oh => oh.day === dayOfWeek);
-                
+
                 if (!dayOperatingHours) {
                     // Field is not operating on this day
                     availability.push({
@@ -1519,22 +1644,22 @@ export class FieldsService {
                         dayOperatingHours.end,
                         field.slotDuration
                     );
-                    
+
                     // Get existing bookings for this date
                     const existingBookings = await this.getExistingBookingsForDate(fieldId, currentDate);
-                    
+
                     // Apply pricing and availability logic
                     const slotsWithPricing = allSlots.map(slot => {
                         const pricing = this.calculateSlotPricing(field, slot.startTime, slot.endTime, dayOfWeek);
-                        
+
                         // Check if slot is booked
-                        const isBooked = existingBookings.some(booking => 
+                        const isBooked = existingBookings.some(booking =>
                             this.slotsOverlap(
                                 { start: slot.startTime, end: slot.endTime },
                                 { start: booking.startTime, end: booking.endTime }
                             )
                         );
-                        
+
                         return {
                             startTime: slot.startTime,
                             endTime: slot.endTime,
@@ -1543,14 +1668,14 @@ export class FieldsService {
                             priceBreakdown: pricing.breakdown
                         };
                     });
-                    
+
                     availability.push({
                         date: currentDate.toISOString().split('T')[0],
                         isHoliday: this.isHoliday(currentDate),
                         slots: slotsWithPricing
                     });
                 }
-                
+
                 currentDate.setDate(currentDate.getDate() + 1);
             }
 
@@ -1572,11 +1697,11 @@ export class FieldsService {
             // ✅ CRITICAL: Normalize date using UTC methods to avoid server timezone issues
             // setHours() uses LOCAL timezone → wrong on Singapore server (UTC+8)
             // Must use setUTCHours() to ensure consistency with how dates are stored
-const startOfDay = new Date(date);
-startOfDay.setUTCHours(0, 0, 0, 0); // Start of UTC day
+            const startOfDay = new Date(date);
+            startOfDay.setUTCHours(0, 0, 0, 0); // Start of UTC day
 
-const endOfDay = new Date(date);
-endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
+            const endOfDay = new Date(date);
+            endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
 
 
             // Get bookings from Booking collection (Pure Lazy Creation pattern)
@@ -1635,18 +1760,18 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
         // Find price range for this time slot and day
         const priceRange = field.priceRanges.find(pr => {
             if (pr.day !== dayOfWeek) return false;
-            
+
             const slotStart = timeToMinutes(startTime);
             const prStart = timeToMinutes(pr.start);
             const prEnd = timeToMinutes(pr.end);
-            
+
             return slotStart >= prStart && slotStart < prEnd;
         });
-        
+
         const basePrice = field.basePrice;
         const multiplier = priceRange?.multiplier || 1;
         const totalPrice = basePrice * multiplier;
-        
+
         return {
             totalPrice,
             multiplier,
@@ -1765,7 +1890,7 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
                 for (const field of fields) {
                     const fieldId = (field._id as Types.ObjectId).toString();
                     result.set(fieldId, field);
-                    
+
                     this.fieldConfigCache.set(fieldId, {
                         field,
                         timestamp: Date.now()
@@ -1809,7 +1934,7 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
 
             // Get day of week for the date (default to monday if no date provided)
             const dayOfWeek = date ? this.getDayOfWeek(date) : 'monday';
-            
+
             // Find operating hours for the specific day
             const dayOperatingHours = field.operatingHours.find(oh => oh.day === dayOfWeek);
             if (!dayOperatingHours) {
@@ -1825,7 +1950,7 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
 
                 const startTime = this.minutesToTimeString(currentMinutes);
                 const endTime = this.minutesToTimeString(slotEndMinutes);
-                
+
                 // Find applicable price range for this day
                 const multiplier = this.getPriceMultiplierForDay(startTime, field.priceRanges, dayOfWeek);
                 const finalPrice = field.basePrice * multiplier;
@@ -1863,7 +1988,7 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
         duration: number;
     } {
         const errors: string[] = [];
-        
+
         try {
             if (!field.operatingHours || !field.slotDuration) {
                 errors.push('Field operating hours or slot duration not configured');
@@ -1877,7 +2002,7 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
 
             // Get day of week for the date (default to monday if no date provided)
             const dayOfWeek = date ? this.getDayOfWeek(date) : 'monday';
-            
+
             // Find operating hours for the specific day
             const dayOperatingHours = field.operatingHours.find(oh => oh.day === dayOfWeek);
             if (!dayOperatingHours) {
@@ -1908,7 +2033,7 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
             // Calculate duration and slots
             const duration = endMinutes - startMinutes;
             const numSlots = Math.ceil(duration / field.slotDuration);
-            
+
             // Check slot constraints
             if (numSlots < field.minSlots) {
                 errors.push(`Minimum booking is ${field.minSlots} slots (${field.minSlots * field.slotDuration} minutes)`);
@@ -1991,10 +2116,10 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
                 const slotEndMinutes = Math.min(currentMinutes + field.slotDuration, endMinutes);
                 const slotStart = this.minutesToTimeString(currentMinutes);
                 const slotEnd = this.minutesToTimeString(slotEndMinutes);
-                
+
                 const multiplier = this.getPriceMultiplierForDay(slotStart, field.priceRanges, dayOfWeek);
                 const slotPrice = field.basePrice * multiplier;
-                
+
                 breakdown.push({
                     startTime: slotStart,
                     endTime: slotEnd,
@@ -2115,10 +2240,10 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
         });
 
         await field.save();
-        
+
         // Clear cache for this field
         this.clearCache(fieldId);
-        
+
         return { success: true };
     }
 
@@ -2142,12 +2267,12 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
         );
         await field.save();
         const after = field.pendingPriceUpdates.length;
-        
+
         // Clear cache for this field
         if (after < before) {
             this.clearCache(fieldId);
         }
-        
+
         return after < before;
     }
 
@@ -2174,11 +2299,11 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
         const R = 6371; // Earth's radius in kilometers
         const dLat = this.deg2rad(lat2 - lat1);
         const dLon = this.deg2rad(lon2 - lon1);
-        const a = 
-            Math.sin(dLat/2) * Math.sin(dLat/2) +
-            Math.cos(this.deg2rad(lat1)) * Math.cos(this.deg2rad(lat2)) * 
-            Math.sin(dLon/2) * Math.sin(dLon/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        const a =
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(this.deg2rad(lat1)) * Math.cos(this.deg2rad(lat2)) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         const distance = R * c; // Distance in kilometers
         return distance;
     }
@@ -2187,7 +2312,7 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
      * Convert degrees to radians
      */
     private deg2rad(deg: number): number {
-        return deg * (Math.PI/180);
+        return deg * (Math.PI / 180);
     }
 
 
@@ -2218,9 +2343,9 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
      * @param location Location object
      * @returns Normalized location object
      */
-    private validateAndNormalizeLocation(location: any): { 
-        address: string; 
-        geo: { type: 'Point'; coordinates: [number, number] } 
+    private validateAndNormalizeLocation(location: any): {
+        address: string;
+        geo: { type: 'Point'; coordinates: [number, number] }
     } {
         if (!location) {
             throw new BadRequestException('Location is required');
@@ -2236,7 +2361,7 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
 
         const [longitude, latitude] = location.geo.coordinates;
         const validation = this.validateCoordinates(latitude, longitude);
-        
+
         if (!validation.isValid) {
             throw new BadRequestException(validation.error);
         }
@@ -2300,7 +2425,7 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
 
         for (let currentMinutes = startMinutes; currentMinutes < endMinutes; currentMinutes += slotDuration) {
             const slotEndMinutes = Math.min(currentMinutes + slotDuration, endMinutes);
-            
+
             slots.push({
                 startTime: this.minutesToTimeString(currentMinutes),
                 endTime: this.minutesToTimeString(slotEndMinutes)
@@ -2468,14 +2593,14 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
             const newProfile = new this.fieldOwnerProfileModel({
                 user: new Types.ObjectId(userId),
                 facility: {
-                facilityName: createDto.facilityName,
-                facilityLocation: createDto.facilityLocation,
-                supportedSports: createDto.supportedSports,
-                description: createDto.description,
-                amenities: createDto.amenities || [],
-                businessHours: createDto.businessHours,
-                contactPhone: createDto.contactPhone,
-                website: createDto.website,
+                    facilityName: createDto.facilityName,
+                    facilityLocation: createDto.facilityLocation,
+                    supportedSports: createDto.supportedSports,
+                    description: createDto.description,
+                    amenities: createDto.amenities || [],
+                    businessHours: createDto.businessHours,
+                    contactPhone: createDto.contactPhone,
+                    website: createDto.website,
                 },
                 verificationDocument: createDto.verificationDocument,
                 rating: 0,
@@ -2664,10 +2789,10 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
                     .exec(),
                 this.fieldOwnerProfileModel.countDocuments(filter),
             ]);
-            
+
             const data = profiles
-            .filter(profile => profile.user !== null) // Skip profiles without valid user reference
-            .map(profile => this.mapToFieldOwnerProfileDto(profile));
+                .filter(profile => profile.user !== null) // Skip profiles without valid user reference
+                .map(profile => this.mapToFieldOwnerProfileDto(profile));
 
             return {
                 data,
@@ -3140,7 +3265,7 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
                 this.logger.debug(`[getFieldOwnerBankAccount] Found default verified bank account: ${bankAccount._id}`);
             } else {
                 this.logger.debug(`[getFieldOwnerBankAccount] No default verified account found, searching for any verified account...`);
-                
+
                 // If no default verified account, try to find any verified account
                 bankAccount = await this.bankAccountModel
                     .findOne({
@@ -3152,11 +3277,11 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
 
                 if (bankAccount) {
                     this.logger.debug(`[getFieldOwnerBankAccount] Found verified account (not default): ${bankAccount._id}, isDefault: ${bankAccount.isDefault}`);
-                    
+
                     // If we found a verified account but it's not default, set it as default for future queries
                     if (!bankAccount.isDefault) {
                         this.logger.debug(`[getFieldOwnerBankAccount] Setting account ${bankAccount._id} as default...`);
-                        
+
                         // Set other accounts to non-default
                         await this.bankAccountModel.updateMany(
                             {
@@ -3165,11 +3290,11 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
                             },
                             { isDefault: false }
                         ).exec();
-                        
+
                         // Set this account as default
                         bankAccount.isDefault = true;
                         await bankAccount.save();
-                        
+
                         this.logger.debug(`[getFieldOwnerBankAccount] Account ${bankAccount._id} set as default successfully`);
                     }
                 } else {
@@ -3179,7 +3304,7 @@ endOfDay.setUTCHours(23, 59, 59, 999); // End of UTC day
                         .select('status isDefault accountNumber bankName')
                         .lean()
                         .exec();
-                    
+
                     this.logger.warn(
                         `[getFieldOwnerBankAccount] No verified bank account found. ` +
                         `Total accounts for owner ${ownerId}: ${allAccounts.length}. ` +

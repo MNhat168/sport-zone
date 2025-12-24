@@ -12,4 +12,6 @@ export enum NotificationType {
   INVOICE_OVERDUE = 'invoice_overdue',
   SUBSCRIPTION_SUSPENDED = 'subscription_suspended',
   SUBSCRIPTION_REACTIVATED = 'subscription_reactivated',
+  PAYMENT_PROOF_SUBMITTED = 'payment_proof_submitted',
+
 }

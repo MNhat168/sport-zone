@@ -8,7 +8,7 @@ import { BankAccountResponseDto } from '../field-owner/dtos/bank-account.dto';
 @ApiTags('Fields')
 @Controller('fields')
 export class FieldsController {
-  constructor(private readonly fieldsService: FieldsService) {}
+  constructor(private readonly fieldsService: FieldsService) { }
 
   @Get()
   @ApiOperation({ summary: 'Get all fields with filtering' })
@@ -23,11 +23,49 @@ export class FieldsController {
   ): Promise<FieldsDto[]> {
     // Log received parameters for debugging
     console.log('[FieldsController.findAll] Received params:', { sortBy, sortOrder, name, location, sportType });
-    
+
     // Convert sportTypes to array if it's a string
     const sportTypesArray = sportTypes
       ? (Array.isArray(sportTypes) ? sportTypes : [sportTypes])
       : undefined;
+
+    const result = await this.fieldsService.findAll({
+      name,
+      location,
+      sportType,
+      sportTypes: sportTypesArray,
+      sortBy,
+      sortOrder,
+    });
+
+    // Handle both array and paginated response (backward compatible)
+    return Array.isArray(result) ? result : result.fields;
+  }
+
+  @Get('paginated')
+  @ApiOperation({ summary: 'Get all fields with filtering and pagination' })
+  @ApiResponse({ status: 200, description: 'Fields retrieved successfully with pagination' })
+  async findAllPaginated(
+    @Query('name') name?: string,
+    @Query('location') location?: string,
+    @Query('sportType') sportType?: string,
+    @Query('sportTypes') sportTypes?: string | string[],
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '10',
+  ) {
+    // Log received parameters for debugging
+    console.log('[FieldsController.findAllPaginated] Received params:', { sortBy, sortOrder, name, location, sportType, page, limit });
+
+    // Convert sportTypes to array if it's a string
+    const sportTypesArray = sportTypes
+      ? (Array.isArray(sportTypes) ? sportTypes : [sportTypes])
+      : undefined;
+
+    // Parse pagination params
+    const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+    const parsedLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
 
     return this.fieldsService.findAll({
       name,
@@ -36,6 +74,45 @@ export class FieldsController {
       sportTypes: sportTypesArray,
       sortBy,
       sortOrder,
+      page: parsedPage,
+      limit: parsedLimit,
+    });
+  }
+
+  @Get('paginated')
+  @ApiOperation({ summary: 'Get paginated fields with filtering' })
+  @ApiResponse({ status: 200, description: 'Paginated fields retrieved successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid pagination parameters' })
+  async findPaginated(
+    @Query('name') name?: string,
+    @Query('location') location?: string,
+    @Query('sportType') sportType?: string,
+    @Query('sportTypes') sportTypes?: string | string[],
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const sportTypesArray = sportTypes
+      ? (Array.isArray(sportTypes) ? sportTypes : [sportTypes])
+      : undefined;
+
+    const p = page ? parseInt(page as any, 10) : 1;
+    const l = limit ? parseInt(limit as any, 10) : 10;
+
+    if (isNaN(p) || isNaN(l) || p <= 0 || l <= 0) {
+      throw new BadRequestException('page and limit must be positive integers');
+    }
+
+    return this.fieldsService.findPaginated({
+      name,
+      location,
+      sportType,
+      sportTypes: sportTypesArray,
+      sortBy,
+      sortOrder,
+      page: p,
+      limit: l,
     });
   }
 

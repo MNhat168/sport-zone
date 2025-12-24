@@ -7,7 +7,7 @@ import { LessonType } from './entities/lesson-type.entity';
 export class LessonTypesService {
 	constructor(
 		@InjectModel(LessonType.name) private lessonTypeModel: Model<LessonType>,
-	) {}
+	) { }
 
 	async createLessonType(data: { type: string; name: string; description: string; user: string; field: string; lessonPrice: number }): Promise<LessonType> {
 		const lessonType = new this.lessonTypeModel(data);
@@ -18,7 +18,7 @@ export class LessonTypesService {
 	 * Get a lesson type by id. Returns the raw document (may contain ObjectId refs).
 	 */
 	async getLessonTypeById(id: string): Promise<LessonType | null> {
-		return this.lessonTypeModel.findById(id).lean().exec();
+		return this.lessonTypeModel.findById(id).exec();
 	}
 
 	/**

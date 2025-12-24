@@ -38,7 +38,7 @@ export class NotificationListener {
       const bookingIdStr = typeof payload.bookingId === 'string'
         ? payload.bookingId
         : String(payload.bookingId);
-      
+
       if (!Types.ObjectId.isValid(bookingIdStr)) {
         this.logger.error(`[Booking Created] Invalid bookingId: ${bookingIdStr}`);
         return;
@@ -103,7 +103,7 @@ export class NotificationListener {
         // Fallback to original string if parsing fails
         bookingDate = payload.date;
       }
-      
+
       const totalPriceFormatted = ((booking as any).totalPrice || 0).toLocaleString('vi-VN') + '₫';
       const notificationMessage = `Bạn có đặt sân mới tại ${(field as any).name} vào ${bookingDate} từ ${payload.startTime} đến ${payload.endTime}. Khách hàng: ${customerUser.fullName}. Tổng tiền: ${totalPriceFormatted}`;
 
@@ -139,7 +139,7 @@ export class NotificationListener {
     fieldId?: string;
     fieldName?: string;
     fieldLocation?: string;
-    date?: string;     
+    date?: string;
     startTime?: string;
     endTime?: string;
   }) {
@@ -259,10 +259,10 @@ export class NotificationListener {
     const message = `Bạn đã thanh toán thành công ${amountStr} qua ${payload.method.toString().toUpperCase()}${payload.transactionId ? ` (Mã GD: ${payload.transactionId})` : ''}.`;
 
     // Ensure userId is a valid string before creating ObjectId
-    const userIdStr = typeof payload.userId === 'string' 
-      ? payload.userId 
+    const userIdStr = typeof payload.userId === 'string'
+      ? payload.userId
       : String(payload.userId);
-    
+
     if (!Types.ObjectId.isValid(userIdStr)) {
       this.logger.error(`[Payment Success] Invalid userId: ${userIdStr}`);
       return;
@@ -289,7 +289,7 @@ export class NotificationListener {
         const bookingIdStr = typeof payload.bookingId === 'string'
           ? payload.bookingId
           : String(payload.bookingId);
-        
+
         if (!Types.ObjectId.isValid(bookingIdStr)) {
           this.logger.error(`[Payment Success] Invalid bookingId: ${bookingIdStr}`);
           return;
@@ -338,10 +338,10 @@ export class NotificationListener {
                 }).catch(err => this.logger.warn('Failed to send owner email', err));
 
                 // Tạo notification cho field owner
-                const bookingDate = booking.date instanceof Date 
-                  ? booking.date.toLocaleDateString('vi-VN') 
+                const bookingDate = booking.date instanceof Date
+                  ? booking.date.toLocaleDateString('vi-VN')
                   : (typeof booking.date === 'string' ? booking.date : new Date(booking.date).toLocaleDateString('vi-VN'));
-                
+
                 const totalPriceFormatted = (booking.totalPrice || 0).toLocaleString('vi-VN') + '₫';
                 const notificationMessage = `Bạn có đặt sân mới tại ${(field as any).name} vào ${bookingDate} từ ${booking.startTime} đến ${booking.endTime}. Khách hàng: ${customerUser.fullName}. Tổng tiền: ${totalPriceFormatted}`;
 
@@ -385,10 +385,10 @@ export class NotificationListener {
     reason?: string;
   }) {
     // Ensure userId is a valid string before creating ObjectId
-    const userIdStr = typeof payload.userId === 'string' 
-      ? payload.userId 
+    const userIdStr = typeof payload.userId === 'string'
+      ? payload.userId
       : String(payload.userId);
-    
+
     if (!Types.ObjectId.isValid(userIdStr)) {
       this.logger.error(`[Payment Failed] Invalid userId: ${userIdStr}`);
       return;
@@ -411,5 +411,144 @@ export class NotificationListener {
         reason: payload.reason || null,
       },
     });
+  }
+
+  @OnEvent('coach.booking.autoCancelled')
+  async handleCoachBookingAutoCancelled(payload: {
+    bookingId: string
+    userId: string
+    coachId?: string
+    date: Date
+    startTime: string
+    cancelledAt: Date
+  }) {
+    try {
+      // Validate userId
+      if (!Types.ObjectId.isValid(payload.userId)) {
+        this.logger.error(
+          `[Coach Auto-Cancel] Invalid userId: ${payload.userId}`
+        )
+        return
+      }
+
+      // Fetch booking (optional but useful)
+      const booking = await this.bookingModel
+        .findById(payload.bookingId)
+        .lean()
+
+      if (!booking) {
+        this.logger.warn(
+          `[Coach Auto-Cancel] Booking ${payload.bookingId} not found`
+        )
+        return
+      }
+
+      // Format date
+      const bookingDate =
+        payload.date instanceof Date
+          ? payload.date.toLocaleDateString('vi-VN')
+          : new Date(payload.date).toLocaleDateString('vi-VN')
+
+      const message = `Your coach request on ${bookingDate} at ${payload.startTime} was declined due to coach not responding.`
+
+      await this.notificationsService.create({
+        recipient: new Types.ObjectId(payload.userId),
+        type: NotificationType.BOOKING_CANCELLED,
+        title: 'Coach request declined',
+        message,
+        metadata: {
+          bookingId: payload.bookingId,
+          coachId: payload.coachId || null,
+          date: bookingDate,
+          startTime: payload.startTime,
+          reason: 'AUTO_CANCEL_NO_COACH_RESPONSE',
+        },
+      })
+    } catch (error) {
+      this.logger.error(
+        '[Coach Auto-Cancel] Error handling auto-cancel notification',
+        error
+      )
+    }
+  }
+
+  @OnEvent('payment.proof.submitted')
+  async handlePaymentProofSubmitted(payload: {
+    bookingId: string;
+    paymentId: string;
+    userId: string;
+    fieldId?: string;
+  }) {
+    try {
+      // 1. Validate payload
+      if (!payload.bookingId) {
+        this.logger.error('[Payment Proof] Missing bookingId in payload');
+        return;
+      }
+      if (!payload.fieldId) {
+        // Try to fetch fieldId from booking if missing
+        const booking = await this.bookingModel.findById(payload.bookingId).lean();
+        if (booking && booking.field) {
+          payload.fieldId = booking.field.toString();
+        } else {
+          this.logger.error(`[Payment Proof] Missing fieldId in payload and booking ${payload.bookingId}`);
+          return;
+        }
+      }
+
+      // 2. Get Field to find Owner
+      const field = await this.fieldModel.findById(payload.fieldId).lean();
+      if (!field) {
+        this.logger.warn(`[Payment Proof] Field ${payload.fieldId} not found`);
+        return;
+      }
+
+      // 3. Resolve Owner User ID
+      let ownerUserId: string | undefined;
+      const ownerRef: any = (field as any).owner;
+
+      if (ownerRef) {
+        // Try owner as profileId first (common pattern in this codebase)
+        if (Types.ObjectId.isValid(ownerRef)) {
+          const profile = await this.fieldOwnerProfileModel.findById(ownerRef).lean();
+          if (profile?.user) {
+            ownerUserId = (profile.user as any).toString();
+          } else {
+            // Fallback: treat ownerRef as userId if profile not found or has no user
+            ownerUserId = (ownerRef as any).toString?.() || String(ownerRef);
+          }
+        } else {
+          // ownerRef might be an object
+          ownerUserId = (ownerRef as any).toString?.() || String(ownerRef);
+        }
+      }
+
+      if (!ownerUserId || !Types.ObjectId.isValid(ownerUserId)) {
+        this.logger.warn(`[Payment Proof] Could not resolve valid ownerUserId from field ${payload.fieldId}`);
+        return;
+      }
+
+      // 4. Create Notification for Owner
+      const customer = await this.userModel.findById(payload.userId).select('fullName email').lean();
+      const customerName = customer?.fullName || 'Khách hàng';
+
+      await this.notificationsService.create({
+        recipient: new Types.ObjectId(ownerUserId),
+        type: NotificationType.PAYMENT_PROOF_SUBMITTED,
+        title: 'Gửi bằng chứng thanh toán',
+        message: `${customerName} đã gửi bằng chứng thanh toán cho sân ${(field as any).name}. Vui lòng kiểm tra và xác nhận.`,
+        metadata: {
+          bookingId: payload.bookingId,
+          paymentId: payload.paymentId,
+          fieldId: payload.fieldId,
+          customerId: payload.userId
+        }
+      });
+
+      this.logger.log(`[Payment Proof] Notification sent to owner ${ownerUserId} for booking ${payload.bookingId}`);
+
+    } catch (error) {
+      this.logger.error('[Payment Proof] Error handling payment proof notification', error);
+    }
   }
 }

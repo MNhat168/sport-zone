@@ -562,6 +562,23 @@ export class BookingsController {
     return this.bookingsService.declineCoachRequest(coachId, bookingId, reason);
   }
 
+  //Complete a booking request
+  @Patch('bookings/coach/:coachId/:bookingId/complete')
+  async completeBooking(
+    @Param('coachId') coachId: string,
+    @Param('bookingId') bookingId: string,
+  ): Promise<Booking> {
+    return this.bookingsService.completeCoachBooking(coachId, bookingId);
+  }
+
+  //Cancel a booking request
+  @Patch('bookings/coach/:coachId/:bookingId/cancel')
+  async cancelBooking(
+    @Param('coachId') coachId: string,
+    @Param('bookingId') bookingId: string,
+  ): Promise<Booking> {
+    return this.bookingsService.cancelCoachBooking(coachId, bookingId);
+  }
   /**
    * Get all bookings for the authenticated coach
    * NOTE: This route must be defined BEFORE the parameterized route to avoid route conflicts
