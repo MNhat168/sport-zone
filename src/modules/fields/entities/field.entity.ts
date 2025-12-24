@@ -108,7 +108,7 @@ export class Field extends BaseEntity {
 }
 
 export const FieldSchema = SchemaFactory.createForClass(Field);
-
+export type FieldDocument = Field & Document;
 // Cấu hình timestamps từ BaseEntity
 configureBaseEntitySchema(FieldSchema);
 

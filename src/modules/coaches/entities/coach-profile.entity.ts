@@ -72,3 +72,4 @@ export const CoachProfileSchema = SchemaFactory.createForClass(CoachProfile);
 
 // Create 2dsphere index for geo queries
 CoachProfileSchema.index({ 'location.geo': '2dsphere' });
+export type CoachProfileDocument = CoachProfile & Document;
