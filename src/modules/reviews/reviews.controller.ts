@@ -111,29 +111,29 @@ export class ReviewsController {
     });
   }
 
-  // Respond to review
-  @UseGuards(AuthGuard('jwt'))
-  @Patch(':id/respond')
-  async respondToReview(
-    @Request() req,
-    @Param('id') reviewId: string,
-    @Body() body: RespondReviewDto,
-  ) {
-    const userId = req.user._id || req.user.id;
-    const userRole = req.user.role;
-    // Only coach or field_owner can respond
-    if (userRole !== UserRole.COACH && userRole !== UserRole.FIELD_OWNER) {
-      throw new ForbiddenException(
-        'Only coach or field owner can respond to reviews',
-      );
-    }
-    return this.reviewsService.respondToReview({
-      reviewId,
-      userId,
-      userRole,
-      response: body.response,
-    });
-  }
+  // // Respond to review
+  // @UseGuards(AuthGuard('jwt'))
+  // @Patch(':id/respond')
+  // async respondToReview(
+  //   @Request() req,
+  //   @Param('id') reviewId: string,
+  //   @Body() body: RespondReviewDto,
+  // ) {
+  //   const userId = req.user._id || req.user.id;
+  //   const userRole = req.user.role;
+  //   // Only coach or field_owner can respond
+  //   if (userRole !== UserRole.COACH && userRole !== UserRole.FIELD_OWNER) {
+  //     throw new ForbiddenException(
+  //       'Only coach or field owner can respond to reviews',
+  //     );
+  //   }
+  //   return this.reviewsService.respondToReview({
+  //     reviewId,
+  //     userId,
+  //     userRole,
+  //     response: body.response,
+  //   });
+  // }
 
   // // Moderate review
   // @UseGuards(AuthGuard('jwt'))
@@ -154,11 +154,11 @@ export class ReviewsController {
   // }
 
   // Get all reviews for a specific field (authenticated route)
-  @UseGuards(AuthGuard('jwt'))
-  @Get('field/:fieldId/all')
-  async getAllReviewsForField(@Param('fieldId') fieldId: string) {
-    return this.reviewsService.getAllReviewsForField(fieldId);
-  }
+  // @UseGuards(AuthGuard('jwt'))
+  // @Get('field/:fieldId/all')
+  // async getAllReviewsForField(@Param('fieldId') fieldId: string) {
+  //   return this.reviewsService.getAllReviewsForField(fieldId);
+  // }
 
   // Public endpoint for retrieving field reviews (used by frontend)
   // This matches the frontend expectation: GET /reviews/field/:fieldId
