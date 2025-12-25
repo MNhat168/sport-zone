@@ -22,6 +22,7 @@ import { CreateCoachBookingLazyDto } from './dto/create-coach-booking-lazy.dto';
 import { CreateCoachBookingV2Dto } from './dto/create-coach-booking-v2.dto';
 import { CreateFieldBookingLazyDto, FieldAvailabilityQueryDto, MarkHolidayDto } from './dto/create-field-booking-lazy.dto';
 import { CreateFieldBookingV2Dto } from './dto/create-field-booking-v2.dto';
+import { CreateCombinedBookingDto } from './dto/create-combined-booking.dto'; // NEW
 import { VerifyPaymentProofDto } from './dto/verify-payment-proof.dto';
 import { CancelBookingDto } from './dto/cancel-booking.dto';
 import { CreateSessionBookingLazyDto } from './dto/create-session-booking-lazy.dto';
@@ -34,9 +35,16 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { RateLimit, RateLimitGuard } from '@common/guards/rate-limit.guard';
 import { CleanupService } from '../../service/cleanup.service';
-import { BookingStatus } from '@common/enums/booking.enum';
+import { BookingStatus, BookingType } from '@common/enums/booking.enum';
 import { PaymentMethod } from '@common/enums/payment-method.enum';
 import { OptionalJwtAuthGuard } from '@common/guards/optional-jwt-auth.guard';
+import { FieldBookingService } from './services/field-booking.service'; // Ensure this is imported effectively via BookingsService or directly injected if needed. 
+// Note: BookingsService wraps FieldBookingService methods usually. Should I inject FieldBookingService directly?
+// The controller injects BookingsService.
+// I should check if BookingsService exports/wraps FieldBookingService methods or if I should inject FieldBookingService.
+// Looking at the constructor: "private readonly bookingsService: BookingsService".
+// I'll check BookingsService if I should add a wrapper there, or just inject FieldBookingService here.
+// To save time and avoid touching BookingsService file, I will inject FieldBookingService directly into Controller. It's already in the module providers.
 
 /**
  * Bookings Controller with Pure Lazy Creation pattern
@@ -47,8 +55,10 @@ import { OptionalJwtAuthGuard } from '@common/guards/optional-jwt-auth.guard';
 @Controller()
 @UseGuards(RateLimitGuard) // ✅ Apply rate limiting to all routes
 export class BookingsController {
+
   constructor(
     private readonly bookingsService: BookingsService,
+    private readonly fieldBookingService: FieldBookingService, // Injected directly
     @InjectModel(Schedule.name) private readonly scheduleModel: Model<Schedule>,
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
     private readonly cleanupService: CleanupService,
@@ -408,6 +418,21 @@ export class BookingsController {
   }
 
   /**
+   * Combined Field + Coach Hold Booking
+   * Creates a single booking that reserves both field and coach slots
+   */
+  @Post('bookings/combined-hold')
+  @RateLimit({ ttl: 60, limit: 5 })
+  @ApiOperation({ summary: 'Giữ chỗ booking sân + HLV (Combined Hold)' })
+  async createCombinedHold(
+    @Request() req: any,
+    @Body() bookingData: CreateCombinedBookingDto,
+  ): Promise<Booking> {
+    const userId = req.user?.userId || req.user?._id || req.user?.id || null;
+    return await this.fieldBookingService.createCombinedBooking(userId, bookingData);
+  }
+
+  /**
    * Đánh dấu ngày đặc biệt (holiday/maintenance) cho sân
    * Tự động upsert Schedule và xử lý các booking bị ảnh hưởng
    */
@@ -596,6 +621,18 @@ export class BookingsController {
   async getMyCoachBookings(@Request() req): Promise<Booking[]> {
     const userId = this.getUserId(req);
     return this.bookingsService.getMyCoachBookings(userId);
+  }
+
+  @Get('bookings/coach/my-bookings/by-type')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get bookings for coach filtered by type (COACH or FIELD_COACH)' })
+  async getMyCoachBookingsByType(
+    @Request() req,
+    @Query('type') type?: BookingType
+  ): Promise<Booking[]> {
+    const userId = this.getUserId(req);
+    return this.bookingsService.getMyCoachBookingsByType(userId, type);
   }
 
   /**

@@ -16,6 +16,7 @@ import {
 import { BankAccount, BankAccountSchema } from '../field-owner/entities/bank-account.entity';
 import { CoachRegistrationRequest, CoachRegistrationRequestSchema } from './entities/coach-registration-request.entity';
 import { EmailService } from 'src/modules/email/email.service';
+import { ServiceModule } from '../../service/service.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { EmailService } from 'src/modules/email/email.service';
       { name: BankAccount.name, schema: BankAccountSchema },
       { name: CoachRegistrationRequest.name, schema: CoachRegistrationRequestSchema },
     ]),
+    ServiceModule,
   ],
   controllers: [CoachesController],
   providers: [CoachesService, CoachScheduleService, EmailService],

@@ -60,6 +60,14 @@ export class CoachProfile extends BaseEntity {
     };
   };
 
+  // Gallery images for coach profile
+  @Prop({ type: [String], default: [] })
+  galleryImages?: string[];
+
+  // Main profile/avatar image
+  @Prop({ type: String })
+  profileImage?: string;
+
   // Xác thực tài khoản ngân hàng
   @Prop({ type: Boolean, default: false })
   bankVerified?: boolean;

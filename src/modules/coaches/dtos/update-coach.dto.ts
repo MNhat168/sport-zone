@@ -26,4 +26,14 @@ export class UpdateCoachDto {
   @IsOptional()
   @IsString()
   experience?: string;
+
+  @ApiPropertyOptional({ description: 'Gallery images URLs', type: [String] })
+  @IsOptional()
+  @IsArray()
+  galleryImages?: string[];
+
+  @ApiPropertyOptional({ description: 'Profile/avatar image URL' })
+  @IsOptional()
+  @IsString()
+  profileImage?: string;
 }

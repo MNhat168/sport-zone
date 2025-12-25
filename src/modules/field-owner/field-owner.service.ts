@@ -80,7 +80,7 @@ export class FieldOwnerService {
     private readonly configService: ConfigService,
     @Inject(forwardRef(() => FieldsService))
     private readonly fieldsService: FieldsService,
-  ) {}
+  ) { }
 
   async findByOwner(
     ownerId: string,
@@ -159,12 +159,12 @@ export class FieldOwnerService {
           images: validImages,
           amenities: Array.isArray((field as any).amenities)
             ? (field as any).amenities
-                .filter((a: any) => a && a.amenity)
-                .map((a: any) => ({
-                  amenityId: (a.amenity._id as Types.ObjectId).toString(),
-                  name: a.amenity.name,
-                  price: a.price ?? 0,
-                }))
+              .filter((a: any) => a && a.amenity)
+              .map((a: any) => ({
+                amenityId: (a.amenity._id as Types.ObjectId).toString(),
+                name: a.amenity.name,
+                price: a.price ?? 0,
+              }))
             : [],
           operatingHours: field.operatingHours,
           slotDuration: field.slotDuration,
@@ -410,17 +410,21 @@ export class FieldOwnerService {
             .exec();
 
           const transactionIds = transactions.map((t) => t._id);
-          
+
           // Create $or condition: transaction status = 'pending' OR paymentStatus = 'paid'
           const orConditions: any[] = [];
-          
+
           if (transactionIds.length > 0) {
             orConditions.push({ transaction: { $in: transactionIds } });
           }
-          
+
           // Also include bookings with paymentStatus = 'paid'
           orConditions.push({ paymentStatus: 'paid' });
-          
+
+          // ✅ FIX: Include bookings WITHOUT transaction (FIELD_COACH pending)
+          orConditions.push({ transaction: { $exists: false } });
+          orConditions.push({ transaction: null });
+
           if (orConditions.length > 0) {
             bookingFilter.$or = orConditions;
           } else {
@@ -500,7 +504,7 @@ export class FieldOwnerService {
         const court = booking.court as any;
         const courtName = court?.name || (court?.courtNumber ? `Sân ${court.courtNumber}` : null);
         const courtNumber = court?.courtNumber;
-        
+
         return {
           bookingId: booking._id?.toString(),
           fieldId: booking.field?._id?.toString(),
@@ -543,6 +547,271 @@ export class FieldOwnerService {
       };
     } catch (error) {
       this.logger.error(`Error getting all bookings for user ${userId}:`, error);
+      if (
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException ||
+        error instanceof UnauthorizedException
+      ) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to get all bookings');
+    }
+  }
+
+  async getAllBookingsByOwnerWithType(
+    userId: string,
+    filters: {
+      type?: string;
+      fieldName?: string;
+      status?: string;
+      transactionStatus?: string;
+      startDate?: string;
+      endDate?: string;
+      page?: number;
+      limit?: number;
+    },
+  ) {
+    try {
+      if (!Types.ObjectId.isValid(userId)) {
+        throw new BadRequestException('Invalid user ID format');
+      }
+
+      const user = await this.userModel.findById(userId).select('_id role').exec();
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      if (user.role !== 'field_owner') {
+        throw new UnauthorizedException('User is not a field owner');
+      }
+
+      const ownerProfile = await this.fieldOwnerProfileModel
+        .findOne({ user: new Types.ObjectId(userId) })
+        .select('_id facilityName')
+        .exec();
+
+      if (!ownerProfile) {
+        return {
+          bookings: [],
+          pagination: {
+            total: 0,
+            page: filters.page || 1,
+            limit: filters.limit || 10,
+            totalPages: 0,
+            hasNextPage: false,
+            hasPrevPage: false,
+          },
+        };
+      }
+
+      const fieldFilter: any = {
+        owner: ownerProfile._id,
+        isActive: true,
+      };
+
+      if (filters.fieldName) {
+        fieldFilter.name = { $regex: filters.fieldName, $options: 'i' };
+      }
+
+      const ownerFields = await this.fieldModel.find(fieldFilter).select('_id name').exec();
+      if (ownerFields.length === 0) {
+        return {
+          bookings: [],
+          pagination: {
+            total: 0,
+            page: filters.page || 1,
+            limit: filters.limit || 10,
+            totalPages: 0,
+            hasNextPage: false,
+            hasPrevPage: false,
+          },
+        };
+      }
+
+      const fieldIds = ownerFields.map((field) => field._id);
+
+      const bookingFilter: any = {
+        field: { $in: fieldIds },
+      };
+
+      // Add type filter if provided
+      if (filters.type) {
+        bookingFilter.type = filters.type;
+      }
+
+      if (filters.status) {
+        bookingFilter.status = filters.status;
+      }
+
+      if (filters.startDate || filters.endDate) {
+        bookingFilter.date = {};
+        if (filters.startDate) {
+          const startDate = new Date(filters.startDate + 'T00:00:00.000Z');
+          bookingFilter.date.$gte = startDate;
+        }
+        if (filters.endDate) {
+          const endDate = new Date(filters.endDate + 'T23:59:59.999Z');
+          bookingFilter.date.$lte = endDate;
+        }
+      }
+
+      if (filters.transactionStatus) {
+        if (filters.transactionStatus === 'pending') {
+          const transactions = await this.transactionModel
+            .find({ status: filters.transactionStatus })
+            .select('_id')
+            .lean()
+            .exec();
+
+          const transactionIds = transactions.map((t) => t._id);
+
+          const orConditions: any[] = [];
+
+          if (transactionIds.length > 0) {
+            orConditions.push({ transaction: { $in: transactionIds } });
+          }
+
+          // ✅ FIX: Include bookings WITHOUT transaction (FIELD_COACH pending)
+          // BUT exclude cancelled/completed bookings
+          orConditions.push({
+            transaction: { $exists: false },
+            status: { $nin: ['cancelled', 'completed'] }
+          });
+          orConditions.push({
+            transaction: null,
+            status: { $nin: ['cancelled', 'completed'] }
+          });
+
+          if (orConditions.length > 0) {
+            bookingFilter.$or = orConditions;
+          } else {
+            return {
+              bookings: [],
+              pagination: {
+                total: 0,
+                page: filters.page || 1,
+                limit: filters.limit || 10,
+                totalPages: 0,
+                hasNextPage: false,
+                hasPrevPage: false,
+              },
+            };
+          }
+        } else {
+          const transactions = await this.transactionModel
+            .find({ status: filters.transactionStatus })
+            .select('_id')
+            .lean()
+            .exec();
+
+          const transactionIds = transactions.map((t) => t._id);
+          if (transactionIds.length > 0) {
+            bookingFilter.transaction = { $in: transactionIds };
+          } else {
+            return {
+              bookings: [],
+              pagination: {
+                total: 0,
+                page: filters.page || 1,
+                limit: filters.limit || 10,
+                totalPages: 0,
+                hasNextPage: false,
+                hasPrevPage: false,
+              },
+            };
+          }
+        }
+      }
+
+      const page = filters.page || 1;
+      const limit = filters.limit || 10;
+      const skip = (page - 1) * limit;
+
+      const total = await this.bookingModel.countDocuments(bookingFilter);
+
+      const bookings = await this.bookingModel
+        .find(bookingFilter)
+        .populate({
+          path: 'field',
+          select: 'name _id',
+        })
+        .populate({
+          path: 'court',
+          select: 'name courtNumber',
+        })
+        .populate({
+          path: 'user',
+          select: 'fullName phone email',
+        })
+        .populate({
+          path: 'selectedAmenities',
+          select: 'name price',
+        })
+        .populate({
+          path: 'transaction',
+          select: 'status',
+        })
+        .populate({
+          path: 'requestedCoach',
+          select: 'fullName phoneNumber',
+        })
+        .sort({ date: -1, startTime: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec();
+
+      const formattedBookings = bookings.map((booking) => {
+        const court = booking.court as any;
+        const courtName = court?.name || (court?.courtNumber ? `Sân ${court.courtNumber}` : null);
+        const courtNumber = court?.courtNumber;
+
+        return {
+          bookingId: booking._id?.toString(),
+          fieldId: booking.field?._id?.toString(),
+          fieldName: (booking.field as any)?.name || 'Unknown Field',
+          courtName,
+          courtNumber,
+          date:
+            typeof booking.date === 'string'
+              ? booking.date
+              : booking.date.toISOString().split('T')[0],
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          status: booking.status,
+          type: booking.type,
+          transactionStatus: (booking.transaction as any)?.status || null,
+          approvalStatus: (booking as any).approvalStatus || (booking as any).noteStatus || undefined,
+          totalPrice: booking.totalPrice,
+          customer: {
+            fullName: (booking.user as any)?.fullName || 'Unknown',
+            phone: (booking.user as any)?.phone || 'N/A',
+            email: (booking.user as any)?.email || 'N/A',
+          },
+          requestedCoach: booking.requestedCoach ? {
+            fullName: (booking.requestedCoach as any)?.fullName || 'Unknown',
+            phoneNumber: (booking.requestedCoach as any)?.phoneNumber || 'N/A',
+          } : null,
+          selectedAmenities: booking.selectedAmenities?.map((amenity: any) => amenity.name) || [],
+          amenitiesFee: booking.amenitiesFee || 0,
+          createdAt: booking.createdAt,
+        };
+      });
+
+      const totalPages = Math.ceil(total / limit);
+
+      return {
+        bookings: formattedBookings,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1,
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error getting all bookings with type for user ${userId}:`, error);
       if (
         error instanceof BadRequestException ||
         error instanceof NotFoundException ||
@@ -601,7 +870,7 @@ export class FieldOwnerService {
         try {
           const fieldId = (savedField._id as Types.ObjectId).toString();
           const fieldName = savedField.name;
-          
+
           // Prepare pricing override from field's basePrice and priceRanges
           const pricingOverride = {
             basePrice: savedField.basePrice,
@@ -609,9 +878,9 @@ export class FieldOwnerService {
           };
 
           // Create courts
-           const courtPromises: Promise<any>[] = [];
+          const courtPromises: Promise<any>[] = [];
           for (let i = 1; i <= numberOfCourts; i++) {
-            const courtName = `${fieldName} - Court ${i}`;
+            const courtName = `Court ${i}`;
             courtPromises.push(
               this.courtModel.create({
                 field: savedField._id,
@@ -792,6 +1061,43 @@ export class FieldOwnerService {
       });
 
       const savedField = await newField.save();
+
+      // Create courts if numberOfCourts is specified and > 0
+      const numberOfCourts = createFieldDto.numberOfCourts ? parseInt(createFieldDto.numberOfCourts) : 1;
+      if (numberOfCourts > 0) {
+        try {
+          const fieldId = (savedField._id as Types.ObjectId).toString();
+          const fieldName = savedField.name;
+
+          // Prepare pricing override from field's basePrice and priceRanges
+          const pricingOverride = {
+            basePrice: savedField.basePrice,
+            priceRanges: savedField.priceRanges || [],
+          };
+
+          // Create courts
+          const courtPromises: Promise<any>[] = [];
+          for (let i = 1; i <= numberOfCourts; i++) {
+            const courtName = `Court ${i}`;
+            courtPromises.push(
+              this.courtModel.create({
+                field: savedField._id,
+                name: courtName,
+                courtNumber: i,
+                pricingOverride,
+                isActive: true,
+              })
+            );
+          }
+
+          await Promise.all(courtPromises);
+          this.logger.log(`Successfully created ${numberOfCourts} court(s) for field ${fieldId}`);
+        } catch (courtError) {
+          // Log error but don't fail the field creation
+          this.logger.error(`Failed to create courts for field ${savedField._id}:`, courtError);
+          // Field is already created, so we continue
+        }
+      }
 
       return {
         id: (savedField._id as Types.ObjectId).toString(),
@@ -1307,8 +1613,8 @@ export class FieldOwnerService {
         // Only include documents if provided (for backward compatibility and business license)
         documents: dto.documents
           ? {
-              businessLicense: dto.documents.businessLicense,
-            }
+            businessLicense: dto.documents.businessLicense,
+          }
           : undefined,
         // eKYC fields
         ekycSessionId: dto.ekycSessionId,
@@ -1324,12 +1630,12 @@ export class FieldOwnerService {
           // Convert frontend format {lat, lng} to GeoJSON format [lng, lat]
           facilityLocationCoordinates: dto.facilityLocationCoordinates
             ? {
-                type: 'Point' as const,
-                coordinates: [
-                  dto.facilityLocationCoordinates.lng,
-                  dto.facilityLocationCoordinates.lat,
-                ],
-              }
+              type: 'Point' as const,
+              coordinates: [
+                dto.facilityLocationCoordinates.lng,
+                dto.facilityLocationCoordinates.lat,
+              ],
+            }
             : undefined,
           supportedSports: dto.supportedSports || [],
           description: dto.description || '',
@@ -1864,7 +2170,7 @@ export class FieldOwnerService {
   ): Promise<void> {
     try {
       this.logger.log(`[Verification Webhook] Processing orderCode: ${orderCode}, status: ${webhookData.status}`);
-      
+
       // Find bank account by verification order code
       const bankAccount = await this.bankAccountModel
         .findOne({
@@ -1900,33 +2206,33 @@ export class FieldOwnerService {
       try {
         const transaction = await this.transactionModel.findOne({ externalTransactionId: String(orderCode) }).exec();
         if (transaction) {
-            if (webhookData.status === 'PAID') {
-                transaction.status = TransactionStatus.SUCCEEDED;
-                transaction.notes = 'Bank account verification fee paid successfully';
-            } else if (webhookData.status === 'CANCELLED' || webhookData.status === 'EXPIRED') {
-                transaction.status = TransactionStatus.FAILED;
-                transaction.notes = `Bank account verification fee ${webhookData.status.toLowerCase()}`;
-            }
-            // Update PayOS metadata
-            transaction.metadata = {
-                ...transaction.metadata,
-                payosOrderCode: orderCode,
-                payosAccountNumber: webhookData.counterAccountNumber,
-                payosReference: webhookData.reference || 'PayOS Webhook',
-                payosTransactionDateTime: webhookData.transactionDateTime,
-            };
-            await transaction.save();
-            this.logger.log(`[Verification Webhook] Updated transaction ${transaction._id} status to ${transaction.status}`);
+          if (webhookData.status === 'PAID') {
+            transaction.status = TransactionStatus.SUCCEEDED;
+            transaction.notes = 'Bank account verification fee paid successfully';
+          } else if (webhookData.status === 'CANCELLED' || webhookData.status === 'EXPIRED') {
+            transaction.status = TransactionStatus.FAILED;
+            transaction.notes = `Bank account verification fee ${webhookData.status.toLowerCase()}`;
+          }
+          // Update PayOS metadata
+          transaction.metadata = {
+            ...transaction.metadata,
+            payosOrderCode: orderCode,
+            payosAccountNumber: webhookData.counterAccountNumber,
+            payosReference: webhookData.reference || 'PayOS Webhook',
+            payosTransactionDateTime: webhookData.transactionDateTime,
+          };
+          await transaction.save();
+          this.logger.log(`[Verification Webhook] Updated transaction ${transaction._id} status to ${transaction.status}`);
         } else {
-            this.logger.warn(`[Verification Webhook] Transaction not found for orderCode ${orderCode}`);
+          this.logger.warn(`[Verification Webhook] Transaction not found for orderCode ${orderCode}`);
         }
       } catch (txError) {
         this.logger.error(`[Verification Webhook] Error updating transaction for orderCode ${orderCode}`, txError);
         // Don't throw here, continue to update BankAccount
       }
-      
+
       if (webhookData.status === 'CANCELLED' || webhookData.status === 'EXPIRED') {
-          return;
+        return;
       }
 
       // Verify account number match (if counter account information is available)
@@ -1951,7 +2257,7 @@ export class FieldOwnerService {
 
           this.logger.log(
             `[Verification Webhook] ✅ Bank account ${bankAccount._id} verified successfully. ` +
-              `Account: ${counterAccountNumber}, Name: ${webhookData.counterAccountName || 'N/A'}`,
+            `Account: ${counterAccountNumber}, Name: ${webhookData.counterAccountName || 'N/A'}`,
           );
         } else {
           // ❌ Mismatch - Reject
@@ -1963,7 +2269,7 @@ export class FieldOwnerService {
 
           this.logger.warn(
             `[Verification Webhook] ❌ Bank account ${bankAccount._id} verification failed. ` +
-              `Registered: ${registeredAccountNumber}, Payer: ${counterAccountNumber}`,
+            `Registered: ${registeredAccountNumber}, Payer: ${counterAccountNumber}`,
           );
         }
       } else if (webhookData.status === 'PAID' && !counterAccountNumber) {
@@ -1980,7 +2286,7 @@ export class FieldOwnerService {
 
         this.logger.warn(
           `[Verification Webhook] ⚠️ Payment PAID for orderCode ${orderCode} but counterAccountNumber is missing. ` +
-            `Marking bank account ${bankAccount._id} as VERIFIED based on successful verification payment.`,
+          `Marking bank account ${bankAccount._id} as VERIFIED based on successful verification payment.`,
         );
       }
 
@@ -2084,7 +2390,7 @@ export class FieldOwnerService {
       this.logger.log(`Bank account ${bankAccountId} needs verification but has no payment. Creating one...`);
       const verification = await this.createVerificationPayment(bankAccountId);
       const paymentStatus = 'pending';
-      
+
       return {
         needsVerification: true,
         verificationPaymentStatus: paymentStatus,
@@ -2398,9 +2704,9 @@ export class FieldOwnerService {
       // Convert GeoJSON format [lng, lat] back to frontend format {lat, lng}
       facilityLocationCoordinates: facility?.facilityLocationCoordinates?.coordinates
         ? {
-            lat: facility.facilityLocationCoordinates.coordinates[1],
-            lng: facility.facilityLocationCoordinates.coordinates[0],
-          }
+          lat: facility.facilityLocationCoordinates.coordinates[1],
+          lng: facility.facilityLocationCoordinates.coordinates[0],
+        }
         : undefined,
       supportedSports: facility?.supportedSports,
       description: facility?.description,
@@ -2422,7 +2728,7 @@ export class FieldOwnerService {
     const needsVerification =
       account.status === BankAccountStatus.PENDING &&
       account.verificationPaymentStatus !== 'paid';
-    
+
     return {
       id: (account._id as Types.ObjectId).toString(),
       fieldOwner: (account.fieldOwner as Types.ObjectId)?.toString() || '',

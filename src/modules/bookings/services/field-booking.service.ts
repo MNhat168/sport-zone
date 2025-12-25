@@ -17,6 +17,10 @@ import { CreateFieldBookingV2Dto } from '../dto/create-field-booking-v2.dto';
 import { AvailabilityService } from './availability.service';
 import { BookingEmailService } from './booking-email.service';
 import { UserRole } from '@common/enums/user.enum';
+import { CoachProfile } from '../../coaches/entities/coach-profile.entity';
+import { CoachesService } from '../../coaches/coaches.service';
+import { CreateCombinedBookingDto } from '../dto/create-combined-booking.dto';
+import { generatePayOSOrderCode } from '../../transactions/utils/payos.utils';
 
 /**
  * Field Booking Service
@@ -33,13 +37,15 @@ export class FieldBookingService {
     @InjectModel(Court.name) private readonly courtModel: Model<Court>,
     @InjectModel(FieldOwnerProfile.name) private readonly fieldOwnerProfileModel: Model<FieldOwnerProfile>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
     @InjectConnection() private readonly connection: Connection,
     private readonly eventEmitter: EventEmitter2,
     private readonly transactionsService: TransactionsService,
     private readonly emailService: EmailService,
     private readonly availabilityService: AvailabilityService,
     private readonly bookingEmailService: BookingEmailService,
-  ) {}
+    private readonly coachesService: CoachesService,
+  ) { }
 
   /**
    * Create field booking with Pure Lazy Creation pattern
@@ -72,7 +78,7 @@ export class FieldBookingService {
 
         // Validate time slots
         this.availabilityService.validateTimeSlots(bookingData.startTime, bookingData.endTime, field, bookingDate);
-        
+
         // Calculate slots and pricing
         const numSlots = this.availabilityService.calculateNumSlots(bookingData.startTime, bookingData.endTime, field.slotDuration);
         const pricingInfo = this.availabilityService.calculatePricing(
@@ -145,13 +151,13 @@ export class FieldBookingService {
         // Only CASH payments can be CONFIRMED immediately (if no note)
         const paymentMethod = bookingData.paymentMethod ?? PaymentMethod.CASH;
         const isOnlinePayment = paymentMethod === PaymentMethod.PAYOS ||
-                                paymentMethod === PaymentMethod.MOMO ||
-                                paymentMethod === PaymentMethod.ZALOPAY ||
-                                paymentMethod === PaymentMethod.EBANKING ||
-                                paymentMethod === PaymentMethod.CREDIT_CARD ||
-                                paymentMethod === PaymentMethod.DEBIT_CARD ||
-                                paymentMethod === PaymentMethod.QR_CODE;
-        
+          paymentMethod === PaymentMethod.MOMO ||
+          paymentMethod === PaymentMethod.ZALOPAY ||
+          paymentMethod === PaymentMethod.EBANKING ||
+          paymentMethod === PaymentMethod.CREDIT_CARD ||
+          paymentMethod === PaymentMethod.DEBIT_CARD ||
+          paymentMethod === PaymentMethod.QR_CODE;
+
         // Booking status logic:
         // - Online payments: Always PENDING (wait for payment confirmation)
         // - Cash with note: PENDING (needs confirmation)
@@ -236,7 +242,7 @@ export class FieldBookingService {
             },
             $inc: { version: 1 }
           },
-          { 
+          {
             session,
             new: true
             // ❌ writeConcern không được phép trong transaction - chỉ dùng ở transaction level
@@ -272,17 +278,17 @@ export class FieldBookingService {
 
     } catch (error) {
       this.logger.error('Error creating field booking', error);
-      
+
       // Re-throw known exceptions as-is
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
-      
+
       // ✅ SECURITY: Detect optimistic locking failures (version mismatch)
       if (error.message?.includes('Slot was booked')) {
         throw new BadRequestException('Slot was booked by another user. Please refresh availability and try again.');
       }
-      
+
       // Generic error for unexpected issues
       throw new InternalServerErrorException('Failed to create booking. Please try again.');
     } finally {
@@ -448,7 +454,7 @@ export class FieldBookingService {
 
         // Validate time slots
         this.availabilityService.validateTimeSlots(bookingData.startTime, bookingData.endTime, field, bookingDate);
-        
+
         // Calculate slots and pricing
         const numSlots = this.availabilityService.calculateNumSlots(bookingData.startTime, bookingData.endTime, field.slotDuration);
         const pricingInfo = this.availabilityService.calculatePricing(
@@ -567,7 +573,7 @@ export class FieldBookingService {
             },
             $inc: { version: 1 }
           },
-          { 
+          {
             session,
             new: true
           }
@@ -608,15 +614,15 @@ export class FieldBookingService {
           endTime: bookingData.endTime,
         }
       });
-      
+
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
-      
+
       if (error.message?.includes('Slot was booked')) {
         throw new BadRequestException('Slot was booked by another user. Please refresh availability and try again.');
       }
-      
+
       // Re-throw with more context if it's a known error
       const errorMessage = error.message || 'Failed to create booking. Please try again.';
       throw new InternalServerErrorException(errorMessage);
@@ -683,4 +689,339 @@ export class FieldBookingService {
 
   // Note: Email sending is now handled by BookingEmailService after transaction commits
   // This prevents email delays from causing transaction timeouts
+
+  /**
+   * Create combined Field + Coach booking (Pure Lazy Creation)
+   * Handles both field and coach slots reservation in a single transaction
+   */
+  async createCombinedBooking(
+    userId: string | null,
+    dto: CreateCombinedBookingDto
+  ): Promise<Booking> {
+    const session: ClientSession = await this.connection.startSession();
+    let booking: Booking;
+    let finalUserId: string;
+    let coachName: string | undefined;
+    let coachEmail: string | undefined;
+    let coachPrice: number = 0;
+    let fieldPrice: number = 0;
+    let fieldName: string | undefined;
+    let fieldAddress: string | undefined;
+    let fieldOwnerEmail: string | undefined;
+    let guestUser: any;
+
+    try {
+      // Step 0: Resolve userId
+      if (!userId) {
+        if (!dto.guestEmail) {
+          throw new BadRequestException('Email is required for guest bookings');
+        }
+        // Guest user creation/lookup happens outside transaction first (optimization)
+        guestUser = await this.createOrFindGuestUser(
+          dto.guestEmail,
+          dto.guestName,
+          dto.guestPhone
+        );
+        finalUserId = (guestUser._id as Types.ObjectId).toString();
+      } else {
+        finalUserId = userId;
+      }
+
+      booking = await session.withTransaction(async () => {
+        // --- 1. VALIDATE & LOCK FIELD ---
+        const field = await this.fieldModel.findById(dto.fieldId).session(session);
+        if (!field || !field.isActive) throw new NotFoundException('Field not found or inactive');
+
+        fieldName = field.name;
+        fieldAddress = field.location?.address || '';
+
+        const court = await this.validateCourt(dto.courtId, dto.fieldId, session);
+        const bookingDate = new Date(dto.date);
+
+        // Validate Field Time Slots
+        this.availabilityService.validateTimeSlots(dto.startTime, dto.endTime, field, bookingDate);
+
+        // Upsert Field Schedule (Lazy)
+        const fieldSchedule = await this.scheduleModel.findOneAndUpdate(
+          { field: new Types.ObjectId(dto.fieldId), court: court._id, date: bookingDate },
+          {
+            $setOnInsert: {
+              field: new Types.ObjectId(dto.fieldId),
+              court: court._id,
+              date: bookingDate,
+              bookedSlots: [],
+              isHoliday: false
+            },
+            $inc: { version: 1 }
+          },
+          { upsert: true, new: true, session }
+        ).exec();
+
+        if (fieldSchedule.isHoliday) throw new BadRequestException(`Field holiday: ${fieldSchedule.holidayReason}`);
+
+        // ✅ CRITICAL FIX: Only check actual Booking records (source of truth)
+        // Schedule.bookedSlots often contains the same slots as Booking records, causing false positive conflicts
+        // The availability API uses Booking records as the primary source, so we should match that behavior
+        this.logger.log(`[createCombinedBooking] Checking field availability for date: ${bookingDate.toISOString()}, court: ${(court as any)._id.toString()}, time: ${dto.startTime} - ${dto.endTime}`);
+
+        const actualFieldBookings = await this.availabilityService.getExistingBookingsForDate(
+          dto.fieldId,
+          bookingDate,
+          (court as any)._id.toString(),
+          session // ✅ Pass session for transactional consistency
+        );
+
+        this.logger.log(`[createCombinedBooking] Found ${actualFieldBookings.length} existing bookings`);
+
+        // Only use actualFieldBookings to check conflicts (avoid duplicate counting from Schedule.bookedSlots)
+        const fieldBookedSlots = actualFieldBookings.map(b => ({
+          startTime: b.startTime,
+          endTime: b.endTime,
+          bookingId: (b._id as any).toString(),
+          status: b.status
+        }));
+
+        this.logger.log(`[createCombinedBooking] Field booked slots: ${JSON.stringify(fieldBookedSlots)}`);
+
+        const fieldConflict = this.availabilityService.findSlotConflict(dto.startTime, dto.endTime, fieldBookedSlots);
+
+        if (fieldConflict) {
+          this.logger.error(`[createCombinedBooking] Conflict detected! Requested slot ${dto.startTime} - ${dto.endTime} conflicts with existing slot ${fieldConflict.startTime} - ${fieldConflict.endTime}`);
+        }
+        if (fieldConflict) {
+          throw new BadRequestException(`Field slots are not available. Conflict with: ${fieldConflict.startTime} - ${fieldConflict.endTime}`);
+        }
+
+        // --- 2. VALIDATE & LOCK COACH ---
+        const coachProfile = await this.coachProfileModel.findOne({ user: new Types.ObjectId(dto.coachId) }).session(session);
+        if (!coachProfile) throw new NotFoundException('Coach not found');
+
+        const coachUser = await this.userModel.findById(dto.coachId).session(session);
+        if (coachUser) {
+          coachName = coachUser.fullName;
+          coachEmail = coachUser.email;
+        }
+        const coachConfig = await this.coachesService.getCoachById(dto.coachId); // Get config for pricing
+        if (!coachConfig) throw new NotFoundException('Coach config not found');
+
+        // Upsert Coach Schedule (Lazy)
+        const coachSchedule = await this.scheduleModel.findOneAndUpdate(
+          { coach: new Types.ObjectId(String(coachProfile._id)), date: bookingDate },
+          {
+            $setOnInsert: {
+              field: new Types.ObjectId(dto.fieldId), // Associate with field context
+              coach: new Types.ObjectId(String(coachProfile._id)),
+              date: bookingDate,
+              bookedSlots: [],
+              isHoliday: false
+            },
+            $inc: { version: 1 }
+          },
+          { upsert: true, new: true, session }
+        ).exec();
+
+        if (coachSchedule.isHoliday) throw new BadRequestException(`Coach holiday: ${coachSchedule.holidayReason}`);
+        const coachConflict = this.availabilityService.findSlotConflict(dto.startTime, dto.endTime, coachSchedule.bookedSlots);
+        if (coachConflict) {
+          throw new BadRequestException(`Coach slots are not available. Conflict with: ${coachConflict.startTime} - ${coachConflict.endTime}`);
+        }
+
+        // --- 3. CALCULATE PRICING ---
+        // Field Price
+        const fieldPricing = this.availabilityService.calculatePricing(
+          dto.startTime, dto.endTime, field, bookingDate, court.pricingOverride
+        );
+        fieldPrice = fieldPricing.totalPrice;
+
+        // Coach Price
+        const startMin = this.availabilityService.timeStringToMinutes(dto.startTime);
+        const endMin = this.availabilityService.timeStringToMinutes(dto.endTime);
+        const hours = (endMin - startMin) / 60;
+        coachPrice = Math.round((coachConfig.hourlyRate || coachProfile.hourlyRate || 0) * hours);
+
+        const bookingAmount = fieldPrice + coachPrice;
+        const platformFee = Math.round(bookingAmount * 0.05);
+        const totalAmount = bookingAmount + platformFee;
+
+        // Determine payment method and handle PayOS specifics
+        const paymentMethod = dto.paymentMethod ?? PaymentMethod.BANK_TRANSFER;
+        let externalTransactionId: string | undefined;
+
+        if (paymentMethod === PaymentMethod.PAYOS) {
+          externalTransactionId = generatePayOSOrderCode().toString();
+          this.logger.log(`Generated PayOS orderCode: ${externalTransactionId} for combined booking`);
+        }
+
+        // --- 4. CREATE BOOKING ---
+        const createdBooking = new this.bookingModel({
+          user: new Types.ObjectId(finalUserId),
+          field: new Types.ObjectId(dto.fieldId),
+          court: court._id,
+          requestedCoach: new Types.ObjectId(String(coachProfile._id)),
+          date: bookingDate,
+          type: BookingType.FIELD_COACH, // Combined field + coach booking
+          startTime: dto.startTime,
+          endTime: dto.endTime,
+          numSlots: this.availabilityService.calculateNumSlots(dto.startTime, dto.endTime, field.slotDuration),
+
+          status: BookingStatus.PENDING,
+          paymentStatus: 'unpaid',
+          coachStatus: 'pending', // Pending coach acceptance
+          approvalStatus: dto.note ? 'pending' : undefined, // Pending field owner acceptance if note
+
+          bookingAmount,
+          platformFee,
+          totalPrice: totalAmount,
+          note: dto.note,
+
+          pricingSnapshot: {
+            basePrice: field.basePrice,
+            appliedMultiplier: fieldPricing.multiplier,
+            priceBreakdown: `Field: ${fieldPrice} + Coach: ${coachPrice}`
+          },
+
+          metadata: {
+            paymentMethod: paymentMethod,
+            isSlotHold: true, // Hold slots immediately
+            slotsReleased: false
+          }
+        });
+
+        await createdBooking.save({ session });
+
+        // --- 5. CREATE PAYMENT ---
+        // ⚠️ IMPORTANT: For FIELD_COACH bookings, transaction is NOT created immediately
+        // Transaction will be created AFTER coach accepts and user proceeds to payment
+        // This is handled by the coach acceptance flow and payment callback
+
+        // REMOVED: Automatic transaction creation
+        // const payment = await this.transactionsService.createPayment({...}, session);
+        // createdBooking.transaction = payment._id as Types.ObjectId;
+
+        // Transaction will be created later when:
+        // 1. Coach accepts the booking (sends payment link)
+        // 2. User completes payment (payment callback creates transaction)
+
+        // --- 6. UPDATE SCHEDULES (Book Slots) ---
+        // Book Field
+        const fieldUpdateResult = await this.scheduleModel.findOneAndUpdate(
+          { _id: fieldSchedule._id, version: fieldSchedule.version },
+          { $push: { bookedSlots: { startTime: dto.startTime, endTime: dto.endTime } }, $inc: { version: 1 } },
+          { session, new: true }
+        ).exec();
+        if (!fieldUpdateResult) throw new BadRequestException('Field slot booked by another user');
+
+        // Book Coach
+        const coachUpdateResult = await this.scheduleModel.findOneAndUpdate(
+          { _id: coachSchedule._id, version: coachSchedule.version },
+          { $push: { bookedSlots: { startTime: dto.startTime, endTime: dto.endTime } }, $inc: { version: 1 } },
+          { session, new: true }
+        ).exec();
+        if (!coachUpdateResult) throw new BadRequestException('Coach slot booked by another user');
+
+        return createdBooking;
+      }, {
+        readConcern: { level: 'snapshot' },
+        writeConcern: { w: 'majority', j: true },
+        maxCommitTimeMS: 15000
+      });
+
+      // --- 7. NOTIFICATIONS (Outside Transaction) ---
+      // Emit event for real-time notifications
+      this.eventEmitter.emit('booking.created', {
+        bookingId: booking._id,
+        userId: finalUserId,
+        fieldId: dto.fieldId,
+        courtId: dto.courtId,
+        coachId: dto.coachId,
+        date: dto.date,
+        startTime: dto.startTime,
+        endTime: dto.endTime,
+        type: BookingType.FIELD_COACH
+      });
+
+      // Send email (outside transaction)
+      try {
+        let customerEmail: string | undefined;
+        if (dto.guestEmail) {
+          customerEmail = dto.guestEmail;
+        } else if (finalUserId) {
+          const user = await this.userModel.findById(finalUserId).select('email').lean();
+          customerEmail = user?.email;
+        }
+
+        if (customerEmail && coachName) {
+          // Re-fetch field for details
+          const field = await this.fieldModel.findById(dto.fieldId).select('name location').lean();
+
+          await this.emailService.sendCombinedBookingPendingConfirmation({
+            to: customerEmail,
+            field: {
+              name: (field as any)?.name || 'Sân bóng',
+              address: (field as any)?.location?.address || ''
+            },
+            coach: { name: coachName || 'HLV' },
+            booking: {
+              date: new Date(booking.date).toLocaleDateString('vi-VN'),
+              startTime: booking.startTime,
+              endTime: booking.endTime
+            },
+            pricing: {
+              totalFormatted: (booking.totalPrice || 0).toLocaleString('vi-VN') + '₫'
+            },
+            paymentMethod: dto.paymentMethod
+          });
+        }
+
+        // Send Email to Coach
+        if (coachEmail) {
+          await this.emailService.sendCoachNewRequest({
+            to: coachEmail,
+            customer: { fullName: dto.guestName || (guestUser ? guestUser.fullName : 'Khách hàng') },
+            field: {
+              name: fieldName || 'Sân bóng',
+              address: fieldAddress || ''
+            },
+            booking: {
+              date: new Date(booking.date).toLocaleDateString('vi-VN'),
+              startTime: booking.startTime,
+              endTime: booking.endTime
+            },
+            pricing: {
+              coachPriceFormatted: (coachPrice).toLocaleString('vi-VN') + '₫'
+            }
+          });
+        }
+
+        // Send Email to Field Owner
+        if (fieldOwnerEmail) {
+          await this.emailService.sendFieldNewBookingPending({
+            to: fieldOwnerEmail,
+            field: { name: fieldName || 'Sân bóng' },
+            customer: { fullName: dto.guestName || (guestUser ? guestUser.fullName : 'Khách hàng') },
+            coach: { name: coachName || 'HLV' },
+            booking: {
+              date: new Date(booking.date).toLocaleDateString('vi-VN'),
+              startTime: booking.startTime,
+              endTime: booking.endTime
+            },
+            pricing: {
+              fieldPriceFormatted: (fieldPrice).toLocaleString('vi-VN') + '₫'
+            }
+          });
+        }
+      } catch (error) {
+        this.logger.warn('Failed to send combined booking confirmation email', error);
+      }
+
+    } catch (error) {
+      this.logger.error('Error creating combined booking', error);
+      if (error instanceof BadRequestException || error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException(error.message || 'Failed to create combined booking');
+    } finally {
+      await session.endSession();
+    }
+
+    return booking;
+  }
 }
