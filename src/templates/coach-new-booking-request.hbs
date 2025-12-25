@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Yêu cầu đặt HLV mới</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            color: #111827;
+        }
+
+        .container {
+            max-width: 640px;
+            margin: 0 auto;
+            padding: 24px;
+            background: #ffffff;
+            border-radius: 12px;
+        }
+
+        .title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .muted {
+            color: #6b7280;
+        }
+
+        .section {
+            margin: 16px 0;
+            padding: 12px;
+            background: #f9fafb;
+            border-radius: 8px;
+        }
+
+        .row {
+            margin: 6px 0;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 12px 16px;
+            background: #10b981;
+            color: #fff;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="title">{{title}}</div>
+        <div class="muted">Bạn vừa nhận được một yêu cầu đặt HLV mới.</div>
+        <p>Vui lòng đăng nhập vào ứng dụng SportZone Coach để xem chi tiết và phản hồi trong thời gian sớm nhất.</p>
+
+        <div class="section">
+            <div class="row"><strong>Khách hàng:</strong> {{customer.fullName}}</div>
+            <div class="row"><strong>Sân:</strong> {{field.name}}</div>
+            {{#if field.address}}
+            <div class="row"><strong>Địa chỉ:</strong> {{field.address}}</div>
+            {{/if}}
+            <div class="row"><strong>Thời gian:</strong> {{booking.date}} {{booking.startTime}} - {{booking.endTime}}
+            </div>
+            <div class="row"><strong>Tổng thu nhập dự kiến:</strong> {{pricing.coachPriceFormatted}}</div>
+        </div>
+
+        <p class="muted">Lưu ý: Nếu không phản hồi trong vòng 2 giờ, yêu cầu sẽ tự động bị hủy.</p>
+    </div>
+</body>
+
+</html>

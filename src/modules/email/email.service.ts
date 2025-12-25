@@ -198,6 +198,119 @@ export class EmailService {
 		});
 	}
 
+
+	/**
+	 * Send combined booking pending confirmation (Awaiting Coach)
+	 */
+	async sendCombinedBookingPendingConfirmation(payload: {
+		to: string;
+		field: { name: string; address: string };
+		coach: { name: string };
+		booking: { date: string; startTime: string; endTime: string };
+		pricing: { totalFormatted: string };
+		paymentMethod?: PaymentMethod | string;
+	}) {
+		let methodLabel = 'Chưa chọn';
+		if (payload.paymentMethod !== undefined) {
+			if (typeof payload.paymentMethod === 'number') {
+				methodLabel = PaymentMethodLabels[payload.paymentMethod as PaymentMethod] || 'Unknown';
+			} else if (typeof payload.paymentMethod === 'string') {
+				methodLabel = payload.paymentMethod;
+			}
+		}
+
+		await this.sendMail({
+			to: payload.to,
+			subject: 'Xác nhận đặt sân & HLV (Đang chờ duyệt) - SportZone',
+			template: 'combined-booking-confirmation.hbs',
+			context: {
+				title: 'Xác nhận đặt sân & HLV',
+				field: payload.field,
+				coach: payload.coach,
+				booking: payload.booking,
+				pricing: payload.pricing,
+				payment: { methodLabel },
+			},
+		});
+	}
+
+	/**
+	 * Send email to Coach for new booking request
+	 */
+	async sendCoachNewRequest(payload: {
+		to: string;
+		customer: { fullName: string };
+		field: { name: string; address?: string };
+		booking: { date: string; startTime: string; endTime: string };
+		pricing: { coachPriceFormatted: string };
+	}) {
+		await this.sendMail({
+			to: payload.to,
+			subject: 'Yêu cầu đặt HLV mới - SportZone',
+			template: 'coach-new-booking-request.hbs',
+			context: {
+				title: 'Yêu cầu đặt HLV mới',
+				customer: payload.customer,
+				field: payload.field,
+				booking: payload.booking,
+				pricing: payload.pricing,
+			},
+		});
+	}
+
+	/**
+	 * Send email to Field Owner for new combined booking (Pending Coach)
+	 */
+	async sendFieldNewBookingPending(payload: {
+		to: string;
+		field: { name: string };
+		customer: { fullName: string };
+		coach: { name: string };
+		booking: { date: string; startTime: string; endTime: string };
+		pricing: { fieldPriceFormatted: string };
+	}) {
+		await this.sendMail({
+			to: payload.to,
+			subject: 'Thông báo đặt sân mới (Chờ HLV) - SportZone',
+			template: 'field-new-booking-pending-coach.hbs',
+			context: {
+				title: 'Thông báo đặt sân mới (Chờ HLV)',
+				field: payload.field,
+				customer: payload.customer,
+				coach: payload.coach,
+				booking: payload.booking,
+				pricing: payload.pricing,
+			},
+		});
+	}
+
+	/**
+	 * Send email to Coach for booking confirmation (Payment Success)
+	 */
+	async sendCoachBookingConfirmed(payload: {
+		to: string;
+		coach: { name: string };
+		customer: { fullName: string; phone?: string; email?: string };
+		field: { name: string; address?: string };
+		booking: { date: string; startTime: string; endTime: string };
+		pricing: { coachPriceFormatted: string };
+	}) {
+		await this.sendMail({
+			to: payload.to,
+			subject: 'Xác nhận lịch đặt HLV - SportZone',
+			template: 'coach-booking-confirmed.hbs',
+			context: {
+				title: 'Lịch đặt HLV đã được xác nhận',
+				coach: payload.coach,
+				customer: payload.customer,
+				field: payload.field,
+				booking: payload.booking,
+				pricing: payload.pricing,
+				viewUrl: `${this.configService.get('FRONTEND_URL')}/coach/schedule`
+			},
+		});
+	}
+
 	async sendResetPassword(email: string, token: string) {
 		const frontendUrl = this.configService.get<string>('FRONTEND_URL');
 		// Use VITE_API_URL as backend base if configured, otherwise use frontend URL

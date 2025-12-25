@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Xác nhận lịch đặt HLV - SportZone</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background-color: #4CAF50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .content {
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .info-group {
+            margin-bottom: 15px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 15px;
+        }
+
+        .label {
+            font-weight: bold;
+            color: #555;
+        }
+
+        .value {
+            color: #000;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Lịch đặt HLV đã được xác nhận!</h1>
+        </div>
+        <div class="content">
+            <p>Xin chào <strong>{{coach.name}}</strong>,</p>
+            <p>Lịch đặt HLV của bạn đã được thanh toán và xác nhận thành công.</p>
+
+            <div class="info-group">
+                <p><span class="label">Khách hàng:</span> <span class="value">{{customer.fullName}}</span></p>
+                {{#if customer.phone}}<p><span class="label">Số điện thoại:</span> <span
+                        class="value">{{customer.phone}}</span></p>{{/if}}
+                {{#if customer.email}}<p><span class="label">Email:</span> <span class="value">{{customer.email}}</span>
+                </p>{{/if}}
+            </div>
+
+            <div class="info-group">
+                <p><span class="label">Sân bóng:</span> <span class="value">{{field.name}}</span></p>
+                {{#if field.address}}<p><span class="label">Địa chỉ:</span> <span class="value">{{field.address}}</span>
+                </p>{{/if}}
+            </div>
+
+            <div class="info-group">
+                <p><span class="label">Thời gian:</span> <span class="value">{{booking.startTime}} -
+                        {{booking.endTime}}</span></p>
+                <p><span class="label">Ngày:</span> <span class="value">{{booking.date}}</span></p>
+            </div>
+
+            <div class="info-group">
+                <p><span class="label">Thu nhập dự kiến:</span> <span class="value"
+                        style="color: #4CAF50; font-weight: bold;">{{pricing.coachPriceFormatted}}</span></p>
+            </div>
+
+            <p>Vui lòng đến sân đúng giờ để hướng dẫn khách hàng.</p>
+
+            <a href="{{viewUrl}}" class="button">Xem chi tiết lịch đặt</a>
+        </div>
+        <div class="footer">
+            <p>&copy; 2024 SportZone. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+
+</html>
