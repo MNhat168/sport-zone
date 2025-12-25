@@ -80,10 +80,7 @@ export class CreateTournamentDto {
   @Min(1)
   maxParticipants: number;
 
-  @ApiProperty({ description: 'Minimum participants (calculated from teams)' })
-  @IsNumber()
-  @Min(1)
-  minParticipants: number;
+
 
   @ApiProperty({ description: 'Registration fee per participant' })
   @IsNumber()

@@ -42,7 +42,7 @@ export class Booking extends BaseEntity {
   @Prop({
     default: 0,
     min: 0,
-    max: 3,
+    max: 4,
   })
   retryAttempts?: number;
 

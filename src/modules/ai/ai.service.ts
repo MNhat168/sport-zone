@@ -2,6 +2,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Groq from 'groq-sdk';
+import OpenAI from 'openai';
 
 export interface DetailedFieldOwnerStats {
     fieldOwnerId: string;
@@ -119,17 +120,84 @@ export interface PlatformAnalyticsData {
 export class AiService {
     private readonly logger = new Logger(AiService.name);
     private groq: Groq;
+    private openai: OpenAI;
 
     constructor(private configService: ConfigService) {
-        const apiKey = this.configService.get<string>('GROQ_API_KEY');
+        const groqApiKey = this.configService.get<string>('GROQ_API_KEY');
+        const openaiApiKey = this.configService.get<string>('OPENAI_API_KEY');
 
-        if (!apiKey || apiKey === 'tba') {
+        if (!groqApiKey || groqApiKey === 'tba') {
             this.logger.warn('Groq API Key is not set. Using enhanced simulated insights with actual data.');
         } else {
             this.groq = new Groq({
-                apiKey: apiKey,
+                apiKey: groqApiKey,
             });
             this.logger.log('Groq AI initialized successfully');
+        }
+
+        if (openaiApiKey) {
+            this.openai = new OpenAI({
+                apiKey: openaiApiKey,
+            });
+            this.logger.log('OpenAI AI initialized successfully');
+        } else {
+            this.logger.warn('OpenAI API Key is not set. OCR features will be disabled.');
+        }
+    }
+
+    /**
+     * Extracts transaction data from a receipt image using OpenAI Vision
+     */
+    async extractTransactionData(imageBuffer: Buffer, mimetype: string): Promise<{
+        amount: number;
+        transactionDate?: Date;
+        referenceCode?: string;
+        isReceipt: boolean;
+        confidence: number;
+    }> {
+        if (!this.openai) {
+            this.logger.error('OpenAI not initialized. Cannot extract transaction data.');
+            return { amount: 0, isReceipt: false, confidence: 0 };
+        }
+
+        try {
+            const base64Image = imageBuffer.toString('base64');
+            const response = await this.openai.chat.completions.create({
+                model: "gpt-5.1",
+                messages: [
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "text",
+                                text: "Scan this transaction receipt and extract the following data in JSON format: amount (number, just the value, e.g., 50000), transactionDate (ISO string), and referenceCode (string). Also, include a field 'isReceipt' (boolean) to indicate if this is actually a payment receipt, and 'confidence' (0-1) for how certain you are about the amount. Only return the JSON object."
+                            },
+                            {
+                                type: "image_url",
+                                image_url: {
+                                    url: `data:${mimetype};base64,${base64Image}`,
+                                },
+                            },
+                        ],
+                    },
+                ],
+                max_completion_tokens: 300,
+                response_format: { type: "json_object" },
+            });
+
+            const content = response.choices[0]?.message?.content || "{}";
+            const extracted = JSON.parse(content);
+
+            return {
+                amount: Number(extracted.amount) || 0,
+                transactionDate: extracted.transactionDate ? new Date(extracted.transactionDate) : undefined,
+                referenceCode: extracted.referenceCode,
+                isReceipt: !!extracted.isReceipt,
+                confidence: Number(extracted.confidence) || 0,
+            };
+        } catch (error) {
+            this.logger.error('Failed to extract transaction data from image:', error);
+            return { amount: 0, isReceipt: false, confidence: 0 };
         }
     }
 
@@ -154,7 +222,7 @@ export class AiService {
                 ],
                 model: "llama-3.1-8b-instant",
                 temperature: 0.7,
-                max_tokens: 2000,
+                max_completion_tokens: 2000,
                 response_format: { type: "json_object" },
             });
 
@@ -389,7 +457,7 @@ export class AiService {
                 ],
                 model: "llama-3.1-8b-instant",
                 temperature: 0.7,
-                max_tokens: 500,
+                max_completion_tokens: 500,
                 response_format: { type: "json_object" },
             });
 
@@ -433,7 +501,7 @@ export class AiService {
                 ],
                 model: "llama-3.1-8b-instant",
                 temperature: 0.7,
-                max_tokens: 500,
+                max_completion_tokens: 500,
                 response_format: { type: "json_object" },
             });
 
@@ -1005,7 +1073,7 @@ export class AiService {
                 ],
                 model: "llama-3.1-8b-instant",
                 temperature: 0.7,
-                max_tokens: 150,
+                max_completion_tokens: 150,
                 top_p: 1,
                 stream: false,
             });

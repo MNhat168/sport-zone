@@ -69,20 +69,20 @@ export class TournamentController {
     return this.tournamentService.findAll(filters);
   }
 
-  @Get('available-courts') // New endpoint
-  // In tournaments.controller.ts
   @Get('available-courts')
   findAvailableCourts(
     @Query('sportType') sportType: string,
     @Query('location') location: string,
     @Query('date') date: string,
+    @Query('startTime') startTime?: string,
+    @Query('endTime') endTime?: string,
   ) {
     // Add validation
     if (!sportType || !location || !date) {
       throw new BadRequestException('Missing required parameters: sportType, location, date');
     }
 
-    return this.tournamentService.findAvailableCourts(sportType, location, date);
+    return this.tournamentService.findAvailableCourts(sportType, location, date, startTime, endTime);
   }
 
   @Get('available-fields')
@@ -90,8 +90,19 @@ export class TournamentController {
     @Query('sportType') sportType: string,
     @Query('location') location: string,
     @Query('date') date: string,
+    @Query('startTime') startTime?: string,
+    @Query('endTime') endTime?: string,
   ) {
-    return this.tournamentService.findAvailableFields(sportType, location, date);
+    return this.tournamentService.findAvailableFields(sportType, location, date, startTime, endTime);
+  }
+
+  @Get(':id/cancellation-fee')
+  @UseGuards(JwtAccessTokenGuard)
+  async getCancellationFee(
+    @Param('id') id: string,
+    @Request() req
+  ) {
+    return this.tournamentService.getCancellationFee(id, req.user.userId);
   }
 
   @Get(':id')
@@ -109,12 +120,39 @@ export class TournamentController {
     return this.tournamentService.updateTournament(id, updateTournamentDto, req.user.userId);
   }
 
-  @Delete(':id')
+  @Get('field-owner/requests')
+  @UseGuards(JwtAccessTokenGuard)
+  async getTournamentRequests(@Request() req) {
+    return this.tournamentService.getTournamentRequestsForFieldOwner(req.user.userId);
+  }
+
+  @Post('field-owner/requests/:reservationId/accept')
+  @UseGuards(JwtAccessTokenGuard)
+  async acceptTournamentRequest(
+    @Param('reservationId') reservationId: string,
+    @Request() req
+  ) {
+    return this.tournamentService.acceptTournamentRequest(req.user.userId, reservationId);
+  }
+
+  @Post('field-owner/requests/:reservationId/reject')
+  @UseGuards(JwtAccessTokenGuard)
+  async rejectTournamentRequest(
+    @Param('reservationId') reservationId: string,
+    @Request() req
+  ) {
+    return this.tournamentService.rejectTournamentRequest(req.user.userId, reservationId);
+  }
+
+  @Post(':id/cancel')
   @UseGuards(JwtAccessTokenGuard)
   async cancelTournament(
     @Param('id') id: string,
+    @Body('reason') reason: string,
     @Request() req
   ) {
-    return this.tournamentService.cancelTournament(id, req.user.userId);
+    // Default reason if not provided
+    const cancellationReason = reason || 'Cancelled by organizer';
+    return this.tournamentService.cancelTournament(id, req.user.userId, cancellationReason);
   }
 }

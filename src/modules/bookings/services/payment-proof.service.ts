@@ -9,6 +9,7 @@ import { TransactionStatus } from '@common/enums/transaction.enum';
 import { TransactionsService } from '../../transactions/transactions.service';
 import { BookingEmailService } from './booking-email.service';
 import { AwsS3Service } from '../../../service/aws-s3.service';
+import { AiService } from '../../ai/ai.service';
 
 /**
  * Payment Proof Service
@@ -26,6 +27,7 @@ export class PaymentProofService {
         private readonly transactionsService: TransactionsService,
         private readonly bookingEmailService: BookingEmailService,
         private readonly awsS3Service: AwsS3Service,
+        private readonly aiService: AiService,
     ) { }
 
     /**
@@ -63,36 +65,44 @@ export class PaymentProofService {
                     throw new BadRequestException(`Cannot submit payment proof for booking with status: ${existingBooking.status}`);
                 }
 
-                // Validate booking doesn't already have a payment
-                if (existingBooking.transaction) {
-                    throw new BadRequestException('Payment proof has already been submitted for this booking');
-                }
-
-                // Validate booking is for bank transfer (check metadata)
-                const metadata = existingBooking.metadata || {};
-                if (metadata.paymentMethod !== PaymentMethod.BANK_TRANSFER) {
-                    throw new BadRequestException('This booking is not for bank transfer payment');
-                }
-
                 // Calculate total amount
                 const totalAmount = existingBooking.bookingAmount + existingBooking.platformFee;
 
-                // Create Payment transaction with payment proof info
-                const payment = await this.transactionsService.createPayment({
-                    bookingId: bookingId,
-                    userId: existingBooking.user.toString(),
-                    amount: totalAmount,
-                    method: PaymentMethod.BANK_TRANSFER,
-                    paymentNote: existingBooking.note,
-                }, session);
+                let payment: any;
+                if (existingBooking.transaction) {
+                    // Step: Allow replacement - Update existing transaction
+                    payment = await this.transactionsService.getPaymentById(existingBooking.transaction.toString());
+                    if (!payment) {
+                        throw new BadRequestException('Linked transaction not found. Please contact support.');
+                    }
 
-                // Update transaction with payment proof information (within transaction)
-                payment.paymentProofImageUrl = paymentProofImageUrl;
-                payment.paymentProofStatus = 'pending';
-                await payment.save({ session });
+                    this.logger.log(`Replacing payment proof for booking ${bookingId}, transaction ${payment._id}`);
 
-                // Update booking with transaction reference and payment status
-                existingBooking.transaction = payment._id as Types.ObjectId;
+                    // Update transaction with new payment proof information
+                    payment.paymentProofImageUrl = paymentProofImageUrl;
+                    payment.paymentProofStatus = 'pending';
+                    payment.paymentProofRejectionReason = undefined; // Clear old reason
+                    payment.notes = (payment.notes || '') + `\n[Payment proof replaced at ${new Date().toISOString()}]`;
+                    await payment.save({ session });
+                } else {
+                    // Step: First time submission - Create new Payment transaction
+                    payment = await this.transactionsService.createPayment({
+                        bookingId: bookingId,
+                        userId: existingBooking.user.toString(),
+                        amount: totalAmount,
+                        method: PaymentMethod.BANK_TRANSFER,
+                        paymentNote: existingBooking.note,
+                    }, session);
+
+                    // Update transaction with payment proof information (within transaction)
+                    payment.paymentProofImageUrl = paymentProofImageUrl;
+                    payment.paymentProofStatus = 'pending';
+                    await payment.save({ session });
+
+                    // Update booking with transaction reference
+                    existingBooking.transaction = payment._id as Types.ObjectId;
+                }
+
                 if (payment.status === TransactionStatus.SUCCEEDED) {
                     existingBooking.paymentStatus = 'paid';
                     // Keep status as PENDING until field owner verifies payment proof
@@ -114,6 +124,89 @@ export class PaymentProofService {
                 maxCommitTimeMS: 15000
             });
 
+            // Step 3: Run AI verification (outside of primary transaction session to avoid long-held locks)
+            try {
+                this.logger.log(`Starting AI verification for booking: ${bookingId}`);
+                const ocrResult = await this.aiService.extractTransactionData(proofImageBuffer, mimetype);
+
+                const totalAmount = booking.bookingAmount + booking.platformFee;
+
+                let verificationAction: 'approve' | 'reject' | 'keep_pending' = 'keep_pending';
+                let reason = '';
+
+                if (!ocrResult.isReceipt) {
+                    verificationAction = 'reject';
+                    reason = 'Uploaded file does not appear to be a payment receipt.';
+                } else if (Math.abs(ocrResult.amount - totalAmount) > 1) { // Allowance for minor rounding
+                    verificationAction = 'reject';
+                    reason = `Amount mismatch: Expected ${totalAmount}, but receipt shows ${ocrResult.amount}.`;
+                } else if (ocrResult.confidence < 0.7) {
+                    this.logger.warn(`AI verification confidence too low (${ocrResult.confidence}) for booking ${bookingId}`);
+                    verificationAction = 'keep_pending';
+                } else {
+                    verificationAction = 'approve';
+                }
+
+                if (verificationAction !== 'keep_pending') {
+                    this.logger.log(`AI Verification result for ${bookingId}: ${verificationAction}. Reason: ${reason}`);
+
+                    // Use a new transaction to apply the result
+                    const resultSession = await this.connection.startSession();
+                    await resultSession.withTransaction(async () => {
+                        const updatedBooking = await this.bookingModel.findById(bookingId).session(resultSession);
+                        if (!updatedBooking || !updatedBooking.transaction) {
+                            this.logger.warn(`Could not find booking or transaction for result update: ${bookingId}`);
+                            return;
+                        }
+
+                        const transaction = await this.transactionsService.getPaymentById(updatedBooking.transaction.toString());
+                        if (!transaction) {
+                            this.logger.warn(`Could not find transaction for booking: ${bookingId}`);
+                            return;
+                        }
+
+                        if (verificationAction === 'approve') {
+                            updatedBooking.status = BookingStatus.CONFIRMED;
+                            updatedBooking.paymentStatus = 'paid';
+                            (transaction as any).paymentProofStatus = 'approved';
+                            (transaction as any).status = TransactionStatus.SUCCEEDED;
+                            (transaction as any).completedAt = new Date();
+                            (transaction as any).notes = ((transaction as any).notes || '') + '\n[Auto-approved by AI OCR]';
+
+                            this.eventEmitter.emit('payment.success', {
+                                paymentId: (transaction as any)._id?.toString(),
+                                bookingId: (updatedBooking as any)._id?.toString(),
+                                userId: updatedBooking.user.toString(),
+                                amount: (transaction as any).amount,
+                                method: (transaction as any).method,
+                            });
+                        } else {
+                            (transaction as any).paymentProofStatus = 'rejected';
+                            (transaction as any).paymentProofRejectionReason = reason;
+
+                            // ✅ Increment retry attempts
+                            updatedBooking.retryAttempts = (updatedBooking.retryAttempts || 0) + 1;
+
+                            if (updatedBooking.retryAttempts >= 4) {
+                                updatedBooking.status = BookingStatus.CANCELLED;
+                                updatedBooking.cancellationReason = 'Tự động hủy do gửi minh chứng sai 4 lần.';
+                                (transaction as any).notes = ((transaction as any).notes || '') + '\n[Auto-cancelled: Limit of 4 payment proof rejections reached]';
+                                this.logger.log(`Booking ${bookingId} auto-cancelled after 4th rejection.`);
+                            } else {
+                                updatedBooking.note = (updatedBooking.note || '') + `\n[Auto-rejected by AI OCR: ${reason}] (Lần ${updatedBooking.retryAttempts}/4)`;
+                            }
+                        }
+
+                        await (transaction as any).save({ session: resultSession });
+                        await updatedBooking.save({ session: resultSession });
+                    });
+                    await resultSession.endSession();
+                }
+            } catch (aiError) {
+                this.logger.error(`AI verification failed for booking ${bookingId}`, aiError);
+                // We don't throw here, as the proof is already submitted and can be verified manually
+            }
+
             // Send confirmation email (outside transaction)
             try {
                 await this.bookingEmailService.sendConfirmationEmails(bookingId, PaymentMethodLabels[PaymentMethod.BANK_TRANSFER]);
@@ -122,7 +215,8 @@ export class PaymentProofService {
                 // Don't fail the booking if email fails
             }
 
-            return booking;
+            // Return the latest version of the booking after all updates
+            return (await this.bookingModel.findById(bookingId).populate('transaction')) as Booking;
         } catch (error) {
             this.logger.error('Error submitting payment proof', error);
 

@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Tournament } from './entities/tournament.entity';
@@ -20,6 +20,9 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
 import { User as UserEntity } from '../users/entities/user.entity';
 import { TransactionsService } from '@modules/transactions/transactions.service';
+import { BookingsService } from '../bookings/bookings.service';
+import { FieldOwnerProfile } from '../field-owner/entities/field-owner-profile.entity';
+import { BookingStatus } from '@common/enums';
 
 @Injectable()
 export class TournamentService {
@@ -33,16 +36,278 @@ export class TournamentService {
         @InjectModel(Court.name) private courtModel: Model<Court>, // Add Court model
         @InjectModel(Transaction.name) private transactionModel: Model<Transaction>,
         @InjectModel(UserEntity.name) private userModel: Model<UserEntity>,
+        @InjectModel(FieldOwnerProfile.name)
+        private fieldOwnerModel: Model<FieldOwnerProfile>,
         private readonly payosService: PayOSService,
         private readonly emailService: EmailService,
         private readonly eventEmitter: EventEmitter2,
         private readonly configService: ConfigService,
         private readonly transactionsService: TransactionsService,
+        @Inject(forwardRef(() => BookingsService))
+        private readonly bookingsService: BookingsService,
     ) {
         this.setupPaymentEventListeners();
     }
 
+    /**
+     * Get all tournament requests (reservations) for fields owned by this user
+     */
+    async getTournamentRequestsForFieldOwner(userId: string) {
+        // 1. Find FieldOwnerProfile
+        const profile = await this.fieldOwnerModel.findOne({ user: new Types.ObjectId(userId) });
+        if (!profile) {
+            throw new BadRequestException('Field owner profile not found');
+        }
+
+        // 2. Find all fields owned by this profile
+        const fields = await this.fieldModel.find({ owner: profile._id as any }).select('_id');
+        const fieldIds = fields.map(f => f._id);
+
+        // 3. Find reservations for these fields
+        return this.reservationModel.find({
+            field: { $in: fieldIds },
+        })
+            .populate('tournament', 'name sportType category tournamentDate description organizer')
+            .populate('court', 'name courtNumber')
+            .populate('field', 'name location')
+            .sort({ date: 1, startTime: 1 })
+            .exec();
+    }
+
+    /**
+     * Accept a tournament request and create a booking
+     */
+    async acceptTournamentRequest(userId: string, reservationId: string) {
+        // 1. Find reservation and populate related data
+        const reservation = await this.reservationModel.findById(reservationId)
+            .populate('tournament')
+            .populate('court');
+
+        if (!reservation) {
+            throw new NotFoundException('Reservation request not found');
+        }
+
+        if (reservation.status !== ReservationStatus.PENDING) {
+            throw new BadRequestException(`Reservation is already ${reservation.status}`);
+        }
+
+        // 2. Verify ownership
+        const profile = await this.fieldOwnerModel.findOne({ user: new Types.ObjectId(userId) });
+
+        if (!reservation.field) {
+            throw new BadRequestException('Reservation field is missing');
+        }
+
+        const field = await this.fieldModel.findById(reservation.field);
+
+        if (!profile || !field || field.owner.toString() !== (profile._id as any).toString()) {
+            throw new BadRequestException('You do not have permission to accept this request');
+        }
+
+        // 3. Update reservation status
+        reservation.status = ReservationStatus.CONFIRMED;
+        await reservation.save();
+
+        // 4. Create actual booking in the system
+        // We use a internal "tournament" user or the organizer?
+        // Usually, the organizer is responsible, but the booking is "paid" or "held" by the tournament
+        const tournament = reservation.tournament as any;
+
+        const bookingData = {
+            courtId: (reservation.court as any)._id?.toString() || reservation.court.toString(),
+            fieldId: reservation.field.toString(),
+            date: reservation.date.toISOString().split('T')[0],
+            startTime: reservation.startTime,
+            endTime: reservation.endTime,
+            price: reservation.estimatedCost,
+            paymentMethod: PaymentMethod.BANK_TRANSFER, // Tournament bookings are handled via escrow
+            isInternal: true, // Mark as internal/tournament booking
+            notes: `Tournament Booking: ${tournament.name}`,
+        };
+
+        // Call BookingsService to create the booking (offline mode usually)
+        // We might need to bypass normal price checks or use a specific method
+        const booking = await this.bookingsService.createFieldBookingWithoutPayment(
+            tournament.organizer.toString(),
+            bookingData as any
+        );
+
+        // Update booking status to CONFIRMED immediately
+        booking.status = BookingStatus.CONFIRMED;
+        booking.paymentStatus = 'paid';
+        await booking.save();
+
+        // 5. Link booking back to tournament
+        const tournamentDoc = await this.tournamentModel.findById(tournament._id);
+        if (tournamentDoc) {
+            // Find the court entry in the tournament and update it
+            const courtEntry = tournamentDoc.courts.find(c =>
+                c.reservation && c.reservation.toString() === reservationId
+            );
+
+            if (courtEntry) {
+                courtEntry.booking = booking._id as Types.ObjectId;
+                tournamentDoc.markModified('courts');
+                await tournamentDoc.save();
+            }
+        }
+
+        // 6. Notify Organizer
+        const organizer = await this.userModel.findById(tournament.organizer);
+        if (organizer) {
+            await this.emailService.sendTournamentAcceptedNotification({
+                to: organizer.email,
+                tournament: {
+                    name: tournament.name,
+                    date: reservation.date.toLocaleDateString(),
+                    sportType: tournament.sportType,
+                    location: field.name,
+                },
+                organizer: { fullName: organizer.fullName },
+            });
+        }
+
+        return { success: true, bookingId: booking._id };
+    }
+
+    /**
+     * Reject a tournament request
+     */
+    async rejectTournamentRequest(userId: string, reservationId: string) {
+        // 1. Find reservation
+        const reservation = await this.reservationModel.findById(reservationId)
+            .populate('tournament')
+            .populate('field');
+
+        if (!reservation) {
+            throw new NotFoundException('Reservation request not found');
+        }
+
+        if (reservation.status !== ReservationStatus.PENDING) {
+            throw new BadRequestException(`Reservation is already ${reservation.status}`);
+        }
+
+        // 2. Verify ownership
+        const profile = await this.fieldOwnerModel.findOne({ user: new Types.ObjectId(userId) });
+        const field = reservation.field as any;
+
+        if (!profile || !field || field.owner.toString() !== (profile._id as any).toString()) {
+            throw new BadRequestException('You do not have permission to reject this request');
+        }
+
+        // 3. Update reservation status
+        reservation.status = ReservationStatus.RELEASED;
+        await reservation.save();
+
+        // 4. Notify Organizer (Optional but recommended)
+        const tournament = reservation.tournament as any;
+        const organizer = await this.userModel.findById(tournament.organizer);
+        if (organizer) {
+            const tournamentDate = new Date(tournament.tournamentDate);
+            const formattedDate = tournamentDate.toLocaleDateString('vi-VN');
+
+            await this.emailService.sendTournamentRejectedNotification({
+                to: organizer.email,
+                tournament: {
+                    name: tournament.name,
+                    date: formattedDate,
+                    location: tournament.location,
+                },
+                organizer: {
+                    fullName: organizer.fullName,
+                },
+            });
+        }
+
+        return { success: true };
+    }
+
+    /**
+     * Check if tournament should be confirmed (reached capacity)
+     */
+    async checkAndConfirmTournament(tournamentId: string) {
+        const tournament = await this.tournamentModel.findById(tournamentId)
+            .populate('participants.user');
+
+        if (!tournament) return;
+
+        // Count confirmed participants
+        const confirmedCount = tournament.participants.filter(p =>
+            p.paymentStatus === 'confirmed'
+        ).length;
+
+        this.logger.log(`Checking auto-confirmation for ${tournament.name}: ${confirmedCount}/${tournament.maxParticipants}`);
+
+        if (confirmedCount >= tournament.maxParticipants && tournament.status === TournamentStatus.PENDING) {
+            this.logger.log(`Tournament ${tournament.name} reached capacity! Confirming...`);
+
+            tournament.status = TournamentStatus.CONFIRMED;
+            await tournament.save();
+
+            // Notify all participants
+            for (const p of tournament.participants) {
+                if (p.paymentStatus === 'confirmed' && p.user) {
+                    const user = p.user as any;
+                    await this.emailService.sendTournamentConfirmedNotification({
+                        to: user.email,
+                        tournament: {
+                            name: tournament.name,
+                            date: tournament.tournamentDate.toLocaleDateString(),
+                            sportType: tournament.sportType,
+                            location: tournament.location,
+                        },
+                        participant: { fullName: user.fullName },
+                    });
+                }
+            }
+
+            // Notify organizer too
+            const organizer = await this.userModel.findById(tournament.organizer);
+            if (organizer) {
+                await this.emailService.sendMail({
+                    to: organizer.email,
+                    subject: `Thông báo: Giải đấu ${tournament.name} đã đủ người tham gia!`,
+                    html: `<p>Chào ${organizer.fullName}, giải đấu của bạn đã đạt đủ ${tournament.maxParticipants} người đăng ký và đã được chuyển sang trạng thái XÁC NHẬN.</p>`
+                });
+            }
+        }
+    }
+
     async create(createTournamentDto: CreateTournamentDto, userId: string) {
+        // Fetch user to check limits
+        const user = await this.userModel.findById(userId);
+        if (!user) {
+            throw new NotFoundException('User not found');
+        }
+
+        // Limit Check 1: Max 3 active tournaments
+        // Active = status other than completed or cancelled
+        // We track this via user.activeTournamentsCount
+        if (user.activeTournamentsCount >= 3) {
+            // Re-verify actual count to be safe
+            const actualActiveCount = await this.tournamentModel.countDocuments({
+                organizer: userId,
+                status: { $nin: [TournamentStatus.COMPLETED, TournamentStatus.CANCELLED] }
+            });
+
+            // Auto-correct if out of sync
+            if (actualActiveCount < 3 && actualActiveCount !== user.activeTournamentsCount) {
+                user.activeTournamentsCount = actualActiveCount;
+                await user.save();
+            } else if (actualActiveCount >= 3) {
+                throw new BadRequestException('You have reached the limit of 3 active tournaments. Please complete or cancel existing ones.');
+            }
+        }
+
+        // Limit Check 2: Weekly Creation Limit
+        // FREE: 1, PREMIUM: 3
+        const weeklyLimit = user.tournamentTier === 'PREMIUM' ? 3 : 1;
+        if (user.weeklyTournamentCreationCount >= weeklyLimit) {
+            throw new BadRequestException(
+                `Weekly tournament creation limit reached (${user.weeklyTournamentCreationCount}/${weeklyLimit}). Upgrade to Premium for more.`
+            );
+        }
+
         const sportRules = SPORT_RULES_MAP[createTournamentDto.sportType];
 
         // Validate teams against sport rules
@@ -75,26 +340,7 @@ export class TournamentService {
             teamSize
         );
 
-        // Validate calculated participants match provided participants
-        if (createTournamentDto.minParticipants !== calculatedParticipants ||
-            createTournamentDto.maxParticipants !== calculatedParticipants) {
-            throw new BadRequestException(
-                `Participants count (${calculatedParticipants}) doesn't match teams configuration`
-            );
-        }
 
-        // Validate participants against sport rules
-        if (calculatedParticipants < sportRules.minParticipants) {
-            throw new BadRequestException(
-                `Minimum participants for ${createTournamentDto.sportType} is ${sportRules.minParticipants}`
-            );
-        }
-
-        if (calculatedParticipants > sportRules.maxParticipants) {
-            throw new BadRequestException(
-                `Maximum participants for ${createTournamentDto.sportType} is ${sportRules.maxParticipants}`
-            );
-        }
 
         // Validate courts needed
         const courtsNeeded = createTournamentDto.courtsNeeded || createTournamentDto.fieldsNeeded || 1;
@@ -201,9 +447,6 @@ export class TournamentService {
             }
         }
 
-        const maxParticipants = createTournamentDto.numberOfTeams * teamSize;
-        const minParticipants = Math.ceil(maxParticipants * 0.5);
-
         // Calculate confirmation deadline (48 hours before tournament)
         const confirmationDeadline = new Date(tournamentDate.getTime() - 48 * 60 * 60 * 1000);
 
@@ -223,8 +466,7 @@ export class TournamentService {
             fieldsNeeded: courtsNeeded,
             numberOfTeams: createTournamentDto.numberOfTeams,
             teamSize: teamSize,
-            maxParticipants: maxParticipants,
-            minParticipants: minParticipants,
+
         });
 
         await tournament.save();
@@ -258,9 +500,14 @@ export class TournamentService {
             });
         }
 
-        await tournament.save();
+        const savedTournament = await tournament.save();
 
-        return tournament;
+        // Increment user counts
+        user.activeTournamentsCount += 1;
+        user.weeklyTournamentCreationCount += 1;
+        await user.save();
+
+        return savedTournament;
     }
 
     async registerParticipant(dto: RegisterTournamentDto, userId: string) {
@@ -716,6 +963,29 @@ export class TournamentService {
 
             this.logger.log(`[Tournament Payment Success] ✅ Tournament found: ${tournament.name}`);
 
+            // ✅ Check for CANCELLATION TYPE
+            if (transaction.metadata?.type === 'TOURNAMENT_CANCELLATION_FEE') {
+                this.logger.log(`[Tournament Payment Success] Processing cancellation for tournament ${tournamentId}`);
+                await this.processCancellation(
+                    tournament,
+                    transaction.metadata.cancellationReason || 'Cancellation Fee Paid'
+                );
+
+                // TODO: Send cancellation confirmation email to organizer
+                // await this.emailService.sendTournamentCancellationConfirmation(userId, tournament, fee);
+                this.logger.log(`[Tournament Payment Success] ✅ Tournament ${tournament.name} cancelled successfully after fee payment`);
+
+                // Update transaction metadata
+                await this.transactionsService.updateTransactionMetadata(
+                    (transaction._id as Types.ObjectId).toString(),
+                    {
+                        cancellationProcessed: true,
+                        cancellationProcessedAt: new Date()
+                    }
+                );
+                return;
+            }
+
             // Check if user is already registered
             const alreadyRegistered = tournament.participants.some(
                 p => String(p.user) === userId
@@ -769,6 +1039,8 @@ export class TournamentService {
 
             this.logger.log(`[Tournament Payment Success] ✅ Successfully processed tournament payment for participant ${userId} in tournament ${tournament.name}`);
 
+            // ✅ Auto-confirm tournament if capacity reached
+            await this.checkAndConfirmTournament(tournamentId);
         } catch (error) {
             this.logger.error('[Tournament Payment Success] ❌ Error processing tournament payment:', error);
             this.logger.error('[Tournament Payment Success] Error stack:', error.stack);
@@ -922,7 +1194,8 @@ export class TournamentService {
         });
 
         for (const tournament of tournaments) {
-            const minParticipantsNeeded = tournament.minParticipants;
+            // Min participants check removed
+            const minParticipantsNeeded = 0;
 
             if (tournament.participants.length < minParticipantsNeeded) {
                 // Refund all participants
@@ -947,31 +1220,51 @@ export class TournamentService {
                 tournament.status = TournamentStatus.CANCELLED;
                 tournament.cancellationReason = 'Insufficient participants';
                 await tournament.save();
+
+                // Decrement active count for organizer
+                const organizer = await this.userModel.findById(tournament.organizer);
+                if (organizer && organizer.activeTournamentsCount > 0) {
+                    organizer.activeTournamentsCount -= 1;
+                    await organizer.save();
+                }
             }
         }
     }
 
-    async findAvailableFields(sportType: string, location: string, date: string) {
-        const tournamentDate = new Date(date);
-
-        // Find fields that are:
-        // 1. Active and match sport type
-        // 2. Match location (case-insensitive)
-        return this.fieldModel.find({
+    async findAvailableFields(sportType: string, location: string, date: string, startTime?: string, endTime?: string) {
+        const query: any = {
             sportType,
             isActive: true,
             'location.address': { $regex: location, $options: 'i' },
-        }).lean();
+        };
+
+        const fields = await this.fieldModel.find(query).lean();
+
+        if (!startTime || !endTime) {
+            return fields;
+        }
+
+        const tournamentDate = new Date(date);
+        const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+        const dayOfWeek = days[tournamentDate.getUTCDay()]; // Use UTC to be consistent with date storage
+
+        return fields.filter(field => {
+            const dayOperatingHours = field.operatingHours?.find(oh => oh.day.toLowerCase() === dayOfWeek);
+            if (!dayOperatingHours) return false;
+
+            // Check if operating hours cover the requested time slot
+            return startTime >= dayOperatingHours.start && endTime <= dayOperatingHours.end;
+        });
     }
 
     // In tournaments.service.ts
-    async findAvailableCourts(sportType: string, location: string, date: string) {
+    async findAvailableCourts(sportType: string, location: string, date: string, startTime?: string, endTime?: string) {
         const tournamentDate = new Date(date);
 
         try {
-            this.logger.log(`Finding available courts for: sportType=${sportType}, location=${location}, date=${date}`);
+            this.logger.log(`Finding available courts for: sportType = ${sportType}, location = ${location}, date = ${date}, time = ${startTime}-${endTime}`);
 
-            // Find courts and populate field with sportType information
+            // 1. Initial filter by field criteria (sportType, isActive, location)
             const courts = await this.courtModel.find({
                 isActive: true,
             })
@@ -986,68 +1279,71 @@ export class TournamentService {
                 })
                 .lean();
 
-            this.logger.log(`Found ${courts.length} courts initially`);
+            // 2. Filter out courts where field doesn't exist or doesn't match operating hours
+            const dayOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][tournamentDate.getUTCDay()];
 
-            // Filter out courts where field doesn't exist or doesn't match criteria
-            const locationFilteredCourts = courts.filter(court => {
-                // Check if field exists and has sportType property
-                const hasField = court.field && typeof court.field === 'object';
-                if (!hasField) {
-                    return false;
+            const filteredCourts = courts.filter(court => {
+                if (!court.field || typeof court.field !== 'object') return false;
+                const field = court.field as any;
+                if (field.sportType !== sportType) return false;
+
+                // Check operating hours if time is provided
+                if (startTime && endTime) {
+                    const dayOperatingHours = field.operatingHours?.find(oh => oh.day.toLowerCase() === dayOfWeek);
+                    if (!dayOperatingHours) return false;
+                    if (startTime < dayOperatingHours.start || endTime > dayOperatingHours.end) return false;
                 }
 
-                // Type assertion to access field properties
-                const field = court.field as any;
-                return field.sportType === sportType;
+                return true;
             });
 
-            this.logger.log(`After location filter: ${locationFilteredCourts.length} courts`);
+            this.logger.log(`After field/operating hours filter: ${filteredCourts.length} courts`);
 
-            // Check for existing reservations
-            const startOfDay = new Date(tournamentDate);
-            startOfDay.setHours(0, 0, 0, 0);
+            // 3. Check for existing reservations overlapping the requested time
+            const startOfDayDate = new Date(tournamentDate);
+            startOfDayDate.setUTCHours(0, 0, 0, 0);
 
-            const endOfDay = new Date(tournamentDate);
-            endOfDay.setHours(23, 59, 59, 999);
+            const endOfDayDate = new Date(tournamentDate);
+            endOfDayDate.setUTCHours(23, 59, 59, 999);
 
             const existingReservations = await this.reservationModel.find({
                 date: {
-                    $gte: startOfDay,
-                    $lte: endOfDay
+                    $gte: startOfDayDate,
+                    $lte: endOfDayDate
                 },
                 status: { $in: [ReservationStatus.PENDING, ReservationStatus.CONFIRMED] }
             }).lean();
 
-            this.logger.log(`Found ${existingReservations.length} existing reservations`);
+            this.logger.log(`Found ${existingReservations.length} existing reservations for the day`);
 
-            // Extract reserved court IDs safely
-            const reservedCourtIds = existingReservations
-                .filter(reservation => reservation.court)
-                .map(reservation => {
-                    // Handle both ObjectId and string formats
-                    const courtId = reservation.court;
-                    if (courtId && typeof courtId === 'object' && 'toString' in courtId) {
-                        return courtId.toString();
-                    }
-                    return String(courtId);
-                })
-                .filter(id => id && id !== 'null' && id !== 'undefined');
-
-            this.logger.log(`Reserved court IDs: ${reservedCourtIds.join(', ')}`);
-
-            // Filter out reserved courts
-            const availableCourts = locationFilteredCourts.filter(court => {
+            // 4. Final availability check (reservation overlap)
+            const availableCourts = filteredCourts.filter(court => {
                 const courtId = court._id.toString();
-                const isReserved = reservedCourtIds.includes(courtId);
 
-                if (isReserved) {
-                    this.logger.log(`Court ${courtId} is reserved`);
+                // Check for overlapping reservations for THIS court
+                const courtReservations = existingReservations.filter(res => {
+                    const resCourtId = res.court?.toString() || String(res.court);
+                    return resCourtId === courtId;
+                });
+
+                if (startTime && endTime && courtReservations.length > 0) {
+                    const hasOverlap = courtReservations.some(res => {
+                        // Reseration overlaps if res.startTime < endTime AND res.endTime > startTime
+                        return res.startTime < endTime && res.endTime > startTime;
+                    });
+                    if (hasOverlap) {
+                        this.logger.log(`Court ${courtId} has overlapping reservation`);
+                        return false;
+                    }
+                } else if (courtReservations.length > 0) {
+                    // If no time range provided, ANY reservation on that day makes it unavailable (default behavior)
+                    return false;
                 }
 
-                return !isReserved;
+                return true;
             });
 
-            this.logger.log(`Available courts: ${availableCourts.length}`);
+            this.logger.log(`Available courts: ${availableCourts.length} `);
 
             // Transform the data for frontend
             const transformedCourts = availableCourts.map(court => {
@@ -1322,11 +1618,20 @@ export class TournamentService {
 
         if (!allowedNextStatuses.includes(status)) {
             throw new BadRequestException(
-                `Cannot transition from ${tournament.status} to ${status}`
+                `Cannot transition from ${tournament.status} to ${status} `
             );
         }
 
         tournament.status = status;
+
+        // Decrement active count if status is CANCELLED or COMPLETED
+        if (status === TournamentStatus.CANCELLED || status === TournamentStatus.COMPLETED) {
+            const organizer = await this.userModel.findById(tournament.organizer);
+            if (organizer && organizer.activeTournamentsCount > 0) {
+                organizer.activeTournamentsCount -= 1;
+                await organizer.save();
+            }
+        }
 
         if (status === TournamentStatus.CANCELLED && reason) {
             tournament.cancellationReason = reason;
@@ -1497,49 +1802,6 @@ export class TournamentService {
         return updatedTournament;
     }
 
-    async cancelTournament(id: string, userId: string) {
-        const tournament = await this.tournamentModel.findById(id);
-
-        if (!tournament) {
-            throw new NotFoundException('Tournament not found');
-        }
-
-        // Check if user is the organizer
-        if (tournament.organizer.toString() !== userId) {
-            throw new BadRequestException('Only tournament organizer can cancel the tournament');
-        }
-
-        // Only allow cancellation if tournament is in draft or pending status
-        if (![TournamentStatus.DRAFT, TournamentStatus.PENDING].includes(tournament.status)) {
-            throw new BadRequestException('Cannot cancel tournament in current status');
-        }
-
-        // Release court reservations
-        await this.reservationModel.updateMany(
-            { tournament: tournament._id },
-            { status: ReservationStatus.RELEASED }
-        );
-
-        // Refund participants if any
-        for (const participant of tournament.participants) {
-            if (participant.transaction) {
-                await this.transactionModel.findByIdAndUpdate(
-                    participant.transaction,
-                    {
-                        status: TransactionStatus.REFUNDED,
-                        type: TransactionType.REFUND_FULL,
-                    }
-                );
-            }
-        }
-
-        tournament.status = TournamentStatus.CANCELLED;
-        tournament.cancellationReason = 'Cancelled by organizer';
-        await tournament.save();
-
-        return tournament;
-    }
-
     /**
      * ✅ ENHANCED: Confirm tournament payment with proper metadata handling
      * Uses TransactionsService methods to safely handle PayOS gateway data
@@ -1592,5 +1854,200 @@ export class TournamentService {
         }
 
         return updatedTransaction;
+    }
+    /**
+     * Get cancellation fee details for a tournament
+     */
+    async getCancellationFee(tournamentId: string, userId: string) {
+        const tournament = await this.tournamentModel.findById(tournamentId);
+        if (!tournament) throw new NotFoundException('Tournament not found');
+
+        // Allow admin or organizer
+        if (tournament.organizer.toString() !== userId) {
+            // You might want to check for admin role here if available
+            throw new BadRequestException('Only organizer can check cancellation fee');
+        }
+
+        return this.calculateCancellationFee(tournament);
+    }
+
+    /**
+     * Calculate cancellation fee based on rules
+     */
+    private calculateCancellationFee(tournament: Tournament) {
+        const now = new Date();
+        const createdDate = new Date(tournament.createdAt as any);
+        const tournamentDate = new Date(tournament.tournamentDate);
+
+        // Free Window: < 48 hours from creation
+        const hoursSinceCreation = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
+
+        // Debug logging
+        this.logger.log(`Calculating cancellation fee for ${tournament._id}: Hours since creation: ${hoursSinceCreation}`);
+
+        if (hoursSinceCreation <= 48) {
+            return { fee: 0, percentage: 0, reason: 'Free cancellation window (< 48h)' };
+        }
+
+        // Tiered Fees
+        const daysToTournament = (tournamentDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+        let feePercentage = 0;
+        let reason = '';
+
+        if (daysToTournament > 7) {
+            feePercentage = 0.10; // 10%
+            reason = 'Early cancellation (> 7 days before event)';
+        } else {
+            feePercentage = 0.50; // 50%
+            reason = 'Late cancellation (< 7 days before event)';
+        }
+
+        const baseCost = tournament.totalCourtCost || tournament.totalFieldCost || 0;
+        const fee = Math.ceil(baseCost * feePercentage);
+
+        return { fee, percentage: feePercentage, reason, baseCost };
+    }
+
+    /**
+     * Cancel a tournament
+     */
+    async cancelTournament(tournamentId: string, userId: string, cancellationReason: string) {
+        const tournament = await this.tournamentModel.findById(tournamentId);
+
+        if (!tournament) {
+            throw new NotFoundException('Tournament not found');
+        }
+
+        // Check if user is organizer
+        if (tournament.organizer.toString() !== userId) {
+            throw new BadRequestException('Only the organizer can cancel the tournament');
+        }
+
+        if (tournament.status === TournamentStatus.CANCELLED) {
+            throw new BadRequestException('Tournament already cancelled');
+        }
+
+        const { fee } = this.calculateCancellationFee(tournament);
+
+        this.logger.log(`Cancelling tournament ${tournamentId}. Fee: ${fee}, Reason: ${cancellationReason}`);
+
+        if (fee > 0) {
+            // Get organizer details for metadata (consistent with registration flow)
+            const organizer = await this.userModel.findById(userId).select('fullName').exec();
+
+            // Create Payment Transaction for Fee
+            const transaction = new this.transactionModel({
+                user: new Types.ObjectId(userId),
+                amount: fee,
+                direction: 'in',
+                method: PaymentMethod.PAYOS,
+                type: TransactionType.FEE,
+                status: TransactionStatus.PENDING,
+                notes: `Cancellation Fee for tournament: ${tournament.name}`,
+                metadata: {
+                    tournamentId: (tournament._id as Types.ObjectId).toString(),
+                    tournamentName: tournament.name,
+                    sportType: tournament.sportType,
+                    category: tournament.category,
+                    cancellationReason: cancellationReason,
+                    userId: userId,
+                    organizerName: organizer?.fullName || 'Organizer',
+                    type: 'TOURNAMENT_CANCELLATION_FEE'
+                }
+            });
+
+            await transaction.save();
+
+            // Get config for URLs
+            const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+            const backendUrl = this.configService.get<string>('BACKEND_URL') || 'http://localhost:3000';
+
+            // Generate PayOS Link
+            const orderCode = Number(Date.now().toString().slice(-9));
+            transaction.externalTransactionId = orderCode.toString();
+            await transaction.save();
+
+            const paymentLink = await this.payosService.createPaymentUrl({
+                orderCode: orderCode,
+                orderId: (transaction._id as Types.ObjectId).toString(),
+                amount: fee,
+                description: `Phí hủy giải ${tournament.name.substring(0, 10)}`,
+                items: [{ name: `Phí hủy giải: ${tournament.name}`, quantity: 1, price: fee }],
+                returnUrl: `${backendUrl}/transactions/payos/tournament-return/${tournament._id}`,
+                cancelUrl: `${frontendUrl}/tournaments/${tournament._id}?cancel=failed`
+            });
+
+            // Save intent info
+            tournament.cancellationFee = fee;
+            tournament.cancellationReason = cancellationReason;
+            await tournament.save();
+
+            return {
+                feeRequired: true,
+                fee,
+                paymentUrl: paymentLink.checkoutUrl,
+                qrCode: paymentLink.qrCodeUrl,
+                message: `Cancellation fee of ${fee.toLocaleString()} VND is required.`
+            };
+        } else {
+            // Free Cancellation
+            await this.processCancellation(tournament, cancellationReason);
+            return {
+                feeRequired: false,
+                success: true,
+                message: 'Tournament cancelled successfully.'
+            };
+        }
+    }
+
+    /**
+     * Process actual cancellation (refunds, release courts)
+     */
+    async processCancellation(tournament: Tournament, reason: string) {
+        this.logger.log(`Processing cancellation for tournament ${tournament._id}`);
+
+        tournament.status = TournamentStatus.CANCELLED;
+        tournament.cancellationReason = reason;
+        // tournament.cancelledAt = new Date(); // If field exists
+        await tournament.save();
+
+        // Release Reservations
+        await this.reservationModel.updateMany(
+            { tournament: tournament._id },
+            { status: ReservationStatus.RELEASED }
+        );
+
+        // Refund Participants
+        const participantsToRefund = tournament.participants.filter(p => p.paymentStatus === 'confirmed');
+
+        for (const p of participantsToRefund) {
+            // Create REFUND transaction record
+            // Actual money refund logic depends on system (manual or auto via gateway)
+            // For now, we assume manual/admin processing or separate refund service
+            const refundTransaction = new this.transactionModel({
+                user: p.user,
+                amount: p.transaction ? tournament.registrationFee : 0, // Should look up original transaction amount
+                direction: 'out',
+                type: TransactionType.REFUND_FULL, // or REFUND_FULL
+                status: TransactionStatus.PENDING,
+                notes: `Auto-refund for cancelled tournament: ${tournament.name}`,
+                relatedTransaction: p.transaction,
+                metadata: {
+                    tournamentId: tournament._id,
+                    reason: 'Tournament Cancelled'
+                }
+            });
+            await refundTransaction.save();
+
+            p.paymentStatus = 'refunded'; // Mark as refunded (or pending_refund)
+        }
+
+        if (participantsToRefund.length > 0) {
+            tournament.markModified('participants');
+            await tournament.save();
+        }
+
+        // Notify Logic (Placeholder)
+        // await this.notificationService.notifyTournamentCancelled(tournament);
     }
 }

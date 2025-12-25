@@ -144,34 +144,19 @@ export class TransactionsService {
       }
     };
 
-    // ✅ CRITICAL: Use dot notation to update individual metadata fields
-    // This ensures MongoDB merges the fields instead of replacing the entire object
-    // First, ensure metadata object exists
-    if (!existingTransaction.metadata) {
-      updateOperations.$set.metadata = {};
-    }
+    // ✅ Merge PayOS gateway data into metadata object safely
+    const mergedMetadata = {
+      ...(existingTransaction.metadata || {}),
+    };
 
-    // ✅ Merge PayOS gateway data into metadata using dot notation
-    // This preserves all existing metadata fields
     if (gatewayData) {
-      if (gatewayData.payosOrderCode) {
-        updateOperations.$set['metadata.payosOrderCode'] = gatewayData.payosOrderCode;
-      }
-      if (gatewayData.payosReference) {
-        updateOperations.$set['metadata.payosReference'] = gatewayData.payosReference;
-      }
-      if (gatewayData.payosAccountNumber) {
-        updateOperations.$set['metadata.payosAccountNumber'] = gatewayData.payosAccountNumber;
-      }
-      if (gatewayData.payosTransactionDateTime) {
-        updateOperations.$set['metadata.payosTransactionDateTime'] = gatewayData.payosTransactionDateTime;
-      }
+      if (gatewayData.payosOrderCode) mergedMetadata.payosOrderCode = gatewayData.payosOrderCode;
+      if (gatewayData.payosReference) mergedMetadata.payosReference = gatewayData.payosReference;
+      if (gatewayData.payosAccountNumber) mergedMetadata.payosAccountNumber = gatewayData.payosAccountNumber;
+      if (gatewayData.payosTransactionDateTime) mergedMetadata.payosTransactionDateTime = gatewayData.payosTransactionDateTime;
     }
 
-    // ✅ Log what will be updated
-    const payosFields = gatewayData ? Object.keys(gatewayData).filter(k => gatewayData[k]) : [];
-    this.logger.debug(`[updatePaymentStatus] Will update PayOS fields: ${payosFields.join(', ')}`);
-    this.logger.debug(`[updatePaymentStatus] Existing metadata will be preserved: ${Object.keys(existingMetadata).join(', ')}`);
+    updateOperations.$set.metadata = mergedMetadata;
 
     // Set externalTransactionId if PayOS order code provided
     if (gatewayData?.payosOrderCode) {

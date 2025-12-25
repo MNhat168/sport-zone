@@ -26,7 +26,7 @@ export class EmailService {
 	/**
 	 * Gửi email dùng SMTP qua MailerService
 	 */
-	private async sendMail(options: SendMailOptions) {
+	async sendMail(options: SendMailOptions) {
 		await this.mailerService.sendMail({
 			to: options.to,
 			subject: options.subject,
@@ -583,6 +583,77 @@ export class EmailService {
 				tournament: payload.tournament,
 				customer: payload.customer,
 				reason: payload.reason,
+			},
+		});
+	}
+
+	/**
+	 * Send tournament accepted notification to organizer
+	 */
+	async sendTournamentAcceptedNotification(payload: {
+		to: string;
+		tournament: {
+			name: string;
+			date: string;
+			sportType: string;
+			location: string;
+		};
+		organizer: { fullName: string };
+	}) {
+		await this.mailerService.sendMail({
+			to: payload.to,
+			subject: 'Yêu cầu tổ chức giải đấu đã được chấp nhận - SportZone',
+			template: 'tournament-request-accepted.hbs',
+			context: {
+				tournament: payload.tournament,
+				organizer: payload.organizer,
+			},
+		});
+	}
+
+	/**
+	 * Send tournament rejected notification to organizer
+	 */
+	async sendTournamentRejectedNotification(payload: {
+		to: string;
+		tournament: {
+			name: string;
+			date: string;
+			location: string;
+		};
+		organizer: { fullName: string };
+	}) {
+		await this.mailerService.sendMail({
+			to: payload.to,
+			subject: 'Thông báo: Yêu cầu đặt sân cho giải đấu bị từ chối - SportZone',
+			template: 'tournament-request-rejected.hbs',
+			context: {
+				tournament: payload.tournament,
+				organizer: payload.organizer,
+			},
+		});
+	}
+
+	/**
+	 * Send tournament confirmed notification to all participants
+	 */
+	async sendTournamentConfirmedNotification(payload: {
+		to: string;
+		tournament: {
+			name: string;
+			date: string;
+			sportType: string;
+			location: string;
+		};
+		participant: { fullName: string };
+	}) {
+		await this.mailerService.sendMail({
+			to: payload.to,
+			subject: 'Thông báo: Giải đấu đã chính thức được XÁC NHẬN - SportZone',
+			template: 'tournament-auto-confirmed.hbs',
+			context: {
+				tournament: payload.tournament,
+				participant: payload.participant,
 			},
 		});
 	}

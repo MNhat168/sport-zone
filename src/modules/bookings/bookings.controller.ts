@@ -36,6 +36,7 @@ import { RateLimit, RateLimitGuard } from '@common/guards/rate-limit.guard';
 import { CleanupService } from '../../service/cleanup.service';
 import { BookingStatus } from '@common/enums/booking.enum';
 import { PaymentMethod } from '@common/enums/payment-method.enum';
+import { OptionalJwtAuthGuard } from '@common/guards/optional-jwt-auth.guard';
 
 /**
  * Bookings Controller with Pure Lazy Creation pattern
@@ -152,6 +153,7 @@ export class BookingsController {
    * ✅ Supports both authenticated and guest (anonymous) bookings
    */
   @Post('bookings/field-booking-hold')
+  @UseGuards(OptionalJwtAuthGuard)
   @RateLimit({ ttl: 60, limit: 5 }) // 5 bookings per minute
   @ApiOperation({
     summary: 'Giữ chỗ booking (tạo booking chưa có payment)',
@@ -187,6 +189,7 @@ export class BookingsController {
    * ✅ Supports both authenticated and guest (anonymous) bookings
    */
   @Post('bookings/field-booking-v2')
+  @UseGuards(OptionalJwtAuthGuard)
   // ✅ Removed AuthGuard to allow optional authentication
   // Users can book without login, but must provide guestEmail
   @UseInterceptors(FileInterceptor('paymentProof'))
@@ -247,6 +250,7 @@ export class BookingsController {
    * ✅ SECURITY: Rate limited to prevent spam
    */
   @Post('bookings/:bookingId/submit-payment-proof')
+  @UseGuards(OptionalJwtAuthGuard) // ✅ Added OptionalJwtAuthGuard
   @UseInterceptors(FileInterceptor('paymentProof'))
   @ApiConsumes('multipart/form-data')
   @RateLimit({ ttl: 60, limit: 5 }) // 5 submissions per minute
@@ -311,6 +315,7 @@ export class BookingsController {
    * ✅ Supports both authenticated and guest (anonymous) bookings
    */
   @Post('bookings/coach/v2')
+  @UseGuards(OptionalJwtAuthGuard) // ✅ Added OptionalJwtAuthGuard
   // ✅ Removed AuthGuard to allow optional authentication
   // Users can book without login, but must provide guestEmail
   @UseInterceptors(FileInterceptor('paymentProof'))
@@ -373,6 +378,7 @@ export class BookingsController {
    * ✅ Supports both authenticated and guest (anonymous) bookings
    */
   @Post('bookings/coach-booking-hold')
+  @UseGuards(OptionalJwtAuthGuard) // ✅ Added OptionalJwtAuthGuard
   @RateLimit({ ttl: 60, limit: 5 }) // 5 bookings per minute
   @ApiOperation({
     summary: 'Giữ chỗ booking coach (tạo booking chưa có payment)',

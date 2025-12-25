@@ -572,7 +572,7 @@ export class OwnerBookingService {
             // Find transactions with pending payment proof
             const pendingTransactions = await this.transactionModel
                 .find({
-                    paymentProofStatus: 'pending',
+                    paymentProofStatus: { $in: ['pending', 'rejected'] },
                     paymentProofImageUrl: { $exists: true, $ne: null },
                 })
                 .select('_id booking')
@@ -631,7 +631,7 @@ export class OwnerBookingService {
             // Find transactions with pending payment proof
             const pendingTransactions = await this.transactionModel
                 .find({
-                    paymentProofStatus: 'pending',
+                    paymentProofStatus: { $in: ['pending', 'rejected'] },
                     paymentProofImageUrl: { $exists: true, $ne: null },
                 })
                 .select('_id booking')

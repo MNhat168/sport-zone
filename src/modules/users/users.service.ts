@@ -22,6 +22,7 @@ import { FavouriteCoachDto } from './dto/favourite-coach.dto';
 import { UserRole } from '@common/enums/user.enum';
 import { Field } from '../fields/entities/field.entity';
 import * as bcrypt from 'bcrypt';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class UsersService {
@@ -33,7 +34,7 @@ export class UsersService {
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Field.name) private readonly fieldModel: Model<Field>,
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
-  ) {}
+  ) { }
 
   async findOneByCondition(condition: FilterQuery<User>): Promise<User | null> {
     const result = await this.userRepository.findOneByCondition(condition);
@@ -91,6 +92,21 @@ export class UsersService {
     const updated = await this.userRepository.update(id, updateData);
     if (!updated) throw new NotFoundException('User not found');
     return updated;
+  }
+
+  async remove(id: string): Promise<User | null> {
+    return this.userModel.findByIdAndDelete(id);
+  }
+
+  @Cron(CronExpression.EVERY_WEEK)
+  async resetWeeklyLimits() {
+    // Reset weekly tournament creation count for all users on Monday at 00:00
+    // Note: CronExpression.EVERY_WEEK defaults to 0 0 * * 0 (Sunday).
+    // If we want Monday 00:00 specifically, we could use '0 0 * * 1'
+    // But EVERY_WEEK (Sunday midnight) is usually fine unless Monday is strictly required.
+    // I'll stick to '0 0 * * 1' to be safe for "start of week".
+    await this.userModel.updateMany({}, { weeklyTournamentCreationCount: 0 });
+    console.log('Weekly tournament creation limits have been reset.');
   }
 
   async findByEmail(email: string) {

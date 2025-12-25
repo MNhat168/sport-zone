@@ -23,6 +23,7 @@ import { CoachesModule } from './modules/coaches/coaches.module';
 import { AmenitiesModule } from './modules/amenities/amenities.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import envConfig from './config/env.config';
+import { ScheduleModule } from '@nestjs/schedule';
 
 import { ChatModule } from '@modules/chat/chat.module';
 import { CourtsModule } from './modules/courts/courts.module';

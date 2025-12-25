@@ -1,11 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { TournamentService } from './tournaments.service';
 import { TournamentController } from './tournaments.controller';
 import { Tournament, TournamentSchema } from './entities/tournament.entity';
-import { 
-  TournamentFieldReservation, 
-  TournamentFieldReservationSchema 
+import {
+  TournamentFieldReservation,
+  TournamentFieldReservationSchema
 } from './entities/tournament-field-reservation.entity';
 import { Field, FieldSchema } from '../fields/entities/field.entity';
 import { Transaction, TransactionSchema } from '../transactions/entities/transaction.entity';
@@ -13,6 +13,8 @@ import { User, UserSchema } from '@modules/users/entities/user.entity';
 import { TransactionsModule } from '@modules/transactions/transactions.module';
 import { EmailModule } from '@modules/email/email.module';
 import { Court, CourtSchema } from '../courts/entities/court.entity';
+import { BookingsModule } from '../bookings/bookings.module';
+import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entities/field-owner-profile.entity';
 
 @Module({
   imports: [
@@ -23,12 +25,14 @@ import { Court, CourtSchema } from '../courts/entities/court.entity';
       { name: Court.name, schema: CourtSchema },
       { name: Transaction.name, schema: TransactionSchema },
       { name: User.name, schema: UserSchema },
+      { name: FieldOwnerProfile.name, schema: FieldOwnerProfileSchema },
     ]),
-     TransactionsModule,
-     EmailModule
+    TransactionsModule,
+    EmailModule,
+    forwardRef(() => BookingsModule),
   ],
   controllers: [TournamentController],
   providers: [TournamentService],
   exports: [TournamentService],
 })
-export class TournamentModule {}
+export class TournamentModule { }

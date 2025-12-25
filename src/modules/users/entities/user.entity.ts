@@ -64,6 +64,16 @@ export class User extends BaseEntity {
 
   @Prop({ type: Date })
   gracePeriodEndDate?: Date;
+
+  // Abuse Prevention Fields
+  @Prop({ type: Number, default: 0 })
+  activeTournamentsCount: number;
+
+  @Prop({ type: Number, default: 0 })
+  weeklyTournamentCreationCount: number;
+
+  @Prop({ type: String, enum: ['FREE', 'PREMIUM'], default: 'FREE' })
+  tournamentTier: 'FREE' | 'PREMIUM';
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
