@@ -854,4 +854,39 @@ export class CoachBookingService {
 
         return bookings as unknown as Booking[];
     }
+
+    /**
+     * Get bookings for the currently authenticated coach filtered by type
+     * @param userId - User ID of the coach
+     * @param type - Optional booking type filter (COACH or FIELD_COACH)
+     */
+    async getMyCoachBookingsByType(
+        userId: string,
+        type?: BookingType
+    ): Promise<Booking[]> {
+        const coachProfile = await this.coachProfileModel
+            .findOne({ user: new Types.ObjectId(userId) })
+            .lean();
+
+        if (!coachProfile) {
+            throw new NotFoundException('Coach profile not found for this user');
+        }
+
+        const query: any = { requestedCoach: coachProfile._id };
+
+        // Add type filter if provided
+        if (type) {
+            query.type = type;
+        }
+
+        const bookings = await this.bookingModel
+            .find(query)
+            .populate('user')
+            .populate('field')
+            .populate('court')
+            .lean()
+            .exec();
+
+        return bookings as unknown as Booking[];
+    }
 }

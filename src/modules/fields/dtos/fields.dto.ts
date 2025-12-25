@@ -15,10 +15,10 @@ class FieldAmenityDto {
 }
 
 class DayOperatingHoursDto {
-    @ApiProperty({ 
+    @ApiProperty({
         enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
-        example: 'monday', 
-        description: 'Ngày trong tuần' 
+        example: 'monday',
+        description: 'Ngày trong tuần'
     })
     @IsString()
     day: string;
@@ -38,10 +38,10 @@ class DayOperatingHoursDto {
 }
 
 class DayPriceRangeDto {
-    @ApiProperty({ 
+    @ApiProperty({
         enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
-        example: 'monday', 
-        description: 'Ngày trong tuần' 
+        example: 'monday',
+        description: 'Ngày trong tuần'
     })
     @IsString()
     day: string;
@@ -192,10 +192,10 @@ export class CreateFieldDto {
     @Type(() => LocationDto)
     location: LocationDto;
 
-    @ApiPropertyOptional({ 
-        type: [String], 
-        example: ['https://example.com/field1.jpg', 'https://example.com/field2.jpg'], 
-        description: 'Danh sách URL hình ảnh sân (optional - sẽ được upload nếu có files)' 
+    @ApiPropertyOptional({
+        type: [String],
+        example: ['https://example.com/field1.jpg', 'https://example.com/field2.jpg'],
+        description: 'Danh sách URL hình ảnh sân (optional - sẽ được upload nếu có files)'
     })
     @IsOptional()
     @IsArray()
@@ -224,8 +224,8 @@ export class CreateFieldDto {
     @Min(1)
     maxSlots: number;
 
-    @ApiProperty({ 
-        type: [DayPriceRangeDto], 
+    @ApiProperty({
+        type: [DayPriceRangeDto],
         description: 'Khung giá theo thời gian và ngày',
         example: [
             { day: 'monday', start: '06:00', end: '10:00', multiplier: 1.0 },
@@ -242,13 +242,13 @@ export class CreateFieldDto {
     @IsPositive()
     basePrice: number;
 
-    @ApiPropertyOptional({ 
-        type: [FieldAmenityDto], 
+    @ApiPropertyOptional({
+        type: [FieldAmenityDto],
         example: [
             { amenityId: '507f1f77bcf86cd799439020', price: 150000 },
             { amenityId: '507f1f77bcf86cd799439021', price: 50000 }
-        ], 
-        description: 'Danh sách tiện ích với giá riêng cho sân này' 
+        ],
+        description: 'Danh sách tiện ích với giá riêng cho sân này'
     })
     @IsOptional()
     @IsArray()
@@ -256,10 +256,10 @@ export class CreateFieldDto {
     @Type(() => FieldAmenityDto)
     amenities?: FieldAmenityDto[];
 
-    @ApiPropertyOptional({ 
-        example: 1, 
-        description: 'Số lượng court sẽ được tạo tự động khi tạo sân (0-10, mặc định: 1)', 
-        minimum: 0, 
+    @ApiPropertyOptional({
+        example: 1,
+        description: 'Số lượng court sẽ được tạo tự động khi tạo sân (0-10, mặc định: 1)',
+        minimum: 0,
         maximum: 10,
         default: 1
     })
@@ -285,10 +285,10 @@ export class UpdateFieldDto {
     @IsString()
     description?: string;
 
-    @ApiPropertyOptional({ 
-        type: [String], 
-        example: ['https://example.com/new-image.jpg'], 
-        description: 'Danh sách URL hình ảnh mới' 
+    @ApiPropertyOptional({
+        type: [String],
+        example: ['https://example.com/new-image.jpg'],
+        description: 'Danh sách URL hình ảnh mới'
     })
     @IsOptional()
     @IsArray()
@@ -321,8 +321,8 @@ export class UpdateFieldDto {
     @Min(1)
     maxSlots?: number;
 
-    @ApiPropertyOptional({ 
-        type: [DayPriceRangeDto], 
+    @ApiPropertyOptional({
+        type: [DayPriceRangeDto],
         description: 'Khung giá mới theo thời gian và ngày',
         example: [
             { day: 'monday', start: '06:00', end: '12:00', multiplier: 1.0 },
@@ -361,13 +361,13 @@ export class UpdateFieldDto {
     @Type(() => LocationDto)
     location?: LocationDto;
 
-    @ApiPropertyOptional({ 
-        type: [FieldAmenityDto], 
+    @ApiPropertyOptional({
+        type: [FieldAmenityDto],
         example: [
             { amenityId: '507f1f77bcf86cd799439020', price: 150000 },
             { amenityId: '507f1f77bcf86cd799439021', price: 50000 }
-        ], 
-        description: 'Danh sách tiện ích với giá riêng cho sân này' 
+        ],
+        description: 'Danh sách tiện ích với giá riêng cho sân này'
     })
     @IsOptional()
     @IsArray()
@@ -392,16 +392,16 @@ export class CreateFieldWithFilesDto {
     @IsString()
     description: string;
 
-    @ApiProperty({ 
-        example: '{"address":"District 3, Ho Chi Minh City","geo":{"type":"Point","coordinates":[106.700981,10.776889]}}', 
-        description: 'Địa điểm của sân (JSON string với address và coordinates)' 
+    @ApiProperty({
+        example: '{"address":"District 3, Ho Chi Minh City","geo":{"type":"Point","coordinates":[106.700981,10.776889]}}',
+        description: 'Địa điểm của sân (JSON string với address và coordinates)'
     })
     @IsString()
     location: string;
 
-    @ApiProperty({ 
+    @ApiProperty({
         example: '[{"day":"monday","start":"06:00","end":"22:00","duration":60}]',
-        description: 'Giờ hoạt động theo ngày (JSON string)' 
+        description: 'Giờ hoạt động theo ngày (JSON string)'
     })
     @IsString()
     operatingHours: string;
@@ -418,9 +418,9 @@ export class CreateFieldWithFilesDto {
     @IsString()
     maxSlots: string;
 
-    @ApiProperty({ 
+    @ApiProperty({
         example: '[{"day":"monday","start":"06:00","end":"10:00","multiplier":1.0},{"day":"monday","start":"18:00","end":"22:00","multiplier":1.5}]',
-        description: 'Khung giá theo thời gian và ngày (JSON string)' 
+        description: 'Khung giá theo thời gian và ngày (JSON string)'
     })
     @IsString()
     priceRanges: string;
@@ -429,15 +429,23 @@ export class CreateFieldWithFilesDto {
     @IsString()
     basePrice: string;
 
-    @ApiPropertyOptional({ 
+    @ApiPropertyOptional({
         example: '[{"amenityId":"507f1f77bcf86cd799439020","price":150000},{"amenityId":"507f1f77bcf86cd799439021","price":50000}]',
-        description: 'Danh sách tiện ích với giá riêng cho sân này (JSON string)' 
+        description: 'Danh sách tiện ích với giá riêng cho sân này (JSON string)'
     })
     @IsOptional()
     @IsString()
     amenities?: string;
 
-    @ApiProperty({ 
+    @ApiPropertyOptional({
+        example: '1',
+        description: 'Số lượng court sẽ được tạo tự động khi tạo sân (0-10, mặc định: 1)'
+    })
+    @IsOptional()
+    @IsString()
+    numberOfCourts?: string;
+
+    @ApiProperty({
         type: 'array',
         items: { type: 'string', format: 'binary' },
         description: 'Danh sách hình ảnh sân (tối đa 10 ảnh)',

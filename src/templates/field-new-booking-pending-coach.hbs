@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Thông báo đặt sân mới (Chờ HLV)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            color: #111827;
+        }
+
+        .container {
+            max-width: 640px;
+            margin: 0 auto;
+            padding: 24px;
+            background: #ffffff;
+            border-radius: 12px;
+        }
+
+        .title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .muted {
+            color: #6b7280;
+        }
+
+        .section {
+            margin: 16px 0;
+            padding: 12px;
+            background: #f9fafb;
+            border-radius: 8px;
+        }
+
+        .row {
+            margin: 6px 0;
+        }
+
+        .highlight {
+            color: #f59e0b;
+            font-weight: 600;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="title">{{title}}</div>
+        <div class="muted">Bạn có một đơn đặt sân mới kèm HLV đang chờ xác nhận.</div>
+        <p>Trạng thái: <span class="highlight">Đang chờ HLV {{coach.name}} chấp nhận</span>.</p>
+
+        <div class="section">
+            <div class="row"><strong>Sân:</strong> {{field.name}}</div>
+            <div class="row"><strong>Khách hàng:</strong> {{customer.fullName}}</div>
+            <div class="row"><strong>HLV:</strong> {{coach.name}}</div>
+            <div class="row"><strong>Thời gian:</strong> {{booking.date}} {{booking.startTime}} - {{booking.endTime}}
+            </div>
+            <div class="row"><strong>Doanh thu sân:</strong> {{pricing.fieldPriceFormatted}}</div>
+        </div>
+
+        <p>Hệ thống sẽ tự động thông báo cho bạn khi HLV chấp nhận và khách hàng hoàn tất thanh toán.</p>
+    </div>
+</body>
+
+</html>

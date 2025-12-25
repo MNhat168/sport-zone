@@ -193,6 +193,7 @@ export class CoachesService {
         certification: profile?.certification ?? '',
         sports: profile?.sports ?? [],
       },
+      galleryImages: profile?.galleryImages ?? [],
       bankAccount: bankAccount ? {
         accountName: bankAccount.accountName,
         accountNumber: bankAccount.accountNumber,
@@ -214,6 +215,7 @@ export class CoachesService {
     if (payload.certification !== undefined) profileUpdates.certification = payload.certification;
     if (payload.rank !== undefined) profileUpdates.rank = payload.rank;
     if (payload.experience !== undefined) profileUpdates.experience = payload.experience;
+    if (payload.galleryImages !== undefined) profileUpdates.galleryImages = payload.galleryImages;
 
     if (Object.keys(profileUpdates).length > 0) {
       await this.coachProfileModel.updateOne({ user: user._id }, { $set: profileUpdates }).exec();

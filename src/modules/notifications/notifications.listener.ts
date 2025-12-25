@@ -50,8 +50,9 @@ export class NotificationListener {
         return;
       }
 
-      // Only create notification for confirmed bookings (CASH payments)
-      if (booking.status !== 'confirmed') {
+      // Relax status check for FIELD_COACH bookings (they start as pending)
+      const isCombinedBooking = (booking as any).type === 'field_coach' || (payload as any).type === 'field_coach';
+      if (!isCombinedBooking && booking.status !== 'confirmed') {
         return;
       }
 
@@ -125,6 +126,32 @@ export class NotificationListener {
           paymentMethod: (booking as any).paymentMethod || 'cash',
         },
       }).catch(err => this.logger.warn('Failed to create owner notification for booking.created', err));
+
+      // Notification for Coach (if Combined Booking)
+      if (isCombinedBooking && (payload as any).coachId) {
+        const coachId = (payload as any).coachId;
+        const coachUser = await this.userModel.findById(coachId).select('fullName').lean(); // Verify coach exists
+
+        if (coachUser) {
+          const coachNotificationMessage = `Bạn có yêu cầu đặt HLV mới từ khách hàng ${customerUser.fullName} vào ${bookingDate} lúc ${payload.startTime}. Vui lòng kiểm tra và phản hồi.`;
+          await this.notificationsService.create({
+            recipient: new Types.ObjectId(coachId),
+            type: NotificationType.COACH_REQUEST,
+            title: 'Yêu cầu đặt HLV mới',
+            message: coachNotificationMessage,
+            metadata: {
+              bookingId: bookingIdStr,
+              fieldId: payload.fieldId,
+              fieldName: (field as any).name,
+              customerName: customerUser.fullName,
+              date: bookingDate,
+              startTime: payload.startTime,
+              endTime: payload.endTime,
+            }
+          }).catch(err => this.logger.warn('Failed to create coach notification for booking.created', err));
+        }
+      }
+
     } catch (error) {
       this.logger.error('[Booking Created] Error creating notification', error);
     }
@@ -323,7 +350,7 @@ export class NotificationListener {
                   field: { name: (field as any).name, address: (field as any)?.location?.address || '' },
                   customer: { fullName: customerUser.fullName, phone: (customerUser as any).phone, email: customerUser.email },
                   booking: {
-                    date: (booking.date instanceof Date ? booking.date.toLocaleDateString('vi-VN') : booking.date),
+                    date: (booking.date instanceof Date ? booking.date.toLocaleDateString('vi-VN') : booking.date as string),
                     startTime: booking.startTime,
                     endTime: booking.endTime,
                     services: [],
@@ -363,6 +390,56 @@ export class NotificationListener {
                     paymentMethod: payload.method,
                   },
                 }).catch(err => this.logger.warn('Failed to create owner notification', err));
+              }
+
+              // --- COMBINED BOOKING EMAILS (User & Coach) ---
+              if ((booking as any).type === 'field_coach' && (booking as any).requestedCoach) {
+                const coachId = (booking as any).requestedCoach;
+                const coachUser = await this.userModel.findById(coachId).select('email fullName').lean();
+                const coachPriceSnapshot = (booking as any).pricingSnapshot?.priceBreakdown?.match(/Coach: (\d+)/)?.[1] || '0';
+
+                // 1. Send Email to Coach
+                if (coachUser && coachUser.email) {
+                  await this.emailService.sendCoachBookingConfirmed({
+                    to: coachUser.email,
+                    coach: { name: coachUser.fullName },
+                    customer: { fullName: (customerUser as any)?.fullName || 'Khách hàng', phone: (customerUser as any)?.phone, email: (customerUser as any)?.email },
+                    field: { name: (field as any).name, address: (field as any)?.location?.address || '' },
+                    booking: {
+                      date: (booking.date instanceof Date ? booking.date.toLocaleDateString('vi-VN') : booking.date as string),
+                      startTime: booking.startTime,
+                      endTime: booking.endTime
+                    },
+                    pricing: {
+                      coachPriceFormatted: parseInt(coachPriceSnapshot).toLocaleString('vi-VN') + '₫'
+                    }
+                  }).catch(err => this.logger.warn('Failed to send coach confirmation email', err));
+                }
+
+                // 2. Send Email to Customer (Confirmation)
+                if ((customerUser as any)?.email) {
+                  await this.emailService.sendCustomerBookingConfirmation({
+                    to: (customerUser as any).email,
+                    field: { name: (field as any).name, address: (field as any)?.location?.address || '' },
+                    customer: { fullName: (customerUser as any).fullName, phone: (customerUser as any).phone, email: (customerUser as any).email },
+                    booking: {
+                      date: (booking.date instanceof Date ? booking.date.toLocaleDateString('vi-VN') : booking.date as string),
+                      startTime: booking.startTime,
+                      endTime: booking.endTime,
+                      services: [],
+                      // Append coach info to confirmation? 
+                      // Using standard template, might need customization or generic "services".
+                      // For receiving generic confirmation, current template is fine.
+                    },
+                    pricing: {
+                      services: [],
+                      fieldPriceFormatted: (booking.totalPrice || 0).toLocaleString('vi-VN') + '₫', // Total
+                      totalFormatted: (booking.totalPrice || 0).toLocaleString('vi-VN') + '₫',
+                    },
+                    preheader: 'Xác nhận đặt sân & HLV thành công',
+                    paymentMethod: payload.method
+                  }).catch(err => this.logger.warn('Failed to send customer confirmation email', err));
+                }
               }
             }
           }

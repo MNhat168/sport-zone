@@ -1,6 +1,6 @@
-import { Controller, Get, Param, Query,Post,Patch, BadRequestException, Put, Body, NotFoundException, Request, UseGuards, Logger} from '@nestjs/common';
+import { Controller, Get, Param, Query, Post, Patch, BadRequestException, Put, Body, NotFoundException, Request, UseGuards, Logger, Delete, ForbiddenException, UploadedFiles, UseInterceptors } from '@nestjs/common';
 import { UpdateCoachDto } from './dtos/update-coach.dto';
-import { ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiOperation, ApiResponse, ApiConsumes } from '@nestjs/swagger';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -8,6 +8,7 @@ import {
   ApiParam,
 } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { CoachesService } from './coaches.service';
 import { CoachesDto } from './dtos/coaches.dto';
 import { SportType } from 'src/common/enums/sport-type.enum';
@@ -20,13 +21,17 @@ import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { Roles } from 'src/decorators/roles.decorator';
 import { UserRole } from '@common/enums/user.enum';
+import { AwsS3Service } from '../../service/aws-s3.service';
 
 @ApiTags('Coaches')
 @Controller('coaches')
 export class CoachesController {
   private readonly logger = new Logger(CoachesController.name);
 
-  constructor(private readonly coachesService: CoachesService) { }
+  constructor(
+    private readonly coachesService: CoachesService,
+    private readonly awsS3Service: AwsS3Service,
+  ) { }
 
   @Get('all')
   async getAllCoaches(): Promise<any[]> {
@@ -167,5 +172,80 @@ export class CoachesController {
       throw new BadRequestException('Date parameter is required');
     }
     return this.coachesService.getCoachAvailableSlots(coachId, date);
+  }
+
+  // POST /coaches/:id/upload-gallery
+  @Post(':id/upload-gallery')
+  @UseGuards(AuthGuard('jwt'))
+  @UseInterceptors(FilesInterceptor('images', 10))
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Upload gallery images for coach profile' })
+  async uploadGalleryImages(
+    @Param('id') id: string,
+    @Request() req: any,
+    @UploadedFiles() files: Express.Multer.File[],
+  ): Promise<{ success: boolean; urls: string[] }> {
+    if (!files || files.length === 0) {
+      throw new BadRequestException('No files provided');
+    }
+
+    // Verify current user owns this coach profile
+    const userId = req.user._id || req.user.id;
+    const coach = await this.coachesService.getCoachById(id);
+    if (!coach) {
+      throw new NotFoundException('Coach profile not found');
+    }
+    if (coach.id !== userId.toString()) {
+      throw new ForbiddenException('Not authorized to upload images for this coach profile');
+    }
+
+    // Upload files to S3
+    const urls = await Promise.all(
+      files.map(file =>
+        this.awsS3Service.uploadRegistrationDocumentFromBuffer(
+          file.buffer,
+          file.mimetype
+        )
+      )
+    );
+
+    // Return URLs only (Frontend will handle saving to profile)
+    return { success: true, urls };
+  }
+
+  // DELETE /coaches/:id/gallery/:index
+  @Delete(':id/gallery/:index')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Delete gallery image by index' })
+  async deleteGalleryImage(
+    @Param('id') id: string,
+    @Param('index') index: string,
+    @Request() req: any,
+  ): Promise<{ success: boolean }> {
+    const userId = req.user._id || req.user.id;
+    const coach = await this.coachesService.getCoachById(id);
+
+    if (!coach) {
+      throw new NotFoundException('Coach profile not found');
+    }
+    if (coach.id !== userId.toString()) {
+      throw new ForbiddenException('Not authorized to modify images for this coach profile');
+    }
+
+    const imageIndex = parseInt(index, 10);
+    if (isNaN(imageIndex) || !coach.galleryImages || imageIndex >= coach.galleryImages.length || imageIndex < 0) {
+      throw new BadRequestException('Invalid index');
+    }
+
+    const newGallery = [...coach.galleryImages];
+    newGallery.splice(imageIndex, 1);
+
+    await this.coachesService.updateCoach(id, {
+      galleryImages: newGallery
+    });
+
+    return { success: true };
   }
 }

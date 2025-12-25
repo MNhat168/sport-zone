@@ -5,25 +5,25 @@
 export enum PaymentMethod {
   /** Trả tiền mặt tại chỗ */
   CASH = 1,
-  
+
   /** Internet Banking */
   EBANKING = 2,
-  
+
   /** Thẻ tín dụng */
   CREDIT_CARD = 3,
-  
+
   /** Thẻ ghi nợ */
   DEBIT_CARD = 4,
-  
+
   /** Ví điện tử MoMo */
   MOMO = 5,
-  
+
   /** Ví điện tử ZaloPay */
   ZALOPAY = 6,
-  
+
   /** Chuyển khoản ngân hàng */
   BANK_TRANSFER = 8,
-  
+
   /** QR Code thanh toán */
   QR_CODE = 9,
 
@@ -32,7 +32,9 @@ export enum PaymentMethod {
 
   /** Cổng thanh toán PayOS */
   PAYOS = 11,
-  WALLET,
+
+  /** Ví */
+  WALLET = 12,
 }
 
 /**
@@ -49,7 +51,7 @@ export const PaymentMethodLabels: Record<PaymentMethod, string> = {
   [PaymentMethod.QR_CODE]: 'QR Code',
   [PaymentMethod.INTERNAL]: 'Giao dịch nội bộ',
   [PaymentMethod.PAYOS]: 'PayOS',
-  [PaymentMethod.WALLET]: ""
+  [PaymentMethod.WALLET]: "Ví"
 };
 
 /**
@@ -66,7 +68,7 @@ export const PaymentMethodNames: Record<PaymentMethod, string> = {
   [PaymentMethod.QR_CODE]: 'qr_code',
   [PaymentMethod.INTERNAL]: 'internal',
   [PaymentMethod.PAYOS]: 'payos',
-  [PaymentMethod.WALLET]: ""
+  [PaymentMethod.WALLET]: "wallet"
 };
 
 /**

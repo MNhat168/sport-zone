@@ -82,7 +82,7 @@ export class FieldOwnerController {
     private readonly fieldsService: FieldsService,
     private readonly awsS3Service: AwsS3Service,
     private readonly ekycService: EkycService,
-  ) {}
+  ) { }
 
   private async getOwnerProfileId(userId: string): Promise<string> {
     const profile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(userId);
@@ -300,6 +300,35 @@ export class FieldOwnerController {
     });
   }
 
+  @Get('bookings/by-type')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get bookings for owner filtered by type (field or field_coach)' })
+  @ApiQuery({ name: 'type', required: false, description: 'Booking type: field or field_coach' })
+  async getAllBookingsByType(
+    @Request() req: any,
+    @Query('type') type?: string,
+    @Query('fieldName') fieldName?: string,
+    @Query('status') status?: string,
+    @Query('transactionStatus') transactionStatus?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
+  ) {
+    const userId = req.user._id || req.user.id;
+    return this.fieldOwnerService.getAllBookingsByOwnerWithType(userId, {
+      type,
+      fieldName,
+      status,
+      transactionStatus,
+      startDate,
+      endDate,
+      page: Number(page),
+      limit: Number(limit),
+    });
+  }
+
   @Put('fields/:id/amenities')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
@@ -347,7 +376,7 @@ export class FieldOwnerController {
   @UseInterceptors(FileInterceptor('file'))
   @ApiBearerAuth()
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Upload business license document',
     description: 'Upload business license document for business/household owner types. Note: CCCD documents are now handled via didit eKYC integration.'
   })
@@ -373,18 +402,18 @@ export class FieldOwnerController {
   @Post('ekyc/session')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Tạo eKYC session với didit',
     description: 'Tạo một phiên xác thực eKYC mới. Frontend sẽ sử dụng redirectUrl để mở didit eKYC widget.'
   })
-  @ApiResponse({ 
-    status: 201, 
+  @ApiResponse({
+    status: 201,
     description: 'eKYC session đã được tạo thành công',
-    type: EkycSessionResponseDto 
+    type: EkycSessionResponseDto
   })
-  @ApiResponse({ 
-    status: 500, 
-    description: 'Không thể tạo phiên xác thực eKYC' 
+  @ApiResponse({
+    status: 500,
+    description: 'Không thể tạo phiên xác thực eKYC'
   })
   async createEkycSession(
     @Request() req: any,
@@ -392,7 +421,7 @@ export class FieldOwnerController {
   ): Promise<EkycSessionResponseDto> {
     try {
       const userId = req.user?._id || req.user?.id;
-      
+
       if (!userId) {
         this.logger.error('User ID not found in request', {
           user: req.user,
@@ -410,12 +439,12 @@ export class FieldOwnerController {
       if (error instanceof BadRequestException) {
         throw error;
       }
-      
+
       this.logger.error('Failed to create eKYC session in controller:', {
         error: error?.message,
         stack: error?.stack,
       });
-      
+
       throw new InternalServerErrorException(
         error?.message || 'Không thể tạo phiên xác thực eKYC. Vui lòng thử lại sau.',
       );
@@ -429,23 +458,23 @@ export class FieldOwnerController {
   @Get('ekyc/status/:sessionId')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Lấy trạng thái eKYC session',
     description: 'Frontend polling endpoint để kiểm tra xem user đã hoàn thành eKYC chưa. Gọi mỗi 3-5s.'
   })
-  @ApiParam({ 
-    name: 'sessionId', 
-    description: 'eKYC session ID', 
-    example: 'ekyc_123456789' 
+  @ApiParam({
+    name: 'sessionId',
+    description: 'eKYC session ID',
+    example: 'ekyc_123456789'
   })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Trạng thái eKYC session',
-    type: EkycStatusResponseDto 
+    type: EkycStatusResponseDto
   })
-  @ApiResponse({ 
-    status: 404, 
-    description: 'eKYC session không tồn tại hoặc không thuộc về bạn' 
+  @ApiResponse({
+    status: 404,
+    description: 'eKYC session không tồn tại hoặc không thuộc về bạn'
   })
   async getEkycStatus(
     @Param('sessionId') sessionId: string,

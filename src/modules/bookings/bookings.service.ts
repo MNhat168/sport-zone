@@ -583,6 +583,10 @@ export class BookingsService {
     return this.coachBookingService.getMyCoachBookings(userId);
   }
 
+  async getMyCoachBookingsByType(userId: string, type?: BookingType): Promise<Booking[]> {
+    return this.coachBookingService.getMyCoachBookingsByType(userId, type);
+  }
+
   /**
    * Accept a booking request for a coach
    * Delegates to SessionBookingService
