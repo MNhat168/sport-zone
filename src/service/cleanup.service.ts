@@ -346,6 +346,7 @@ export class CleanupService {
 
       // ============================================================
       // Part 2: Cleanup BANK_TRANSFER bookings without payment proof
+      // Excludes field_coach type since those require coach approval before payment
       // ============================================================
       const bookingsWithoutPayment = await this.bookingModel.find({
         status: BookingStatus.PENDING,
@@ -353,6 +354,7 @@ export class CleanupService {
         transaction: { $exists: false },
         'metadata.paymentMethod': PaymentMethod.BANK_TRANSFER,
         'metadata.isSlotHold': true,
+        type: { $ne: 'field_coach' }, // Exclude field_coach - these wait for coach approval first
       })
         .populate('user', 'email fullName password isVerified')
         .populate('field', 'name');

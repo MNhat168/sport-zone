@@ -45,7 +45,8 @@
         }
     </style>
     <!-- Preheader -->
-    <span style="display:none!important;visibility:hidden;opacity:0;color:transparent;height:0;width:0;">Đơn đặt sân & HLV của bạn đang chờ HLV xác nhận.</span>
+    <span style="display:none!important;visibility:hidden;opacity:0;color:transparent;height:0;width:0;">Đơn đặt sân &
+        HLV của bạn đang chờ HLV xác nhận.</span>
 </head>
 
 <body>
@@ -60,16 +61,20 @@
             <div class="row"><strong>Địa chỉ:</strong> {{field.address}}</div>
             {{/if}}
             <div class="row"><strong>HLV:</strong> {{coach.name}}</div>
-            <div class="row"><strong>Thời gian:</strong> {{booking.date}} {{booking.startTime}} - {{booking.endTime}}</div>
+            <div class="row"><strong>Thời gian:</strong> {{booking.date}} {{booking.startTime}} - {{booking.endTime}}
+            </div>
             <div class="row"><strong>Tổng tiền:</strong> {{pricing.totalFormatted}}</div>
-            <div class="row"><strong>Phương thức thanh toán:</strong> {{payment.methodLabel}}</div>
+            <div class="row"><strong>Phương thức thanh toán:</strong> PayOS <span
+                    style="background:#1e40af;color:white;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;margin-left:4px;">Thanh
+                    toán trực tuyến</span></div>
         </div>
 
         <p>
             Chúng tôi sẽ gửi email thông báo thanh toán ngay khi HLV chấp nhận yêu cầu của bạn.
         </p>
-        
-        <p class="muted">Nếu HLV từ chối hoặc không phản hồi trong thời gian quy định, yêu cầu sẽ tự động hủy và bạn sẽ không bị tính phí.</p>
+
+        <p class="muted">Nếu HLV từ chối hoặc không phản hồi trong thời gian quy định, yêu cầu sẽ tự động hủy và bạn sẽ
+            không bị tính phí.</p>
 
         <p class="muted">Cảm ơn bạn đã sử dụng dịch vụ SportZone.</p>
     </div>

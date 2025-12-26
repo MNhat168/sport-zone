@@ -1142,7 +1142,11 @@ export class BookingsService {
       // This ensures only ONE update happens even if webhook is called multiple times
       // Determine booking type to decide lifecycle change
       const current = await this.bookingModel.findById(event.bookingId).select('type status').exec();
-      const isCoach = current && String((current as any).type) === String(BookingType.COACH);
+      // COACH bookings stay PENDING until coach verifies
+      // FIELD_COACH bookings stay CONFIRMED (already set when coach accepted)
+      // Other bookings move to CONFIRMED
+      const isCoachOnly = current && String((current as any).type) === String(BookingType.COACH);
+      const isFieldCoach = current && String((current as any).type) === String(BookingType.FIELD_COACH);
 
       const updateResult = await this.bookingModel.findOneAndUpdate(
         {
@@ -1151,7 +1155,8 @@ export class BookingsService {
         {
           $set: {
             paymentStatus: 'paid',
-            ...(isCoach ? {} : { status: BookingStatus.CONFIRMED }),
+            // Only update status to CONFIRMED for FIELD bookings (not COACH or FIELD_COACH)
+            ...(isCoachOnly || isFieldCoach ? {} : { status: BookingStatus.CONFIRMED }),
             transaction: new Types.ObjectId(event.paymentId)
           }
         },

@@ -969,7 +969,7 @@ export class FieldBookingService {
             pricing: {
               totalFormatted: (booking.totalPrice || 0).toLocaleString('vi-VN') + '₫'
             },
-            paymentMethod: dto.paymentMethod
+            paymentMethod: 11 // 11: PayOS (Fixed for combined bookings)
           });
         }
 

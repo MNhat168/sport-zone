@@ -13,9 +13,10 @@ import {
 
 import { Transaction } from '../../transactions/entities/transaction.entity';
 import { PaymentMethod } from '@common/enums/payment-method.enum';
-import { TransactionStatus } from '@common/enums/transaction.enum';
+import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum';
 import { EmailService } from '../../email/email.service';
 import { PayOSService } from '../../transactions/payos.service';
+import { generatePayOSOrderCode } from '../../transactions/utils/payos.utils';
 
 /**
  * Session Booking Service
@@ -84,9 +85,14 @@ export class SessionBookingService {
     const field = booking.field ? (booking.field as any) : null;
 
     try {
+      // Extract userId properly - booking.user can be populated (object) or ObjectId
+      const userId = (booking.user as any)._id
+        ? (booking.user as any)._id.toString()
+        : (booking.user as any).toString();
+
       this.eventEmitter.emit('booking.coach.accept', {
         bookingId: booking.id.toString(),
-        userId: booking.user.toString(),
+        userId: userId,
         coachId,
         fieldId: field?._id?.toString(),
         date: booking.date.toISOString().split('T')[0],
@@ -99,6 +105,41 @@ export class SessionBookingService {
 
       booking.coachStatus = 'accepted';
       await booking.save();
+
+      // ✅ Auto-create transaction for FIELD_COACH if missing (Combined Booking flow)
+      // This ensures we can generate a PayOS payment link
+      if (booking.type === BookingType.FIELD_COACH && !booking.transaction) {
+        try {
+          // Generate order code
+          const orderCode = generatePayOSOrderCode();
+
+          // Get User ID safely
+          const userId = (booking.user as any)._id || booking.user;
+
+          // Create transaction
+          const transaction = new this.transactionModel({
+            user: userId,
+            amount: booking.totalPrice,
+            direction: 'in',
+            type: TransactionType.PAYMENT,
+            method: PaymentMethod.PAYOS,
+            status: TransactionStatus.PENDING,
+            externalTransactionId: orderCode,
+            description: `Thanh toan don ${(booking as any)._id}`,
+            booking: booking._id
+          });
+
+          await transaction.save();
+
+          // Update booking with transaction
+          booking.transaction = transaction._id as any;
+          await booking.save();
+
+          this.logger.log(`Auto-created PayOS transaction ${transaction._id} for accepted booking ${booking._id}`);
+        } catch (txError) {
+          this.logger.error(`Failed to auto-create transaction: ${txError.message}`);
+        }
+      }
 
       // ✅ PayOS Payment Link Generation logic
       if (booking.type === BookingType.FIELD_COACH && booking.transaction) {
@@ -118,22 +159,23 @@ export class SessionBookingService {
               items: [
                 { name: `Booking san + HLV`, quantity: 1, price: transaction.amount }
               ],
-              returnUrl: `${process.env.FRONTEND_URL}/payment/success?bookingId=${booking._id}`,
-              cancelUrl: `${process.env.FRONTEND_URL}/payment/cancel?bookingId=${booking._id}`
+              returnUrl: `${process.env.FRONTEND_URL}/transactions/payos/return?bookingId=${booking._id}`,
+              cancelUrl: `${process.env.FRONTEND_URL}/transactions/payos/cancel?bookingId=${booking._id}`
             });
 
             // Update transaction with link info (optional, but good for debugging)
             // transaction.paymentLink = paymentLinkRes.checkoutUrl; 
             // await transaction.save();
 
-            // Send Email to User
+            // Send Email to User with PayOS payment link (field_coach specific)
             const user = booking.user as any;
-            await this.emailService.sendBookingPaymentRequest({
+            await this.emailService.sendFieldCoachPaymentRequest({
               to: user.email,
               field: {
                 name: field?.name || 'Sân bóng',
                 address: field?.location?.address || ''
               },
+              coach: { name: coach?.fullName || 'Huấn luyện viên' },
               customer: { fullName: user.fullName },
               booking: {
                 date: booking.date instanceof Date ? booking.date.toLocaleDateString('vi-VN') : booking.date,
@@ -143,9 +185,7 @@ export class SessionBookingService {
               pricing: {
                 totalFormatted: transaction.amount.toLocaleString('vi-VN') + ' đ'
               },
-              paymentLink: paymentLinkRes.checkoutUrl,
-              paymentMethod: 'PayOS',
-              expiresAt: undefined // Optional
+              paymentLink: paymentLinkRes.checkoutUrl
             });
 
             this.logger.log(`Sent PayOS payment email to ${user.email}`);

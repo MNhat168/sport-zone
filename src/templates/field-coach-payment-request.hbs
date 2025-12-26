@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <title>HLV đã chấp nhận - Yêu cầu thanh toán</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            color: #111827;
+        }
+
+        .container {
+            max-width: 640px;
+            margin: 0 auto;
+            padding: 24px;
+            background: #ffffff;
+            border-radius: 12px;
+        }
+
+        .title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #059669;
+        }
+
+        .subtitle {
+            color: #6b7280;
+            margin-bottom: 16px;
+        }
+
+        .highlight {
+            color: #059669;
+            font-weight: 600;
+        }
+
+        .section {
+            margin: 16px 0;
+            padding: 12px;
+            background: #f9fafb;
+            border-radius: 8px;
+        }
+
+        .coach-section {
+            margin: 16px 0;
+            padding: 12px;
+            background: #ecfdf5;
+            border-radius: 8px;
+            border: 1px solid #6ee7b7;
+        }
+
+        .row {
+            margin: 6px 0;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 14px 24px;
+            background: #10b981;
+            color: #fff;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .payos-badge {
+            display: inline-block;
+            background: #1e40af;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+
+        .muted {
+            color: #6b7280;
+        }
+
+        .warning {
+            background: #fff7ed;
+            border: 1px solid #fed7aa;
+            padding: 12px;
+            border-radius: 8px;
+            margin: 16px 0;
+        }
+    </style>
+    <!-- Preheader -->
+    <span style="display:none!important;visibility:hidden;opacity:0;color:transparent;height:0;width:0;">
+        HLV {{coach.name}} đã chấp nhận yêu cầu đặt lịch! Vui lòng thanh toán qua PayOS để hoàn tất đặt sân & HLV.
+    </span>
+</head>
+
+<body>
+    <div class="container">
+        <div class="title">✅ HLV đã chấp nhận yêu cầu đặt lịch!</div>
+        <div class="subtitle">
+            Huấn luyện viên <strong class="highlight">{{coach.name}}</strong> đã chấp nhận yêu cầu của bạn.
+            Vui lòng hoàn tất thanh toán qua <strong>PayOS</strong> để xác nhận đặt sân & HLV.
+        </div>
+
+        {{#if payment.expiresInMinutes}}
+        <div class="warning">
+            <div class="row"><strong>⏰ Lưu ý:</strong> Liên kết thanh toán sẽ hết hạn sau {{payment.expiresInMinutes}}
+                phút.</div>
+            {{#if payment.expiresAt}}
+            <div class="row muted">Hết hạn vào: {{payment.expiresAt}}</div>
+            {{/if}}
+        </div>
+        {{/if}}
+
+        <div class="coach-section">
+            <div class="row"><strong>🏅 Huấn luyện viên:</strong> {{coach.name}}</div>
+        </div>
+
+        <div class="section">
+            <div class="row"><strong>⚽ Sân:</strong> {{field.name}}</div>
+            {{#if field.address}}
+            <div class="row"><strong>📍 Địa chỉ:</strong> {{field.address}}</div>
+            {{/if}}
+            <div class="row"><strong>📅 Thời gian:</strong> {{booking.date}} {{booking.startTime}} - {{booking.endTime}}
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="row"><strong>💰 Tổng tiền:</strong> {{pricing.totalFormatted}}</div>
+            <div class="row"><strong>💳 Phương thức:</strong> PayOS <span class="payos-badge">Thanh toán trực
+                    tuyến</span></div>
+        </div>
+
+        <p style="text-align: center; margin: 24px 0;">
+            <a class="button" href="{{payment.link}}" target="_blank">Thanh toán ngay qua PayOS</a>
+        </p>
+
+        <p class="muted" style="text-align: center; font-size: 13px;">
+            Nếu bạn không thực hiện yêu cầu đặt sân & HLV này, vui lòng bỏ qua email.
+        </p>
+    </div>
+</body>
+
+</html>
