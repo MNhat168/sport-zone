@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model, Types } from 'mongoose';
 import { User, UserDocument } from 'src/modules/users/entities/user.entity';
+import { Notification, NotificationDocument } from 'src/modules/notifications/entities/notification.entity';
 import { UserRole } from '@common/enums/user.enum';
 import { Transaction, TransactionDocument } from 'src/modules/transactions/entities/transaction.entity';
 import { TransactionStatus } from '@common/enums/transaction.enum';
@@ -40,6 +41,7 @@ export class AdminService {
         @InjectModel('Field') private fieldModel: Model<FieldDocument>,
         @InjectModel('CoachProfile') private coachProfileModel: Model<CoachProfileDocument>,
         @InjectModel('Tournament') private tournamentModel: Model<any>,
+        @InjectModel('Notification') private readonly notificationModel: Model<NotificationDocument>,
         private aiService: AiService,
     ) { }
 
@@ -2773,5 +2775,31 @@ export class AdminService {
 
     async exportAnalytics(format: 'csv' | 'json' | 'pdf', filter?: AnalyticsFilterDto): Promise<any> {
         throw new Error('Export functionality not yet implemented');
+    }
+
+    async createNotificationForAllUsers(
+        title: string,
+        message: string,
+        metadata?: Record<string, any>,
+    ) {
+        const users = await this.userModel
+            .find(
+                { userRole: { $ne: 'admin' } },
+                { _id: 1 },
+            )
+            .lean();
+
+        if (!users.length) return [];
+
+        const notifications = users.map((user) => ({
+            recipient: user._id as Types.ObjectId,
+            type: 'admin_notifcation',
+            title,
+            message,
+            metadata,
+            isRead: false,
+        }));
+
+        return this.notificationModel.insertMany(notifications);
     }
 }
