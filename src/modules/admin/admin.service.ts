@@ -974,9 +974,12 @@ export class AdminService {
             return this.createEmptyFieldOwnerStats(owner);
         }
 
-        // 2. Find fields using the profile ID
+        // 2. Find fields using the profile ID OR User ID (to handle legacy data)
         const fields = await this.fieldModel.find({
-            owner: fieldOwnerProfile._id
+            $or: [
+                { owner: fieldOwnerProfile._id },
+                { owner: owner._id }
+            ]
         });
 
         // Rest of the method remains the same...
@@ -1078,16 +1081,18 @@ export class AdminService {
         profile: CoachProfileDocument,
         dateFilter: any
     ): Promise<CoachStatsDto> {
-        const userId = profile.user;
+        const user = profile.user as any;
+        const userId = user._id as Types.ObjectId;
+        const profileId = profile._id as Types.ObjectId;
 
         const [totalBookings, totalFavorites] = await Promise.all([
-            this.getTotalBookingsForCoach(userId, dateFilter),
-            this.getTotalFavoritesForCoach(userId)
+            this.getTotalBookingsForCoach(profileId, dateFilter),
+            this.getTotalFavoritesForCoach(userId as Types.ObjectId)
         ]);
 
         return {
             coachId: userId.toString(),
-            coachName: (profile as any).user?.fullName || 'Unknown',
+            coachName: user.fullName || 'Unknown',
             averageRating: profile.rating || 0,
             totalBookings,
             totalFavorites,
@@ -1095,6 +1100,7 @@ export class AdminService {
             sports: profile.sports,
             hourlyRate: profile.hourlyRate,
             monthlyBookings: [],
+            // Placeholder values
             bookingTrend: 'stable',
             clientRetentionRate: 0,
             peakAvailability: [],
@@ -1116,10 +1122,17 @@ export class AdminService {
         ownerId: Types.ObjectId,
         dateFilter: any
     ): Promise<FieldOwnerStatsDto> {
-        const [owner, fields] = await Promise.all([
+        const [owner, fieldOwnerProfile] = await Promise.all([
             this.userModel.findById(ownerId),
-            this.fieldModel.find({ owner: ownerId })
+            this.fieldOwnerProfileModel.findOne({ user: ownerId })
         ]);
+
+        const fields = await this.fieldModel.find({
+            $or: [
+                { owner: fieldOwnerProfile?._id },
+                { owner: ownerId } // Legacy support
+            ]
+        });
 
         // Type assertion - assuming fields is an array of FieldDocument
         const typedFields = fields as FieldDocument[];
@@ -1193,7 +1206,9 @@ export class AdminService {
         profile: CoachProfileDocument,
         dateFilter: any
     ): Promise<CoachStatsDto> {
-        const userId = profile.user;
+        const user = profile.user as any;
+        const userId = user._id as Types.ObjectId;
+        const profileId = profile._id as Types.ObjectId;
 
         const [
             monthlyBookings,
@@ -1202,11 +1217,11 @@ export class AdminService {
             clientRetentionRate,
             peakAvailability
         ] = await Promise.all([
-            this.getMonthlyBookingsForCoach(userId, dateFilter),
-            this.getTotalBookingsForCoach(userId, dateFilter),
+            this.getMonthlyBookingsForCoach(profileId, dateFilter),
+            this.getTotalBookingsForCoach(profileId, dateFilter),
             this.getTotalFavoritesForCoach(userId),
-            this.getClientRetentionRate(userId, dateFilter),
-            this.getPeakAvailability(userId, dateFilter)
+            this.getClientRetentionRate(profileId, dateFilter),
+            this.getPeakAvailability(profileId, dateFilter)
         ]);
 
         const statsContext: DetailedCoachStats = {
@@ -2201,13 +2216,13 @@ export class AdminService {
     }
 
     private async getMonthlyBookingsForCoach(
-        userId: Types.ObjectId,
+        profileId: Types.ObjectId,
         dateFilter: any
     ): Promise<MonthlyBookingDto[]> {
         return this.bookingModel.aggregate([
             {
                 $match: {
-                    requestedCoach: userId,
+                    requestedCoach: profileId,
                     ...dateFilter
                 }
             },
@@ -2243,11 +2258,11 @@ export class AdminService {
     }
 
     private async getTotalBookingsForCoach(
-        userId: Types.ObjectId,
+        profileId: Types.ObjectId,
         dateFilter: any
     ): Promise<number> {
         return this.bookingModel.countDocuments({
-            requestedCoach: userId,
+            requestedCoach: profileId,
             type: 'coach',
             ...dateFilter
         });
@@ -2260,13 +2275,13 @@ export class AdminService {
     }
 
     private async getClientRetentionRate(
-        userId: Types.ObjectId,
+        profileId: Types.ObjectId,
         dateFilter: any
     ): Promise<number> {
         const repeatClients = await this.bookingModel.aggregate([
             {
                 $match: {
-                    requestedCoach: userId,
+                    requestedCoach: profileId,
                     ...dateFilter
                 }
             },
@@ -2287,7 +2302,7 @@ export class AdminService {
         ]);
 
         const totalClients = await this.bookingModel.distinct('user', {
-            requestedCoach: userId,
+            requestedCoach: profileId,
             ...dateFilter
         });
 
@@ -2297,13 +2312,13 @@ export class AdminService {
     }
 
     private async getPeakAvailability(
-        userId: Types.ObjectId,
+        profileId: Types.ObjectId,
         dateFilter: any
     ): Promise<string[]> {
         const peakTimes = await this.bookingModel.aggregate([
             {
                 $match: {
-                    requestedCoach: userId,
+                    requestedCoach: profileId,
                     ...dateFilter
                 }
             },

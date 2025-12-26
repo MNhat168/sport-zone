@@ -1162,8 +1162,14 @@ export class FieldsService {
                 });
             }
 
+            // Verify field owner profile exists
+            const fieldOwnerProfile = await this.fieldOwnerProfileModel.findOne({ user: new Types.ObjectId(ownerId) });
+            if (!fieldOwnerProfile) {
+                throw new BadRequestException('User is not a registered field owner. Please register as a field owner first.');
+            }
+
             const newField = new this.fieldModel({
-                owner: new Types.ObjectId(ownerId),
+                owner: fieldOwnerProfile._id, // Use FieldOwnerProfile ID instead of User ID
                 name: createFieldDto.name,
                 sportType: createFieldDto.sportType,
                 description: createFieldDto.description,
@@ -1334,9 +1340,15 @@ export class FieldsService {
                 throw new BadRequestException('Invalid numeric values');
             }
 
+            // Verify field owner profile exists
+            const fieldOwnerProfile = await this.fieldOwnerProfileModel.findOne({ user: new Types.ObjectId(ownerId) });
+            if (!fieldOwnerProfile) {
+                throw new BadRequestException('User is not a registered field owner. Please register as a field owner first.');
+            }
+
             // Create new field document using simple structure
             const newField = new this.fieldModel({
-                owner: new Types.ObjectId(ownerId),
+                owner: fieldOwnerProfile._id, // Use FieldOwnerProfile ID instead of User ID
                 name: createFieldDto.name,
                 sportType: createFieldDto.sportType,
                 description: createFieldDto.description,
