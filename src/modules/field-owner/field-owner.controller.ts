@@ -29,7 +29,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
-import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
+import { FilesInterceptor, FileInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express';
 import { FieldOwnerService } from './field-owner.service';
 import { FieldsService } from '../fields/fields.service';
 import { AwsS3Service } from '../../service/aws-s3.service';
@@ -40,6 +40,7 @@ import {
   FieldsDto,
   OwnerFieldsResponseDto,
   UpdateFieldDto,
+  UpdateFieldWithFilesDto,
 } from '../fields/dtos/fields.dto';
 import { UpdateFieldVerificationDto } from '../fields/dtos/update-field-verification.dto';
 import {
@@ -201,6 +202,26 @@ export class FieldOwnerController {
     const userId = req.user._id || req.user.id || req.user.userId;
     const ownerId = await this.getOwnerProfileId(userId);
     return this.fieldOwnerService.update(id, updateFieldDto, ownerId);
+  }
+
+  @Put('fields/:id/with-images')
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'avatar', maxCount: 1 },
+    { name: 'gallery', maxCount: 10 }
+  ]))
+  @UseGuards(AuthGuard('jwt'), SubscriptionStatusGuard)
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Update field with images (avatar + gallery)' })
+  async updateFieldWithImages(
+    @Request() req,
+    @Param('id') id: string,
+    @Body() updateFieldDto: UpdateFieldWithFilesDto,
+    @UploadedFiles() files: { avatar?: IFile[], gallery?: IFile[] },
+  ): Promise<FieldsDto> {
+    const userId = req.user._id || req.user.id || req.user.userId;
+    const ownerId = await this.getOwnerProfileId(userId);
+    return this.fieldOwnerService.updateWithFiles(id, updateFieldDto, files, ownerId);
   }
 
   @Delete('fields/:id')
