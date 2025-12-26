@@ -132,6 +132,38 @@ export class CoachesService {
     });
   }
 
+  /**
+   * Public listing of coaches optionally filtered by sports array
+   * @param sports optional array of SportType to filter coaches
+   */
+  async getAllCoachesPublic(sports?: SportType[]): Promise<any[]> {
+    const users = await this.userModel.find({ role: UserRole.COACH }).lean();
+
+    const profileFilter: any = { user: { $in: users.map((u) => u._id) } };
+    if (sports && sports.length > 0) {
+      profileFilter.sports = { $in: sports };
+    }
+
+    const profiles = await this.coachProfileModel.find(profileFilter).lean();
+
+    return profiles.map((profile) => {
+      const user = users.find((u) => u._id.toString() === profile.user.toString());
+      return {
+        id: user?._id?.toString() ?? profile.user.toString(),
+        name: user?.fullName ?? '',
+        location: typeof profile?.location === 'string'
+          ? profile.location
+          : profile?.location?.address ?? '',
+        description: profile?.bio ?? '',
+        rating: profile?.rating ?? 0,
+        totalReviews: profile?.totalReviews ?? 0,
+        price: profile?.hourlyRate ?? 0,
+        rank: profile?.rank ?? undefined,
+        sports: profile?.sports ?? [],
+      };
+    });
+  }
+
   async getCoachById(id: string): Promise<any> {
     // Find user by ID and role
     const user = await this.userModel
