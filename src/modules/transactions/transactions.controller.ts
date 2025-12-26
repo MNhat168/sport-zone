@@ -1218,6 +1218,36 @@ export class TransactionsController {
                 }
             } else {
                 console.log(`[PayOS Return] ℹ️ Transaction ${transaction._id} is already ${transaction.status}. Skipping update to prevent race condition.`);
+
+                // Force emit success event if transaction is SUCCEEDED
+                // This handles cases where webhook processed the transaction but the booking handler failed or missed the event
+                if (transaction.status === TransactionStatus.SUCCEEDED && shouldEmitSuccessEvent) {
+                    console.log(`[PayOS Return] ℹ️ Force emitting payment.success for already succeeded transaction ${transaction._id}`);
+                    const bookingIdStr = updated.booking
+                        ? (typeof updated.booking === 'string'
+                            ? updated.booking
+                            : (updated.booking as any)?._id
+                                ? String((updated.booking as any)._id)
+                                : String(updated.booking))
+                        : undefined;
+
+                    const userIdStr = updated.user
+                        ? (typeof updated.user === 'string'
+                            ? updated.user
+                            : (updated.user as any)?._id
+                                ? String((updated.user as any)._id)
+                                : String(updated.user))
+                        : undefined;
+
+                    this.eventEmitter.emit('payment.success', {
+                        paymentId: String(updated._id),
+                        bookingId: bookingIdStr,
+                        userId: userIdStr,
+                        amount: updated.amount,
+                        method: updated.method,
+                        transactionId: payosTransaction.reference,
+                    });
+                }
             }
 
             const bookingId = updated.booking

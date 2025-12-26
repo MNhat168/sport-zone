@@ -140,6 +140,19 @@ export class CoachesController {
 
   // ==================== End Coach Registration Endpoints ====================
 
+  /**
+   * Public endpoint: GET /coaches/public?sports=football,basketball
+   * Accepts comma-separated SportType values and returns matching coaches.
+   */
+  @Get('public')
+  async getAllCoachesPublic(@Query('sports') sports?: string): Promise<any[]> {
+    let sportsArray: SportType[] | undefined = undefined;
+    if (sports) {
+      sportsArray = sports.split(',').map(s => s.trim()).filter(Boolean) as SportType[];
+    }
+    return this.coachesService.getAllCoachesPublic(sportsArray);
+  }
+
   // GET /coaches/:id
   @Get(':id')
   async getCoachById(@Param('id') coachId: string): Promise<CoachesDto> {

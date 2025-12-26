@@ -13,5 +13,5 @@ export enum NotificationType {
   SUBSCRIPTION_SUSPENDED = 'subscription_suspended',
   SUBSCRIPTION_REACTIVATED = 'subscription_reactivated',
   PAYMENT_PROOF_SUBMITTED = 'payment_proof_submitted',
-
+  ADMIN_NOTIFICATION = 'admin_notifcation'
 }
