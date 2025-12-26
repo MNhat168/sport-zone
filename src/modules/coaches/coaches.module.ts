@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ConfigModule } from '@nestjs/config';
 import { CoachesController } from './coaches.controller';
+import { CoachProfileController } from './coach-profile.controller';
 import { CoachesService } from './coaches.service';
 import { CoachScheduleService } from './services/coach-schedule.service';
 import { User, UserSchema } from 'src/modules/users/entities/user.entity';
@@ -17,6 +19,8 @@ import { BankAccount, BankAccountSchema } from '../field-owner/entities/bank-acc
 import { CoachRegistrationRequest, CoachRegistrationRequestSchema } from './entities/coach-registration-request.entity';
 import { EmailService } from 'src/modules/email/email.service';
 import { ServiceModule } from '../../service/service.module';
+import { Transaction, TransactionSchema } from '../transactions/entities/transaction.entity';
+import { TransactionsModule } from '../transactions/transactions.module';
 
 @Module({
   imports: [
@@ -27,11 +31,15 @@ import { ServiceModule } from '../../service/service.module';
       { name: LessonType.name, schema: LessonTypeSchema },
       { name: BankAccount.name, schema: BankAccountSchema },
       { name: CoachRegistrationRequest.name, schema: CoachRegistrationRequestSchema },
+      { name: Transaction.name, schema: TransactionSchema },
     ]),
     ServiceModule,
+    TransactionsModule,
+    ConfigModule,
   ],
-  controllers: [CoachesController],
+  controllers: [CoachesController, CoachProfileController],
   providers: [CoachesService, CoachScheduleService, EmailService],
   exports: [CoachesService, CoachScheduleService],
 })
 export class CoachesModule { }
+

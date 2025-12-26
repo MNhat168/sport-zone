@@ -169,6 +169,9 @@ export class FieldsDto {
         ]
     })
     amenities?: { amenityId: string; name: string; price: number; type?: string }[];
+
+    @ApiPropertyOptional({ description: 'Danh sách sân con (courts)', type: 'array', example: [] })
+    courts?: any[];
 }
 
 /**
@@ -374,6 +377,19 @@ export class UpdateFieldDto {
     @ValidateNested({ each: true })
     @Type(() => FieldAmenityDto)
     amenities?: FieldAmenityDto[];
+
+    @ApiPropertyOptional({
+        example: 1,
+        description: 'Số lượng court sẽ được cập nhật (0-10)',
+        minimum: 0,
+        maximum: 10
+    })
+    @IsOptional()
+    @IsNumber()
+    @Min(0)
+    @Max(10)
+    @Type(() => Number)
+    numberOfCourts?: number;
 }
 
 /**
@@ -452,6 +468,116 @@ export class CreateFieldWithFilesDto {
         required: false
     })
     images?: Express.Multer.File[];
+}
+
+/**
+ * DTO cho việc cập nhật sân với hỗ trợ upload ảnh
+ */
+export class UpdateFieldWithFilesDto {
+    @ApiPropertyOptional({ example: 'Sân bóng Phú Nhuận', description: 'Tên sân' })
+    @IsOptional()
+    @IsString()
+    name?: string;
+
+    @ApiPropertyOptional({ enum: SportType, example: SportType.FOOTBALL, description: 'Loại thể thao' })
+    @IsOptional()
+    @IsString()
+    sportType?: string;
+
+    @ApiPropertyOptional({ example: 'Sân bóng đá 11 người, có đèn chiếu sáng', description: 'Mô tả sân' })
+    @IsOptional()
+    @IsString()
+    description?: string;
+
+    @ApiPropertyOptional({
+        example: '{"address":"District 3, Ho Chi Minh City","geo":{"type":"Point","coordinates":[106.700981,10.776889]}}',
+        description: 'Địa điểm của sân (JSON string với address và coordinates)'
+    })
+    @IsOptional()
+    @IsString()
+    location?: string;
+
+    @ApiPropertyOptional({
+        example: '[{"day":"monday","start":"06:00","end":"22:00","duration":60}]',
+        description: 'Giờ hoạt động theo ngày (JSON string)'
+    })
+    @IsOptional()
+    @IsString()
+    operatingHours?: string;
+
+    @ApiPropertyOptional({ example: '60', description: 'Thời lượng một slot (phút)' })
+    @IsOptional()
+    @IsString()
+    slotDuration?: string;
+
+    @ApiPropertyOptional({ example: '1', description: 'Số slot tối thiểu có thể đặt' })
+    @IsOptional()
+    @IsString()
+    minSlots?: string;
+
+    @ApiPropertyOptional({ example: '4', description: 'Số slot tối đa có thể đặt' })
+    @IsOptional()
+    @IsString()
+    maxSlots?: string;
+
+    @ApiPropertyOptional({
+        example: '[{"day":"monday","start":"06:00","end":"10:00","multiplier":1.0},{"day":"monday","start":"18:00","end":"22:00","multiplier":1.5}]',
+        description: 'Khung giá theo thời gian và ngày (JSON string)'
+    })
+    @IsOptional()
+    @IsString()
+    priceRanges?: string;
+
+    @ApiPropertyOptional({ example: '150000', description: 'Giá cơ bản mỗi slot (VND)' })
+    @IsOptional()
+    @IsString()
+    basePrice?: string;
+
+    @ApiPropertyOptional({
+        example: '[{"amenityId":"507f1f77bcf86cd799439020","price":150000},{"amenityId":"507f1f77bcf86cd799439021","price":50000}]',
+        description: 'Danh sách tiện ích với giá riêng cho sân này (JSON string)'
+    })
+    @IsOptional()
+    @IsString()
+    amenities?: string;
+
+    @ApiPropertyOptional({ example: true, description: 'Trạng thái hoạt động (string "true"/"false")' })
+    @IsOptional()
+    @IsString()
+    isActive?: string;
+
+    @ApiPropertyOptional({
+        type: 'array',
+        items: { type: 'string', format: 'binary' },
+        description: 'Danh sách hình ảnh sân mới thêm vào (tối đa 10 ảnh)',
+        required: false
+    })
+    images?: Express.Multer.File[];
+
+    @ApiPropertyOptional({
+        type: [String],
+        description: 'Danh sách URL hình ảnh cũ muốn giữ lại (JSON string or array of strings if supported by framework but here JSON string is safer for FormData)',
+        example: '["https://example.com/old1.jpg"]'
+    })
+    @IsOptional()
+    @IsString()
+    keptImages?: string; // Expecting JSON string of string[]
+
+    @ApiPropertyOptional({
+        example: '1',
+        description: 'Số lượng court sẽ được cập nhật (0-10)'
+    })
+    @IsOptional()
+    @IsString()
+    numberOfCourts?: string;
+
+    @ApiPropertyOptional({
+        example: '["507f1f77bcf86cd799439011","507f1f77bcf86cd799439012"]',
+        description: 'Danh sách court IDs cần xóa (JSON string)'
+    })
+    @IsOptional()
+    @IsString()
+    courtsToDelete?: string;
 }
 
 /**

@@ -26,6 +26,8 @@ import { Transaction } from '../transactions/entities/transaction.entity';
 import { EmailService } from '../email/email.service';
 
 
+import { Court } from '../courts/entities/court.entity';
+
 @Injectable()
 export class FieldsService {
     private readonly logger = new Logger(FieldsService.name);
@@ -44,6 +46,7 @@ export class FieldsService {
         @InjectModel(User.name) private userModel: Model<User>,
         @InjectModel(Amenity.name) private amenityModel: Model<Amenity>,
         @InjectModel(Transaction.name) private transactionModel: Model<Transaction>,
+        @InjectModel(Court.name) private courtModel: Model<Court>,
         private priceFormatService: PriceFormatService,
         private awsS3Service: AwsS3Service,
         private emailService: EmailService,
@@ -169,105 +172,105 @@ export class FieldsService {
         return mappedFields;
     }
 
-        /**
-         * Public paginated fields listing
-         */
-        async findPaginated(query?: {
-            name?: string;
-            location?: string;
-            sportType?: string;
-            sportTypes?: string[];
-            sortBy?: string;
-            sortOrder?: 'asc' | 'desc';
-            page?: number;
-            limit?: number;
-        }): Promise<{
-            fields: FieldsDto[];
-            pagination: {
-                total: number;
-                page: number;
-                limit: number;
-                totalPages: number;
-                hasNextPage: boolean;
-                hasPrevPage: boolean;
-            };
-        }> {
-            const filter: any = { isActive: true };
-            if (query?.name) filter.name = { $regex: query.name, $options: 'i' };
+    /**
+     * Public paginated fields listing
+     */
+    async findPaginated(query?: {
+        name?: string;
+        location?: string;
+        sportType?: string;
+        sportTypes?: string[];
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        page?: number;
+        limit?: number;
+    }): Promise<{
+        fields: FieldsDto[];
+        pagination: {
+            total: number;
+            page: number;
+            limit: number;
+            totalPages: number;
+            hasNextPage: boolean;
+            hasPrevPage: boolean;
+        };
+    }> {
+        const filter: any = { isActive: true };
+        if (query?.name) filter.name = { $regex: query.name, $options: 'i' };
 
-            // Priority: sportTypes > sportType
-            if (query?.sportTypes && query.sportTypes.length > 0) {
-                filter.sportType = { $in: query.sportTypes.map(s => new RegExp(`^${s}$`, 'i')) };
-            } else if (query?.sportType) {
-                filter.sportType = new RegExp(`^${query.sportType}$`, 'i');
-            }
-
-            if (query?.location) filter['location.address'] = { $regex: query.location, $options: 'i' };
-
-            // Sorting
-            let sortOptions: any = {};
-            if (query?.sortBy === 'price' && query?.sortOrder) {
-                sortOptions.basePrice = query.sortOrder === 'asc' ? 1 : -1;
-            }
-
-            const page = query?.page || 1;
-            const limit = query?.limit || 10;
-            const skip = (page - 1) * limit;
-
-            const total = await this.fieldModel.countDocuments(filter);
-
-            const qb = this.fieldModel.find(filter).skip(skip).limit(limit);
-            if (Object.keys(sortOptions).length > 0) qb.sort(sortOptions);
-
-            const docs = await qb.lean().exec();
-
-            const fieldsDto: FieldsDto[] = docs.map(field => {
-                const price = this.priceFormatService.formatPrice(field.basePrice);
-                const validImages = (field.images || []).filter((img: string) => {
-                    if (!img || typeof img !== 'string') return false;
-                    if (img.includes('placeholder') || img.includes('placehold.co')) return false;
-                    return img.trim().length > 0;
-                });
-                return {
-                    id: field._id?.toString() || '',
-                    owner: field.owner?.toString() || '',
-                    name: field.name,
-                    sportType: field.sportType,
-                    description: field.description,
-                    location: field.location,
-                    images: validImages,
-                    operatingHours: field.operatingHours,
-                    slotDuration: field.slotDuration,
-                    minSlots: field.minSlots,
-                    maxSlots: field.maxSlots,
-                    priceRanges: field.priceRanges,
-                    basePrice: field.basePrice,
-                    price: price,
-                    isActive: field.isActive,
-                    isAdminVerify: field.isAdminVerify ?? false,
-                    maintenanceNote: field.maintenanceNote,
-                    maintenanceUntil: field.maintenanceUntil,
-                    rating: field.rating,
-                    totalReviews: field.totalReviews,
-                    createdAt: field.createdAt,
-                    updatedAt: field.updatedAt,
-                } as FieldsDto;
-            });
-
-            const totalPages = Math.ceil(total / limit);
-
-            return {
-                fields: fieldsDto,
-                pagination: {
-                    total,
-                    page,
-                    limit,
-                    totalPages,
-                    hasNextPage: page < totalPages,
-                    hasPrevPage: page > 1,
-                }
-            };
+        // Priority: sportTypes > sportType
+        if (query?.sportTypes && query.sportTypes.length > 0) {
+            filter.sportType = { $in: query.sportTypes.map(s => new RegExp(`^${s}$`, 'i')) };
+        } else if (query?.sportType) {
+            filter.sportType = new RegExp(`^${query.sportType}$`, 'i');
         }
+
+        if (query?.location) filter['location.address'] = { $regex: query.location, $options: 'i' };
+
+        // Sorting
+        let sortOptions: any = {};
+        if (query?.sortBy === 'price' && query?.sortOrder) {
+            sortOptions.basePrice = query.sortOrder === 'asc' ? 1 : -1;
+        }
+
+        const page = query?.page || 1;
+        const limit = query?.limit || 10;
+        const skip = (page - 1) * limit;
+
+        const total = await this.fieldModel.countDocuments(filter);
+
+        const qb = this.fieldModel.find(filter).skip(skip).limit(limit);
+        if (Object.keys(sortOptions).length > 0) qb.sort(sortOptions);
+
+        const docs = await qb.lean().exec();
+
+        const fieldsDto: FieldsDto[] = docs.map(field => {
+            const price = this.priceFormatService.formatPrice(field.basePrice);
+            const validImages = (field.images || []).filter((img: string) => {
+                if (!img || typeof img !== 'string') return false;
+                if (img.includes('placeholder') || img.includes('placehold.co')) return false;
+                return img.trim().length > 0;
+            });
+            return {
+                id: field._id?.toString() || '',
+                owner: field.owner?.toString() || '',
+                name: field.name,
+                sportType: field.sportType,
+                description: field.description,
+                location: field.location,
+                images: validImages,
+                operatingHours: field.operatingHours,
+                slotDuration: field.slotDuration,
+                minSlots: field.minSlots,
+                maxSlots: field.maxSlots,
+                priceRanges: field.priceRanges,
+                basePrice: field.basePrice,
+                price: price,
+                isActive: field.isActive,
+                isAdminVerify: field.isAdminVerify ?? false,
+                maintenanceNote: field.maintenanceNote,
+                maintenanceUntil: field.maintenanceUntil,
+                rating: field.rating,
+                totalReviews: field.totalReviews,
+                createdAt: field.createdAt,
+                updatedAt: field.updatedAt,
+            } as FieldsDto;
+        });
+
+        const totalPages = Math.ceil(total / limit);
+
+        return {
+            fields: fieldsDto,
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages,
+                hasNextPage: page < totalPages,
+                hasPrevPage: page > 1,
+            }
+        };
+    }
 
     /**
      * Lấy danh sách field của field-owner
@@ -1093,6 +1096,11 @@ export class FieldsService {
             return img.trim().length > 0;
         });
 
+        // Fetch courts associated with this field
+        // Use manual casting to ensure ObjectId match and remove isActive filter to see all courts
+        const courts = await this.courtModel.find({ field: new Types.ObjectId(id) }).sort({ courtNumber: 1 }).exec();
+        // this.logger.log(`Found ${courts.length} courts for field ${id}`);
+
         return {
             id: (field._id as Types.ObjectId).toString(),
             owner: ownerId,
@@ -1117,6 +1125,12 @@ export class FieldsService {
             rating: field.rating,
             totalReviews: field.totalReviews,
             amenities: amenitiesDto,
+            courts: courts.map(c => ({
+                id: (c._id as Types.ObjectId).toString(),
+                name: c.name,
+                courtNumber: c.courtNumber,
+                sportType: c.sportType || field.sportType
+            })),
             createdAt: field.createdAt,
             updatedAt: field.updatedAt,
         };
@@ -2343,7 +2357,7 @@ export class FieldsService {
      * @param location Location object
      * @returns Normalized location object
      */
-    private validateAndNormalizeLocation(location: any): {
+    public validateAndNormalizeLocation(location: any): {
         address: string;
         geo: { type: 'Point'; coordinates: [number, number] }
     } {

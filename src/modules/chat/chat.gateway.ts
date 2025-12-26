@@ -72,7 +72,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Join user to their personal room
       client.join(`user:${userId}`);
 
-      console.log(`User ${userId} connected to chat`);
+      // console.log(`User ${userId} connected to chat`);
     } catch (error) {
       console.error('WebSocket connection error:', error);
       client.disconnect();

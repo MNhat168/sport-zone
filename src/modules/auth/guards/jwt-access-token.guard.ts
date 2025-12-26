@@ -23,14 +23,7 @@ export class JwtAccessTokenGuard extends AuthGuard('jwt') {
 			return true;
 		}
 
-		// Debug: Log request info để kiểm tra cookie
-		console.log('🔍 [JwtAccessTokenGuard] Request:', {
-			path: req.path,
-			origin: req.headers?.origin || 'no origin',
-			host: req.headers?.host,
-			hasCookies: !!req.cookies && Object.keys(req.cookies).length > 0,
-			cookieHeader: req.headers?.cookie ? 'exists' : 'missing',
-		});
+
 
 		return super.canActivate(context);
 	}
