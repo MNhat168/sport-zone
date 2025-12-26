@@ -55,6 +55,13 @@ export class TournamentController {
     return this.tournamentService.findTournamentsByOrganizer(userId);
   }
 
+  @Get('my-participations')
+  @UseGuards(JwtAccessTokenGuard)
+  getMyParticipations(@Request() req) {
+    const userId = req.user.userId;
+    return this.tournamentService.findTournamentsByParticipant(userId);
+  }
+
   @Get()
   findAll(
     @Query('sportType') sportType?: string,

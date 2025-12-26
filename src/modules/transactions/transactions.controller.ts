@@ -728,7 +728,7 @@ export class TransactionsController {
             orderCodeToUse = generatePayOSOrderCode();
 
             // Update transaction with new orderCode
-            await this.transactionsService.updatePaymentStatus(
+            await this.transactionsService.updatePaymentStatusSafe(
                 (transaction._id as any).toString(),
                 transaction.status, // Keep current status
                 undefined,
@@ -895,7 +895,7 @@ export class TransactionsController {
             }
 
             // Update transaction
-            const updated = await this.transactionsService.updatePaymentStatus(
+            const updated = await this.transactionsService.updatePaymentStatusSafe(
                 (transaction._id as any).toString(),
                 newStatus,
                 undefined,
@@ -1119,7 +1119,7 @@ export class TransactionsController {
                 console.log(`[PayOS Return] Status changed from ${transaction.status} to ${newStatus}. Updating...`);
 
                 // Update transaction status with atomic $set operation
-                updated = await this.transactionsService.updatePaymentStatus(
+                updated = await this.transactionsService.updatePaymentStatusSafe(
                     (transaction._id as any).toString(),
                     newStatus,
                     undefined,
@@ -1369,7 +1369,7 @@ export class TransactionsController {
             if (transaction.status !== TransactionStatus.SUCCEEDED && transaction.status !== TransactionStatus.FAILED) {
                 console.log(`[Tournament Payment Return] Updating transaction ${transaction._id} from ${transaction.status} to ${newStatus}`);
 
-                const updated = await this.transactionsService.updatePaymentStatus(
+                const updated = await this.transactionsService.updatePaymentStatusSafe(
                     (transaction._id as any).toString(),
                     newStatus,
                     undefined,

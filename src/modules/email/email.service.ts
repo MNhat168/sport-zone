@@ -826,5 +826,37 @@ export class EmailService {
              `
 		});
 	}
+
+	/**
+	 * Send tournament cancellation notification to participants
+	 */
+	async sendTournamentCancellationNotification(payload: {
+		to: string;
+		participant: { fullName: string };
+		tournament: {
+			name: string;
+			sportType: string;
+			date: string;
+			time?: string;
+			location: string;
+		};
+		cancellationReason: string;
+		refundAmount: number;
+	}) {
+		const amountFormatted = payload.refundAmount.toLocaleString('vi-VN') + '₫';
+
+		await this.mailerService.sendMail({
+			to: payload.to,
+			subject: `Thông báo hủy giải đấu: ${payload.tournament.name} - SportZone`,
+			template: 'tournament-cancellation-notification.hbs',
+			context: {
+				title: 'Thông báo hủy giải đấu',
+				participant: payload.participant,
+				tournament: payload.tournament,
+				cancellationReason: payload.cancellationReason,
+				refundAmount: amountFormatted,
+			},
+		});
+	}
 }
 

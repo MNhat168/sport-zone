@@ -963,6 +963,13 @@ export class TournamentService {
 
             this.logger.log(`[Tournament Payment Success] ✅ Tournament found: ${tournament.name}`);
 
+            // ✅ DEBUG: Log transaction metadata to verify type field
+            this.logger.log(`[Tournament Payment Success] Transaction metadata:`, {
+                type: transaction.metadata?.type,
+                tournamentId: transaction.metadata?.tournamentId,
+                metadataKeys: Object.keys(transaction.metadata || {})
+            });
+
             // ✅ Check for CANCELLATION TYPE
             if (transaction.metadata?.type === 'TOURNAMENT_CANCELLATION_FEE') {
                 this.logger.log(`[Tournament Payment Success] Processing cancellation for tournament ${tournamentId}`);
@@ -1717,6 +1724,25 @@ export class TournamentService {
             .lean();
     }
 
+    async findTournamentsByParticipant(userId: string) {
+        return this.tournamentModel
+            .find({
+                'participants.user': new Types.ObjectId(userId),
+                'participants.paymentStatus': 'confirmed',
+                status: { $ne: TournamentStatus.CANCELLED }
+            })
+            .sort({ tournamentDate: -1 })
+            .populate('organizer', 'fullName email avatarUrl')
+            .populate({
+                path: 'courts.court',
+                populate: {
+                    path: 'field',
+                    select: 'name location'
+                }
+            })
+            .lean();
+    }
+
     async updateTournament(id: string, updateDto: UpdateTournamentDto, userId: string) {
         const tournament = await this.tournamentModel.findById(id);
 
@@ -1819,7 +1845,7 @@ export class TournamentService {
 
         // ✅ Use TransactionsService.updatePaymentStatus to handle gateway data properly
         // This ensures PayOS metadata is merged correctly and atomically
-        const updatedTransaction = await this.transactionsService.updatePaymentStatus(
+        const updatedTransaction = await this.transactionsService.updatePaymentStatusSafe(
             transactionId,
             TransactionStatus.SUCCEEDED,
             undefined, // receiptUrl
@@ -1964,8 +1990,30 @@ export class TournamentService {
 
             // Generate PayOS Link
             const orderCode = Number(Date.now().toString().slice(-9));
+
+            // ✅ Update transaction with metadata BEFORE saving (following registration pattern)
             transaction.externalTransactionId = orderCode.toString();
-            await transaction.save();
+
+            // Ensure metadata is a plain object
+            const currentMetadata = transaction.metadata || {};
+
+            transaction.metadata = {
+                ...currentMetadata,
+                tournamentId: (tournament._id as Types.ObjectId).toString(),
+                tournamentName: tournament.name,
+                sportType: tournament.sportType,
+                category: tournament.category,
+                cancellationReason: cancellationReason,
+                userId: userId,
+                organizerName: organizer?.fullName || 'Organizer',
+                type: 'TOURNAMENT_CANCELLATION_FEE'
+            };
+
+            // Explicitly mark metadata as modified to ensure Mongoose saves it
+            transaction.markModified('metadata');
+
+            const savedTransaction = await transaction.save();
+            this.logger.log(`[Cancel Tournament] Saved transaction ${savedTransaction._id} with metadata:`, savedTransaction.metadata);
 
             const paymentLink = await this.payosService.createPaymentUrl({
                 orderCode: orderCode,
@@ -2047,7 +2095,38 @@ export class TournamentService {
             await tournament.save();
         }
 
-        // Notify Logic (Placeholder)
-        // await this.notificationService.notifyTournamentCancelled(tournament);
+        // ✅ Send cancellation emails to all confirmed participants
+        const confirmedParticipants = tournament.participants.filter(
+            p => p.paymentStatus === 'confirmed' || p.paymentStatus === 'refunded'
+        );
+
+        this.logger.log(`Sending cancellation emails to ${confirmedParticipants.length} participants`);
+
+        for (const participant of confirmedParticipants) {
+            try {
+                const user = await this.userModel.findById(participant.user).select('email fullName').exec();
+                if (user?.email) {
+                    await this.emailService.sendTournamentCancellationNotification({
+                        to: user.email,
+                        participant: { fullName: user.fullName },
+                        tournament: {
+                            name: tournament.name,
+                            sportType: tournament.sportType,
+                            date: tournament.tournamentDate.toLocaleDateString('vi-VN'),
+                            time: `${tournament.startTime} - ${tournament.endTime}`,
+                            location: tournament.location
+                        },
+                        cancellationReason: reason,
+                        refundAmount: tournament.registrationFee
+                    });
+                    this.logger.log(`✅ Cancellation email sent to ${user.email}`);
+                }
+            } catch (emailError) {
+                this.logger.error(`❌ Failed to send cancellation email to participant ${participant.user}:`, emailError);
+                // Don't fail the whole process if email fails
+            }
+        }
+
+        this.logger.log(`✅ Tournament ${tournament.name} cancellation processed successfully`);
     }
 }

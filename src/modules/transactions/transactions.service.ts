@@ -109,7 +109,7 @@ export class TransactionsService {
     }
   }
 
-  async updatePaymentStatus(
+  async updatePaymentStatusSafe(
     transactionId: string,
     status: TransactionStatus,
     receiptUrl?: string,
@@ -144,19 +144,24 @@ export class TransactionsService {
       }
     };
 
-    // ✅ Merge PayOS gateway data into metadata object safely
-    const mergedMetadata = {
-      ...(existingTransaction.metadata || {}),
-    };
+    this.logger.debug(`[updatePaymentStatus] Initial updateOperations: ${JSON.stringify(updateOperations)}`);
 
+    // ✅ CRITICAL FIX: Use dot notation for PayOS fields to preserve existing metadata
+    // DO NOT replace entire metadata object - use individual field updates
     if (gatewayData) {
-      if (gatewayData.payosOrderCode) mergedMetadata.payosOrderCode = gatewayData.payosOrderCode;
-      if (gatewayData.payosReference) mergedMetadata.payosReference = gatewayData.payosReference;
-      if (gatewayData.payosAccountNumber) mergedMetadata.payosAccountNumber = gatewayData.payosAccountNumber;
-      if (gatewayData.payosTransactionDateTime) mergedMetadata.payosTransactionDateTime = gatewayData.payosTransactionDateTime;
+      if (gatewayData.payosOrderCode) {
+        updateOperations.$set['metadata.payosOrderCode'] = gatewayData.payosOrderCode;
+      }
+      if (gatewayData.payosReference) {
+        updateOperations.$set['metadata.payosReference'] = gatewayData.payosReference;
+      }
+      if (gatewayData.payosAccountNumber) {
+        updateOperations.$set['metadata.payosAccountNumber'] = gatewayData.payosAccountNumber;
+      }
+      if (gatewayData.payosTransactionDateTime) {
+        updateOperations.$set['metadata.payosTransactionDateTime'] = gatewayData.payosTransactionDateTime;
+      }
     }
-
-    updateOperations.$set.metadata = mergedMetadata;
 
     // Set externalTransactionId if PayOS order code provided
     if (gatewayData?.payosOrderCode) {
@@ -183,6 +188,8 @@ export class TransactionsService {
 
     // 3. ✅ CRITICAL: Use findOneAndUpdate with atomic operations
     // This ensures metadata is properly merged and preserved
+    this.logger.debug(`[updatePaymentStatus] Final updateOperations: ${JSON.stringify(updateOperations)}`);
+
     const transaction = await this.transactionModel.findOneAndUpdate(
       {
         _id: transactionId,
