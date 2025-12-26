@@ -513,6 +513,56 @@ export class AiService {
             return this.generateEnhancedCoachInsights(stats);
         }
     }
+    async moderateContent(text: string): Promise<{ isSafe: boolean; reason?: string; flaggedWords?: string[] }> {
+        if (!this.groq) {
+            // If Groq is not available, we default to safe (or could use a basic regex list)
+            // For now, allow everything if AI is down to avoid blocking legitimate users
+            return { isSafe: true };
+        }
+
+        try {
+            const chatCompletion = await this.groq.chat.completions.create({
+                messages: [
+                    {
+                        role: "system",
+                        content: `You are a content moderation AI. Analyze the text for inappropriate content including:
+                        - Profanity/Swearing (in English, Vietnamese, or other languages)
+                        - Hate speech, discrimination, harassment
+                        - Sexual content
+                        - Violence or threats
+                        
+                        Return ONLY a JSON object: { "isSafe": boolean, "reason": string | null, "flaggedWords": string[] }
+                        If isSafe is false:
+                        - provide a short, polite reason (e.g., "Contains profanity").
+                        - list the specific words or phrases that triggered the flag in "flaggedWords".`
+                    },
+                    {
+                        role: "user",
+                        content: text
+                    }
+                ],
+                model: "llama-3.1-8b-instant",
+                temperature: 0, // Deterministic
+                max_completion_tokens: 100,
+                response_format: { type: "json_object" },
+            });
+
+            const response = chatCompletion.choices[0]?.message?.content || "{}";
+            const result = JSON.parse(response);
+
+            return {
+                isSafe: !!result.isSafe,
+                reason: result.reason || undefined,
+                flaggedWords: Array.isArray(result.flaggedWords) ? result.flaggedWords : []
+            };
+
+        } catch (error) {
+            this.logger.error('Failed to moderate content:', error);
+            // Fail open (allow) if AI fails, to prevent service disruption
+            return { isSafe: true };
+        }
+    }
+
 
     private buildFieldOwnerPrompt(stats: DetailedFieldOwnerStats): string {
         const totalRevenue = stats.monthlyBookings?.reduce((sum, month) => sum + (month.revenue || 0), 0) || 0;

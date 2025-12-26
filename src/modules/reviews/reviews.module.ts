@@ -6,6 +6,7 @@ import { Review, ReviewSchema } from './entities/review.entity';
 import { Booking, BookingSchema } from '../bookings/entities/booking.entity';
 import { CoachProfile, CoachProfileSchema } from 'src/modules/coaches/entities/coach-profile.entity';
 import { Field, FieldSchema } from 'src/modules/fields/entities/field.entity';
+import { AiModule } from '../ai/ai.module';
 
 @Module({
   imports: [
@@ -15,9 +16,10 @@ import { Field, FieldSchema } from 'src/modules/fields/entities/field.entity';
       { name: CoachProfile.name, schema: CoachProfileSchema },
       { name: Field.name, schema: FieldSchema },
     ]),
+    AiModule,
   ],
   controllers: [ReviewsController],
   providers: [ReviewsService],
   exports: [ReviewsService],
 })
-export class ReviewsModule {}
+export class ReviewsModule { }

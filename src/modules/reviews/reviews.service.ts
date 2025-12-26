@@ -7,6 +7,7 @@ import { Booking } from '../bookings/entities/booking.entity';
 import { BookingType } from '@common/enums/booking.enum';
 import { CoachProfile } from 'src/modules/coaches/entities/coach-profile.entity';
 import { Field } from 'src/modules/fields/entities/field.entity';
+import { AiService } from '../ai/ai.service';
 
 @Injectable()
 export class ReviewsService {
@@ -15,7 +16,8 @@ export class ReviewsService {
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
     @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
     @InjectModel(Field.name) private readonly fieldModel: Model<Field>,
-  ) {}
+    private readonly aiService: AiService,
+  ) { }
 
   // Create coach review service *
   async createCoachReview(data: {
@@ -37,6 +39,18 @@ export class ReviewsService {
     }
     if (trimmedComment.length < 10) {
       throw new BadRequestException('Comment must be at least 10 characters');
+    }
+
+    // Moderate content (title + comment)
+    const textToModerate = (data.title ? data.title + '. ' : '') + trimmedComment;
+    const moderationResult = await this.aiService.moderateContent(textToModerate);
+
+    if (!moderationResult.isSafe) {
+      throw new BadRequestException({
+        message: moderationResult.reason || 'Review contains inappropriate content and cannot be posted.',
+        flaggedWords: moderationResult.flaggedWords || [],
+        error: 'Bad Request'
+      });
     }
 
     let bookingId = data.booking;
@@ -147,6 +161,18 @@ export class ReviewsService {
     }
     if (trimmedComment.length < 10) {
       throw new BadRequestException(`Comment must be at least 10 characters (current: ${trimmedComment.length})`);
+    }
+
+    // Moderate content (title + comment)
+    const textToModerate = (data.title ? data.title + '. ' : '') + trimmedComment;
+    const moderationResult = await this.aiService.moderateContent(textToModerate);
+
+    if (!moderationResult.isSafe) {
+      throw new BadRequestException({
+        message: moderationResult.reason || 'Review contains inappropriate content and cannot be posted.',
+        flaggedWords: moderationResult.flaggedWords || [],
+        error: 'Bad Request'
+      });
     }
 
     let bookingId = data.booking;
