@@ -2487,9 +2487,12 @@ export class FieldOwnerService {
       if (!bankAccount) {
         this.logger.error(
           `[Verification Webhook] ❌ Bank account not found for verification orderCode: ${orderCode} after ${maxRetries} attempts. ` +
-          `This may indicate a data consistency issue.`,
+          `This may indicate a data consistency issue or timing problem.`,
         );
-        return;
+        throw new NotFoundException(
+          `Bank account not found for verification orderCode ${orderCode}. ` +
+          `Payment may have arrived before BankAccount was fully saved. PayOS will retry.`
+        );
       }
 
       // Determine owner type (coach vs field owner)

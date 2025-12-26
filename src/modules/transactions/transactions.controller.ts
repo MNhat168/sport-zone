@@ -836,17 +836,23 @@ export class TransactionsController {
                         },
                     );
                     console.log(`[PayOS Webhook] ✅ Bank account verification processed for orderCode: ${webhookData.orderCode}`);
+
+                    // ✅ CRITICAL: Return success immediately for verification payments
+                    // Do NOT proceed to booking-related logic below
+                    return {
+                        code: '00',
+                        desc: 'Verification payment processed successfully',
+                    };
                 } catch (verificationError) {
                     console.error(`[PayOS Webhook] ❌ Error processing bank account verification:`, verificationError);
-                    // Even if it fails, we return success to PayOS to avoid retries if it's a logic error
-                    // But ideally we should check if it's a retry-able error
-                }
 
-                // Verification payments are handled entirely by FieldOwnerService
-                return {
-                    code: '00',
-                    desc: 'Verification payment processed',
-                };
+                    // Return error to PayOS so it retries later
+                    // This gives the BankAccount record time to be saved if it's a timing issue
+                    return {
+                        code: '99',
+                        desc: `Verification processing failed: ${verificationError.message}`,
+                    };
+                }
             } else {
                 console.log(`[PayOS Webhook] ℹ️ Not a verification payment (description: "${webhookData.description}")`);
             }
@@ -985,6 +991,21 @@ export class TransactionsController {
                 const verifiedTournamentId = verifiedTransaction.metadata?.tournamentId
                     ? String(verifiedTransaction.metadata.tournamentId)
                     : tournamentId; // Fallback to previously extracted tournamentId
+
+                // ✅ CRITICAL: Do NOT emit payment.success for verification payments
+                // Check if this is a verification transaction (bank account or coach bank account)
+                const isVerificationTx = verifiedTransaction.metadata?.verificationType &&
+                    (verifiedTransaction.metadata.verificationType === 'BANK_ACCOUNT_VERIFICATION' ||
+                        verifiedTransaction.metadata.verificationType === 'COACH_BANK_ACCOUNT_VERIFICATION');
+
+                if (isVerificationTx) {
+                    console.log(`[PayOS Webhook] ℹ️ Skipping payment.success emission for verification transaction ${updated._id}`);
+                    console.log(`[PayOS Webhook] ✅ Verification transaction updated successfully`);
+                    return {
+                        code: '00',
+                        desc: 'Verification transaction updated successfully',
+                    };
+                }
 
                 const bookingIdStr = updated.booking
                     ? (typeof updated.booking === 'string'

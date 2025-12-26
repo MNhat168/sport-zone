@@ -652,9 +652,7 @@ export class OwnerBookingService {
             // 2. Requested coach matches this coach profile
             // 3. Have paymentStatus = 'unpaid'
             // 4. Have transaction with pending payment proof
-            const coachProfileId = coachProfile._id instanceof Types.ObjectId
-                ? coachProfile._id
-                : new Types.ObjectId(coachProfile._id.toString());
+            const coachProfileId = new Types.ObjectId((coachProfile._id as any).toString());
 
             const bookings = await this.bookingModel
                 .find({
