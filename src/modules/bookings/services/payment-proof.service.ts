@@ -208,12 +208,7 @@ export class PaymentProofService {
             }
 
             // Send confirmation email (outside transaction)
-            try {
-                await this.bookingEmailService.sendConfirmationEmails(bookingId, PaymentMethodLabels[PaymentMethod.BANK_TRANSFER]);
-            } catch (emailError) {
-                this.logger.warn('Failed to send booking confirmation email', emailError);
-                // Don't fail the booking if email fails
-            }
+            // Email will be sent when payment is approved (via payment.success event)
 
             // Return the latest version of the booking after all updates
             return (await this.bookingModel.findById(bookingId).populate('transaction')) as Booking;
