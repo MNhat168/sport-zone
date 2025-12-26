@@ -610,6 +610,15 @@ export class BookingsController {
   ): Promise<Booking> {
     return this.bookingsService.cancelCoachBooking(coachId, bookingId);
   }
+
+  //Get statistic for current coach
+  @Get('coach/:id/statistics')
+  getCoachStatistics(
+    @Param('id') coachId: string,
+    @Query('mode') mode: 'month' | 'year' = 'month',
+  ) {
+    return this.bookingsService.getCoachStatistics(coachId, mode)
+  }
   /**
    * Get all bookings for the authenticated coach
    * NOTE: This route must be defined BEFORE the parameterized route to avoid route conflicts

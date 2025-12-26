@@ -454,4 +454,103 @@ export class SessionBookingService {
 
     return booking;
   }
+
+  async getCoachStatistics(
+    coachId: string,
+    mode: 'month' | 'year',
+    referenceDate: Date = new Date(),
+  ) {
+    const coachObjectId = new Types.ObjectId(coachId)
+
+    const year = referenceDate.getFullYear()
+    const month = referenceDate.getMonth()
+
+    let currentStart: Date
+    let currentEnd: Date
+    let previousStart: Date
+    let previousEnd: Date
+
+    if (mode === 'month') {
+      currentStart = new Date(year, month, 1)
+      currentEnd = new Date(year, month + 1, 1)
+      previousStart = new Date(year, month - 1, 1)
+      previousEnd = new Date(year, month, 1)
+    } else {
+      currentStart = new Date(year, 0, 1)
+      currentEnd = new Date(year + 1, 0, 1)
+      previousStart = new Date(year - 1, 0, 1)
+      previousEnd = new Date(year, 0, 1)
+    }
+
+    const pipeline = (start: Date, end: Date) => [
+      {
+        $match: {
+          requestedCoach: coachObjectId,
+          date: { $gte: start, $lt: end },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalBookings: { $sum: 1 },
+          completedBookings: {
+            $sum: {
+              $cond: [{ $eq: ['$status', BookingStatus.COMPLETED] }, 1, 0],
+            },
+          },
+          totalRevenue: {
+            $sum: {
+              $cond: [
+                { $eq: ['$status', BookingStatus.COMPLETED] },
+                '$bookingAmount',
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]
+
+    const [current] = await this.bookingModel.aggregate(
+      pipeline(currentStart, currentEnd),
+    )
+
+    const [previous] = await this.bookingModel.aggregate(
+      pipeline(previousStart, previousEnd),
+    )
+
+    const safe = (v?: number) => v ?? 0
+
+    const growth = (c: number, p: number) =>
+      p === 0 ? (c > 0 ? 100 : 0) : ((c - p) / p) * 100
+
+    return {
+      period: mode,
+      current: {
+        totalBookings: safe(current?.totalBookings),
+        completedBookings: safe(current?.completedBookings),
+        totalRevenue: safe(current?.totalRevenue),
+      },
+      previous: {
+        totalBookings: safe(previous?.totalBookings),
+        completedBookings: safe(previous?.completedBookings),
+        totalRevenue: safe(previous?.totalRevenue),
+      },
+      growth: {
+        totalBookings: growth(
+          safe(current?.totalBookings),
+          safe(previous?.totalBookings),
+        ),
+        completedBookings: growth(
+          safe(current?.completedBookings),
+          safe(previous?.completedBookings),
+        ),
+        totalRevenue: growth(
+          safe(current?.totalRevenue),
+          safe(previous?.totalRevenue),
+        ),
+      },
+    }
+  }
+
 }

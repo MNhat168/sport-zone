@@ -625,6 +625,12 @@ export class BookingsService {
     return this.sessionBookingService.getByRequestedCoachId(coachId);
   }
 
+  async getCoachStatistics(
+  coachId: string,
+  mode: 'month' | 'year',
+) {
+  return this.sessionBookingService.getCoachStatistics(coachId, mode)
+}
   // ============================================================================
   // USER QUERY OPERATIONS - Delegated to BookingQueryService
   // ============================================================================
