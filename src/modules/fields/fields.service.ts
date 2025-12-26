@@ -1129,7 +1129,7 @@ export class FieldsService {
                 id: (c._id as Types.ObjectId).toString(),
                 name: c.name,
                 courtNumber: c.courtNumber,
-                sportType: c.sportType || field.sportType
+                sportType: field.sportType
             })),
             createdAt: field.createdAt,
             updatedAt: field.updatedAt,

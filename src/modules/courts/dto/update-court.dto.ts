@@ -1,7 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
-import { CourtPricingOverrideDto } from './create-court.dto';
+import { IsBoolean, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 export class UpdateCourtDto {
   @ApiPropertyOptional({ example: 'Court B', description: 'Tên court' })
@@ -15,12 +13,6 @@ export class UpdateCourtDto {
   @IsInt()
   @Min(1)
   courtNumber?: number;
-
-  @ApiPropertyOptional({ type: CourtPricingOverrideDto, description: 'Giá override cho court (tùy chọn)' })
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => CourtPricingOverrideDto)
-  pricingOverride?: CourtPricingOverrideDto;
 
   @ApiPropertyOptional({ description: 'Kích hoạt / vô hiệu hóa court' })
   @IsOptional()

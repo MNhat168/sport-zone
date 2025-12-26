@@ -367,8 +367,7 @@ export class BookingsService {
           bookingData.startTime,
           bookingData.endTime,
           field,
-          bookingDate,
-          court.pricingOverride
+          bookingDate
         );
 
         // ✅ SECURITY: Atomic upsert with version initialization (Pure Lazy Creation)
@@ -626,11 +625,11 @@ export class BookingsService {
   }
 
   async getCoachStatistics(
-  coachId: string,
-  mode: 'month' | 'year',
-) {
-  return this.sessionBookingService.getCoachStatistics(coachId, mode)
-}
+    coachId: string,
+    mode: 'month' | 'year',
+  ) {
+    return this.sessionBookingService.getCoachStatistics(coachId, mode)
+  }
   // ============================================================================
   // USER QUERY OPERATIONS - Delegated to BookingQueryService
   // ============================================================================

@@ -461,8 +461,20 @@ export class FieldOwnerService {
             .exec();
 
           const transactionIds = transactions.map((t) => t._id);
+
+          const orConditions: any[] = [];
+
           if (transactionIds.length > 0) {
-            bookingFilter.transaction = { $in: transactionIds };
+            orConditions.push({ transaction: { $in: transactionIds } });
+          }
+
+          // FIX: If filtering by cancelled, also include bookings with status = 'cancelled'
+          if (filters.transactionStatus === 'cancelled') {
+            orConditions.push({ status: 'cancelled' });
+          }
+
+          if (orConditions.length > 0) {
+            bookingFilter.$or = orConditions;
           } else {
             return {
               bookings: [],
@@ -717,8 +729,20 @@ export class FieldOwnerService {
             .exec();
 
           const transactionIds = transactions.map((t) => t._id);
+
+          const orConditions: any[] = [];
+
           if (transactionIds.length > 0) {
-            bookingFilter.transaction = { $in: transactionIds };
+            orConditions.push({ transaction: { $in: transactionIds } });
+          }
+
+          // FIX: If filtering by cancelled, also include bookings with status = 'cancelled'
+          if (filters.transactionStatus === 'cancelled') {
+            orConditions.push({ status: 'cancelled' });
+          }
+
+          if (orConditions.length > 0) {
+            bookingFilter.$or = orConditions;
           } else {
             return {
               bookings: [],
@@ -883,13 +907,7 @@ export class FieldOwnerService {
           const fieldId = (savedField._id as Types.ObjectId).toString();
           const fieldName = savedField.name;
 
-          // Prepare pricing override from field's basePrice and priceRanges
-          const pricingOverride = {
-            basePrice: savedField.basePrice,
-            priceRanges: savedField.priceRanges || [],
-          };
-
-          // Create courts
+          // Create courts - they inherit pricing from Field
           const courtPromises: Promise<any>[] = [];
           for (let i = 1; i <= numberOfCourts; i++) {
             const courtName = `Court ${i}`;
@@ -898,7 +916,6 @@ export class FieldOwnerService {
                 field: savedField._id,
                 name: courtName,
                 courtNumber: i,
-                pricingOverride,
                 isActive: true,
               })
             );
@@ -1081,13 +1098,7 @@ export class FieldOwnerService {
           const fieldId = (savedField._id as Types.ObjectId).toString();
           const fieldName = savedField.name;
 
-          // Prepare pricing override from field's basePrice and priceRanges
-          const pricingOverride = {
-            basePrice: savedField.basePrice,
-            priceRanges: savedField.priceRanges || [],
-          };
-
-          // Create courts
+          // Create courts - they inherit pricing from Field
           const courtPromises: Promise<any>[] = [];
           for (let i = 1; i <= numberOfCourts; i++) {
             const courtName = `Court ${i}`;
@@ -1096,7 +1107,6 @@ export class FieldOwnerService {
                 field: savedField._id,
                 name: courtName,
                 courtNumber: i,
-                pricingOverride,
                 isActive: true,
               })
             );
@@ -3058,7 +3068,6 @@ export class FieldOwnerService {
           courtNumber: courtNumber,
           field: fieldObjectId,
           isActive: true, // Default active
-          sportType: sportType
         });
       }
 

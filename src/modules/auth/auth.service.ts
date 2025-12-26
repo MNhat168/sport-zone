@@ -155,7 +155,7 @@ export class AuthService {
     const user = await this.userModel.findOne({ email });
     if (!user) throw new BadRequestException('User not found');
     if (user.isVerified) return { message: 'Already verified' };
-    
+
     // Verify JWT token
     try {
       const payload = this.jwt_service.verify(verificationToken);
@@ -169,7 +169,7 @@ export class AuthService {
       }
       throw new BadRequestException('Invalid verification token');
     }
-    
+
     user.isVerified = true;
     await user.save();
     return { message: 'Account verified and created' };
@@ -183,17 +183,17 @@ export class AuthService {
     try {
       // Verify JWT token
       const payload = this.jwt_service.verify(verificationToken);
-      
+
       // Check if token is for email verification
       if (payload.type !== 'email_verification' || !payload.email) {
         throw new BadRequestException('Invalid verification token');
       }
-      
+
       // Find user by email from token
       const user = await this.userModel.findOne({ email: payload.email });
       if (!user) throw new BadRequestException('User not found');
       if (user.isVerified) return { message: 'Already verified' };
-      
+
       user.isVerified = true;
       await user.save();
       return { message: 'Account verified and created' };
@@ -216,6 +216,7 @@ export class AuthService {
     const { email, password } = body;
     const user = await this.userModel.findOne({ email });
     if (!user) throw new BadRequestException('Email không tồn tại');
+    if (!user.isActive) throw new BadRequestException('Tài khoản của bạn đã bị vô hiệu hóa');
     if (!user.isVerified) throw new BadRequestException('Account not verified');
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) throw new BadRequestException('Mật khẩu không đúng');
@@ -263,7 +264,7 @@ export class AuthService {
   async resetPassword(body: { email: string; resetPasswordToken: string; newPassword: string; confirmPassword: string }) {
     const { email, resetPasswordToken, newPassword, confirmPassword } = body;
     if (newPassword !== confirmPassword) throw new BadRequestException('Mật khẩu xác nhận không khớp');
-    
+
     // Verify JWT token
     try {
       const payload = this.jwt_service.verify(resetPasswordToken);
@@ -277,10 +278,10 @@ export class AuthService {
       }
       throw new BadRequestException('Invalid or expired reset password token');
     }
-    
+
     const user = await this.userModel.findOne({ email });
     if (!user) throw new BadRequestException('User not found');
-    
+
     user.password = await bcrypt.hash(newPassword, 10);
     await user.save();
     return { message: 'Password reset successful' };

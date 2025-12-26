@@ -137,8 +137,7 @@ export class AvailabilityService {
         const schedule = scheduleMap.get(dateKey);
 
         // Generate virtual slots from Field config
-        const pricingOverride = targetCourt?.pricingOverride;
-        const virtualSlots = this.generateVirtualSlots(field, currentDate, pricingOverride);
+        const virtualSlots = this.generateVirtualSlots(field, currentDate);
 
         // Apply schedule constraints if exists
         const availableSlots = schedule
@@ -183,8 +182,7 @@ export class AvailabilityService {
    */
   generateVirtualSlots(
     field: Field,
-    date?: Date,
-    pricingOverride?: { basePrice?: number; priceRanges?: { day: string; start: string; end: string; multiplier: number }[] }
+    date?: Date
   ): Omit<AvailabilitySlot, 'available'>[] {
     const slots: Omit<AvailabilitySlot, 'available'>[] = [];
 
@@ -212,7 +210,7 @@ export class AvailabilityService {
       const startTime = this.minutesToTimeString(currentMinutes);
       const endTime = this.minutesToTimeString(slotEndMinutes);
 
-      const pricing = this.calculateSlotPricing(startTime, endTime, field, date, pricingOverride);
+      const pricing = this.calculateSlotPricing(startTime, endTime, field, date);
 
       slots.push({
         startTime,
@@ -377,8 +375,7 @@ export class AvailabilityService {
     startTime: string,
     endTime: string,
     field: Field,
-    date?: Date,
-    pricingOverride?: { basePrice?: number; priceRanges?: { day: string; start: string; end: string; multiplier: number }[] }
+    date?: Date
   ): {
     price: number;
     multiplier: number;
@@ -388,9 +385,7 @@ export class AvailabilityService {
     const dayOfWeek = date ? this.getDayOfWeek(date) : 'monday';
 
     // Find applicable price range for the specific day
-    const priceRanges = pricingOverride?.priceRanges && pricingOverride.priceRanges.length > 0
-      ? pricingOverride.priceRanges
-      : field.priceRanges;
+    const priceRanges = field.priceRanges || [];
 
     const applicableRange = priceRanges.find(range => {
       if (range.day !== dayOfWeek) return false;
@@ -403,7 +398,7 @@ export class AvailabilityService {
     });
 
     const multiplier = applicableRange?.multiplier || 1;
-    const basePrice = pricingOverride?.basePrice ?? field.basePrice;
+    const basePrice = field.basePrice;
     const price = basePrice * multiplier;
 
     return {
@@ -431,8 +426,7 @@ export class AvailabilityService {
     startTime: string,
     endTime: string,
     field: Field,
-    date?: Date,
-    pricingOverride?: { basePrice?: number; priceRanges?: { day: string; start: string; end: string; multiplier: number }[] }
+    date?: Date
   ): {
     totalPrice: number;
     multiplier: number;
@@ -449,7 +443,7 @@ export class AvailabilityService {
       const slotStart = this.minutesToTimeString(currentMinutes);
       const slotEnd = this.minutesToTimeString(slotEndMinutes);
 
-      const slotPricing = this.calculateSlotPricing(slotStart, slotEnd, field, date, pricingOverride);
+      const slotPricing = this.calculateSlotPricing(slotStart, slotEnd, field, date);
       totalPrice += slotPricing.price;
 
       if (breakdown) breakdown += ', ';
@@ -458,7 +452,7 @@ export class AvailabilityService {
 
     // Calculate average multiplier
     const numSlots = Math.ceil((endMinutes - startMinutes) / field.slotDuration);
-    const basePrice = pricingOverride?.basePrice ?? field.basePrice;
+    const basePrice = field.basePrice;
     const avgMultiplier = basePrice > 0 ? totalPrice / (basePrice * numSlots) : 0;
 
     return {
