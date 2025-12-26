@@ -104,7 +104,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleSendMessage(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: {
-      fieldOwnerId: string;
+      fieldOwnerId?: string;
+      coachId?: string;
       fieldId?: string;
       content: string;
       type?: string;
@@ -115,15 +116,33 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!userId) return;
 
     try {
-      // Use the auto-create method
-      const { message, chatRoom } = await this.chatService.sendMessageWithAutoCreate(
-        userId,
-        data.fieldOwnerId,
-        data.content,
-        data.type as any,
-        data.fieldId,
-        data.attachments,
-      );
+      let result;
+
+      if (data.coachId) {
+        // Use coach-specific auto-create method
+        result = await this.chatService.sendMessageToCoachWithAutoCreate(
+          userId,
+          data.coachId,
+          data.content,
+          data.type as any,
+          data.fieldId,
+          data.attachments,
+        );
+      } else if (data.fieldOwnerId) {
+        // Use field-specific auto-create method
+        result = await this.chatService.sendMessageWithAutoCreate(
+          userId,
+          data.fieldOwnerId,
+          data.content,
+          data.type as any,
+          data.fieldId,
+          data.attachments,
+        );
+      } else {
+        throw new Error('Neither fieldOwnerId nor coachId provided');
+      }
+
+      const { message, chatRoom } = result;
 
       // Emit message to chat room
       this.server.to(`chat:${chatRoom._id}`).emit('new_message', {
@@ -132,19 +151,30 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         chatRoom,
       });
 
-      // Notify field owner via their user socket (map profile -> user)
-      const fieldOwnerProfileId = (chatRoom.fieldOwner as Types.ObjectId).toString();
-      const fieldOwnerUserId = await this.chatService.getFieldOwnerUserId(fieldOwnerProfileId);
-      if (fieldOwnerUserId) {
-        const socketId = this.userSocketMap.get(fieldOwnerUserId);
+      // Join the sender to the room so they receive subsequent updates
+      client.join(`chat:${chatRoom._id}`);
+
+      // Notify recipient via their user socket
+      let recipientProfileId: string | undefined;
+      let recipientUserId: string | null = null;
+
+      if (chatRoom.fieldOwner) {
+        recipientProfileId = (chatRoom.fieldOwner as Types.ObjectId).toString();
+        recipientUserId = await this.chatService.getFieldOwnerUserId(recipientProfileId);
+      } else if (chatRoom.coach) {
+        recipientProfileId = (chatRoom.coach as Types.ObjectId).toString();
+        recipientUserId = await this.chatService.getCoachUserId(recipientProfileId);
+      }
+
+      if (recipientUserId) {
+        const socketId = this.userSocketMap.get(recipientUserId);
         if (socketId) {
-          // lightweight notification (always ok)
           this.server.to(socketId).emit('message_notification', {
             chatRoomId: (chatRoom._id as Types.ObjectId).toString(),
             message,
             sender: userId,
           });
-          // Avoid duplicate 'new_message' if owner socket already joined the room
+
           const roomName = `chat:${chatRoom._id}`;
           const alreadyInRoom = this.isSocketInRoom(socketId, roomName);
           if (!alreadyInRoom) {
@@ -160,7 +190,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     } catch (error) {
       console.error('Error sending message:', error);
       client.emit('message_error', {
-        error: 'Failed to send message',
+        error: error.message || 'Failed to send message',
         ...data,
       });
     }
@@ -190,6 +220,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const userId = this.socketUserMap.get(client.id);
     if (!userId) return;
 
+    console.log('📨 [send_message_to_room] Received:', {
+      chatRoomId: data.chatRoomId,
+      userId,
+      content: data.content?.substring(0, 50),
+    });
+
     try {
       const message = await this.chatService.sendMessage(
         data.chatRoomId,
@@ -198,6 +234,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         (data.type as any) || 'text',
         data.attachments,
       );
+
+      console.log('✅ [send_message_to_room] Message saved to DB:', message || 'no-id');
 
       // Optionally fetch updated room snapshot for FE state consistency
       const chatRoom = await this.chatService.getChatRoomMessages(data.chatRoomId, userId);
@@ -233,7 +271,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
       }
     } catch (error) {
-      console.error('Error sending message to room:', error);
+      console.error('❌ [send_message_to_room] Error:', error);
       client.emit('message_error', {
         error: 'Failed to send message to room',
         ...data,

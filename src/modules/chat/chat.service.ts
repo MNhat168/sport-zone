@@ -236,7 +236,44 @@ export class ChatService {
       attachments
     );
 
-    return { message, chatRoom };
+    // Fetch the UPDATED room to ensure history is included
+    const updatedRoom = await this.getChatRoomMessages(
+      (chatRoom._id as Types.ObjectId).toString(),
+      userId
+    );
+
+    return { message, chatRoom: updatedRoom };
+  }
+
+  // New method for coach chats
+  async sendMessageToCoachWithAutoCreate(
+    userId: string,
+    coachId: string,
+    content: string,
+    type: MessageType = MessageType.TEXT,
+    fieldId?: string,
+    attachments?: string[],
+  ): Promise<{ message: Message; chatRoom: ChatRoom }> {
+
+    // First, get or create chat room
+    const chatRoom = await this.createOrGetCoachChatRoom(userId, coachId, fieldId);
+
+    // Send the message
+    const message = await this.sendMessage(
+      (chatRoom._id as Types.ObjectId).toString(),
+      userId,
+      content,
+      type,
+      attachments
+    );
+
+    // Fetch the UPDATED room
+    const updatedRoom = await this.getChatRoomMessages(
+      (chatRoom._id as Types.ObjectId).toString(),
+      userId
+    );
+
+    return { message, chatRoom: updatedRoom };
   }
 
   async sendMessage(
@@ -246,8 +283,12 @@ export class ChatService {
     type: MessageType = MessageType.TEXT,
     attachments?: string[],
   ): Promise<Message> {
+    console.log('📝 [ChatService.sendMessage] Called:', { chatRoomId, senderId, contentLength: content?.length });
+
     const chatRoom = await this.chatModel.findById(chatRoomId);
     if (!chatRoom) throw new NotFoundException('Chat room not found');
+
+    console.log('📝 [ChatService.sendMessage] Room found, current messages count:', chatRoom.messages.length);
 
     // Verify sender is a participant: customer, field owner, or coach
     let isParticipant = chatRoom.user.toString() === senderId;
@@ -264,6 +305,7 @@ export class ChatService {
       }
     }
     if (!isParticipant) {
+      console.error('❌ [ChatService.sendMessage] User not participant');
       throw new ForbiddenException('You are not a participant in this chat');
     }
 
@@ -282,7 +324,11 @@ export class ChatService {
     // Mark as unread for receiver: if sender is user, mark unread for owner/coach; if sender is owner/coach, mark unread for user
     chatRoom.hasUnread = chatRoom.user.toString() !== senderId;
 
+    console.log('💾 [ChatService.sendMessage] About to save, messages count:', chatRoom.messages.length);
+
     await chatRoom.save();
+
+    console.log('✅ [ChatService.sendMessage] Saved successfully');
 
     return newMessage;
   }
@@ -298,6 +344,7 @@ export class ChatService {
       })
       .populate('user', 'fullName avatarUrl')
       .populate('fieldOwner', 'facilityName')
+      .populate('coach', 'hourlyRate displayName') // Added displayName for coach
       .populate('field', 'name images sportType')
       .sort({ lastMessageAt: -1 })
       .exec();
@@ -475,20 +522,19 @@ export class ChatService {
       throw new ForbiddenException('Access denied');
     }
 
-    // Update all unread messages from other participants
+    // Update messages to isRead: true for messages NOT from the current user
+    // We use a more atomic approach to avoid fetching and saving the whole array if possible,
+    // but for subdocument arrays, we often need to map or use $[]
+    let hasUnreadFromOthers = false;
     const updatedMessages = chatRoom.messages.map(message => {
       if (!message.isRead && message.sender.toString() !== userId) {
+        hasUnreadFromOthers = true;
         return { ...message, isRead: true };
       }
       return message;
     });
 
-    // Check if any messages were updated
-    const hasUnreadMessages = updatedMessages.some(
-      (msg, index) => msg.isRead !== chatRoom.messages[index].isRead
-    );
-
-    if (hasUnreadMessages || chatRoom.hasUnread) {
+    if (hasUnreadFromOthers || chatRoom.hasUnread) {
       await this.chatModel.updateOne(
         { _id: chatRoomId },
         {
