@@ -173,7 +173,7 @@ export class PaymentHandlerService implements OnModuleInit {
       // This ensures only ONE update happens even if webhook is called multiple times
       // Determine booking type to decide lifecycle change
       const current = await this.bookingModel.findById(event.bookingId).session(session).select('type status');
-const isCoach = !!current && (current as any).type === BookingType.COACH;
+      const isCoach = !!current && (current as any).type === BookingType.COACH;
 
       const updateResult = await this.bookingModel.findOneAndUpdate(
         {
@@ -368,29 +368,44 @@ const isCoach = !!current && (current as any).type === BookingType.COACH;
       this.logger.log(
         `[Release Slots] 🔓 Releasing schedule slots for booking ${booking._id} ` +
         `(field: ${booking.field}, date: ${new Date(booking.date).toISOString().split('T')[0]}, ` +
-        `slot: ${booking.startTime}-${booking.endTime})`
+        `slot: ${booking.startTime}-${booking.endTime}, type: ${booking.type})`
       );
 
       // ✅ CRITICAL: Use UTC methods to normalize date, not local time methods
-      // setHours() uses LOCAL timezone → wrong on Singapore server (UTC+8)
-      // Must use setUTCHours() to ensure date stays at UTC midnight
-      // booking.date and schedule.date are stored as UTC midnight (no offset)
       const bookingDate = new Date(booking.date);
       bookingDate.setUTCHours(0, 0, 0, 0);
 
+      // Construct query based on booking type
+      let query: any = { date: bookingDate };
+
+      // Case 1: Coach Booking - Must use 'coach' field, NOT 'field' (field is optional/informational)
+      if (booking.type === BookingType.COACH && booking.requestedCoach) {
+        query.coach = booking.requestedCoach;
+        // Coach schedules don't use court
+      }
+      // Case 2: Field Booking with specific Court - Must use 'court' field
+      else if (booking.court) {
+        query.court = booking.court;
+      }
+      // Case 3: Legacy/Simple Field Booking - Use 'field' only (no court specific)
+      else if (booking.field) {
+        query.field = booking.field;
+        // Ensure we don't accidentally match a court-specific schedule if looking for field-level
+        query.court = { $exists: false };
+      }
+      else {
+        this.logger.error(`[Release Slots] ❌ Cannot determine schedule target for booking ${booking._id} (no coach, court, or field)`);
+        return;
+      }
+
       this.logger.debug(
-        `[Release Slots] Searching for schedule: field=${booking.field}, ` +
-        `date=${bookingDate.toISOString()} (normalized to UTC midnight), ` +
-        `slot=${booking.startTime}-${booking.endTime}`
+        `[Release Slots] Searching for schedule with query: ${JSON.stringify(query)} ` +
+        `to release slot=${booking.startTime}-${booking.endTime}`
       );
 
       // Use MongoDB $pull operator for atomic slot removal
-      // This removes ALL matching slots (handles case where multiple slots exist)
       const updateResult = await this.scheduleModel.findOneAndUpdate(
-        {
-          field: booking.field,
-          date: bookingDate
-        },
+        query,
         {
           $pull: {
             bookedSlots: {
@@ -407,15 +422,13 @@ const isCoach = !!current && (current as any).type === BookingType.COACH;
 
       if (!updateResult) {
         this.logger.warn(
-          `[Release Slots] ⚠️ No schedule found for field ${booking.field} on ${bookingDate.toISOString()} ` +
-          `(booking date: ${booking.date.toISOString()}) - slot may have already been released or schedule doesn't exist`
+          `[Release Slots] ⚠️ No schedule found matching query: ${JSON.stringify(query)} ` +
+          `- slot may have already been released or schedule doesn't exist`
         );
         return;
       }
 
       // Check if slots were actually removed by comparing array lengths
-      // Note: $pull removes all matching entries, so we can't get exact count
-      // But we can verify the slot is no longer in the array
       const slotStillExists = updateResult.bookedSlots.some(
         slot => slot.startTime === booking.startTime && slot.endTime === booking.endTime
       );
@@ -428,8 +441,7 @@ const isCoach = !!current && (current as any).type === BookingType.COACH;
       } else {
         this.logger.log(
           `[Release Slots] ✅ Successfully released slot ${booking.startTime}-${booking.endTime} ` +
-          `from schedule (field: ${booking.field}, date: ${bookingDate.toISOString().split('T')[0]}) ` +
-          `for booking ${booking._id}`
+          `from schedule (id: ${updateResult._id}) for booking ${booking._id}`
         );
       }
 

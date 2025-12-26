@@ -1936,6 +1936,7 @@ export class TournamentService {
 
     /**
      * Cancel a tournament
+     * Simplified version - always free cancellation (no fee required)
      */
     async cancelTournament(tournamentId: string, userId: string, cancellationReason: string) {
         const tournament = await this.tournamentModel.findById(tournamentId);
@@ -1953,99 +1954,23 @@ export class TournamentService {
             throw new BadRequestException('Tournament already cancelled');
         }
 
-        const { fee } = this.calculateCancellationFee(tournament);
-
-        this.logger.log(`Cancelling tournament ${tournamentId}. Fee: ${fee}, Reason: ${cancellationReason}`);
-
-        if (fee > 0) {
-            // Get organizer details for metadata (consistent with registration flow)
-            const organizer = await this.userModel.findById(userId).select('fullName').exec();
-
-            // Create Payment Transaction for Fee
-            const transaction = new this.transactionModel({
-                user: new Types.ObjectId(userId),
-                amount: fee,
-                direction: 'in',
-                method: PaymentMethod.PAYOS,
-                type: TransactionType.FEE,
-                status: TransactionStatus.PENDING,
-                notes: `Cancellation Fee for tournament: ${tournament.name}`,
-                metadata: {
-                    tournamentId: (tournament._id as Types.ObjectId).toString(),
-                    tournamentName: tournament.name,
-                    sportType: tournament.sportType,
-                    category: tournament.category,
-                    cancellationReason: cancellationReason,
-                    userId: userId,
-                    organizerName: organizer?.fullName || 'Organizer',
-                    type: 'TOURNAMENT_CANCELLATION_FEE'
-                }
-            });
-
-            await transaction.save();
-
-            // Get config for URLs
-            const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
-            const backendUrl = this.configService.get<string>('BACKEND_URL') || 'http://localhost:3000';
-
-            // Generate PayOS Link
-            const orderCode = Number(Date.now().toString().slice(-9));
-
-            // ✅ Update transaction with metadata BEFORE saving (following registration pattern)
-            transaction.externalTransactionId = orderCode.toString();
-
-            // Ensure metadata is a plain object
-            const currentMetadata = transaction.metadata || {};
-
-            transaction.metadata = {
-                ...currentMetadata,
-                tournamentId: (tournament._id as Types.ObjectId).toString(),
-                tournamentName: tournament.name,
-                sportType: tournament.sportType,
-                category: tournament.category,
-                cancellationReason: cancellationReason,
-                userId: userId,
-                organizerName: organizer?.fullName || 'Organizer',
-                type: 'TOURNAMENT_CANCELLATION_FEE'
-            };
-
-            // Explicitly mark metadata as modified to ensure Mongoose saves it
-            transaction.markModified('metadata');
-
-            const savedTransaction = await transaction.save();
-            this.logger.log(`[Cancel Tournament] Saved transaction ${savedTransaction._id} with metadata:`, savedTransaction.metadata);
-
-            const paymentLink = await this.payosService.createPaymentUrl({
-                orderCode: orderCode,
-                orderId: (transaction._id as Types.ObjectId).toString(),
-                amount: fee,
-                description: `Phí hủy giải ${tournament.name.substring(0, 10)}`,
-                items: [{ name: `Phí hủy giải: ${tournament.name}`, quantity: 1, price: fee }],
-                returnUrl: `${backendUrl}/transactions/payos/tournament-return/${tournament._id}`,
-                cancelUrl: `${frontendUrl}/tournaments/${tournament._id}?cancel=failed`
-            });
-
-            // Save intent info
-            tournament.cancellationFee = fee;
-            tournament.cancellationReason = cancellationReason;
-            await tournament.save();
-
-            return {
-                feeRequired: true,
-                fee,
-                paymentUrl: paymentLink.checkoutUrl,
-                qrCode: paymentLink.qrCodeUrl,
-                message: `Cancellation fee of ${fee.toLocaleString()} VND is required.`
-            };
-        } else {
-            // Free Cancellation
-            await this.processCancellation(tournament, cancellationReason);
-            return {
-                feeRequired: false,
-                success: true,
-                message: 'Tournament cancelled successfully.'
-            };
+        // Check if tournament has already started
+        const now = new Date();
+        const tournamentDate = new Date(tournament.tournamentDate);
+        if (now >= tournamentDate) {
+            throw new BadRequestException('Cannot cancel a tournament that has already started');
         }
+
+        this.logger.log(`Cancelling tournament ${tournamentId}. Reason: ${cancellationReason}`);
+
+        // Always perform free cancellation
+        await this.processCancellation(tournament, cancellationReason);
+
+        return {
+            feeRequired: false,
+            success: true,
+            message: 'Tournament cancelled successfully.'
+        };
     }
 
     /**

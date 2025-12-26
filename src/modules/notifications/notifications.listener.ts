@@ -731,6 +731,11 @@ export class NotificationListener {
         const booking = await this.bookingModel.findById(payload.bookingId).lean();
         if (booking && booking.field) {
           payload.fieldId = booking.field.toString();
+        } else if (booking && (booking as any).type === BookingType.COACH) {
+          // Coach booking might not have a field - this is normal
+          // Skip field owner notification for pure coach bookings
+          this.logger.log(`[Payment Proof] Skipping field owner notification for Coach booking ${payload.bookingId}`);
+          return;
         } else {
           this.logger.error(`[Payment Proof] Missing fieldId in payload and booking ${payload.bookingId}`);
           return;
