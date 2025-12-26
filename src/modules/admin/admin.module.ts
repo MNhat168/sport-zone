@@ -11,6 +11,7 @@ import { CoachProfile, CoachProfileSchema } from '../coaches/entities/coach-prof
 import { Tournament, TournamentSchema } from '../tournaments/entities/tournament.entity';
 import { AiModule } from '../ai/ai.module';
 import { FieldOwnerProfile } from '@modules/field-owner/entities/field-owner-profile.entity';
+import { Notification, NotificationSchema } from '../notifications/entities/notification.entity';
 
 @Module({
   imports: [
@@ -20,8 +21,9 @@ import { FieldOwnerProfile } from '@modules/field-owner/entities/field-owner-pro
       { name: Booking.name, schema: BookingSchema },
       { name: Field.name, schema: FieldSchema },
       { name: CoachProfile.name, schema: CoachProfileSchema },
-      { name: FieldOwnerProfile.name, schema: CoachProfileSchema }, 
+      { name: FieldOwnerProfile.name, schema: CoachProfileSchema },
       { name: Tournament.name, schema: TournamentSchema },
+      { name: Notification.name, schema: NotificationSchema },
     ]),
     AiModule,
   ],
@@ -29,4 +31,4 @@ import { FieldOwnerProfile } from '@modules/field-owner/entities/field-owner-pro
   providers: [AdminService],
   exports: [AdminService],
 })
-export class AdminModule {}
+export class AdminModule { }
