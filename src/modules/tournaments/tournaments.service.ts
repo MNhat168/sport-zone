@@ -280,8 +280,14 @@ export class TournamentService {
             throw new NotFoundException('User not found');
         }
 
+        // Limit Check 0: Demerit/Ban Check
+        if (user.demeritUntil && new Date() < user.demeritUntil) {
+            throw new BadRequestException(
+                `Your account is currently restricted from creating tournaments until ${user.demeritUntil.toLocaleDateString('vi-VN')}. This is due to frequent cancellations.`
+            );
+        }
+
         // Limit Check 1: Max 3 active tournaments
-        // Active = status other than completed or cancelled
         // We track this via user.activeTournamentsCount
         if (user.activeTournamentsCount >= 3) {
             // Re-verify actual count to be safe
@@ -970,29 +976,12 @@ export class TournamentService {
                 metadataKeys: Object.keys(transaction.metadata || {})
             });
 
-            // ✅ Check for CANCELLATION TYPE
-            if (transaction.metadata?.type === 'TOURNAMENT_CANCELLATION_FEE') {
-                this.logger.log(`[Tournament Payment Success] Processing cancellation for tournament ${tournamentId}`);
-                await this.processCancellation(
-                    tournament,
-                    transaction.metadata.cancellationReason || 'Cancellation Fee Paid'
-                );
-
-                // TODO: Send cancellation confirmation email to organizer
-                // await this.emailService.sendTournamentCancellationConfirmation(userId, tournament, fee);
-                this.logger.log(`[Tournament Payment Success] ✅ Tournament ${tournament.name} cancelled successfully after fee payment`);
-
-                // Update transaction metadata
-                await this.transactionsService.updateTransactionMetadata(
-                    (transaction._id as Types.ObjectId).toString(),
-                    {
-                        cancellationProcessed: true,
-                        cancellationProcessedAt: new Date()
-                    }
-                );
-                return;
+            // ✅ TOURNAMENT_CANCELLATION_FEE is deprecated in favor of demerit system
+            // Keeping structure for other tournament-related payments
+            if (transaction.metadata?.type === 'TOURNAMENT_REGISTRATION') {
+                this.logger.log(`[Tournament Payment Success] Processing registration for tournament ${tournamentId}`);
+                // Existing registration logic...
             }
-
             // Check if user is already registered
             const alreadyRegistered = tournament.participants.some(
                 p => String(p.user) === userId
@@ -1505,6 +1494,8 @@ export class TournamentService {
             .findById(id)
             .populate('organizer', 'fullName email avatarUrl')
             .populate('participants.user', 'fullName email avatarUrl')
+            .populate('teams.members', 'fullName email avatarUrl')
+            .populate('teams.captain', 'fullName email avatarUrl')
             .populate({
                 path: 'courts.court',
                 populate: {
@@ -1945,7 +1936,7 @@ export class TournamentService {
             throw new NotFoundException('Tournament not found');
         }
 
-        // Check if user is organizer
+        // Only organizer can cancel
         if (tournament.organizer.toString() !== userId) {
             throw new BadRequestException('Only the organizer can cancel the tournament');
         }
@@ -1954,22 +1945,38 @@ export class TournamentService {
             throw new BadRequestException('Tournament already cancelled');
         }
 
-        // Check if tournament has already started
+        // Cannot cancel if already started
         const now = new Date();
-        const tournamentDate = new Date(tournament.tournamentDate);
-        if (now >= tournamentDate) {
+        if (now >= new Date(tournament.tournamentDate)) {
             throw new BadRequestException('Cannot cancel a tournament that has already started');
         }
 
         this.logger.log(`Cancelling tournament ${tournamentId}. Reason: ${cancellationReason}`);
 
-        // Always perform free cancellation
+        // Apply Demerit System
+        const user = await this.userModel.findById(userId);
+        if (user) {
+            const shortInterval = 30 * 24 * 60 * 60 * 1000; // 30 days
+            const lastCancelTime = user.lastCancellationDate ? user.lastCancellationDate.getTime() : 0;
+            const timeSinceLastCancel = now.getTime() - lastCancelTime;
+
+            if (user.lastCancellationDate && timeSinceLastCancel < shortInterval) {
+                // If cancelled twice within 30 days, ban for 1 year
+                const oneYear = 365 * 24 * 60 * 60 * 1000;
+                user.demeritUntil = new Date(now.getTime() + oneYear);
+                this.logger.log(`User ${userId} penalized with 1-year ban due to frequent cancellations.`);
+            }
+
+            user.lastCancellationDate = now;
+            await user.save();
+        }
+
+        // Perform cancellation (refunds participants, releases courts)
         await this.processCancellation(tournament, cancellationReason);
 
         return {
-            feeRequired: false,
             success: true,
-            message: 'Tournament cancelled successfully.'
+            message: 'Tournament cancelled successfully. Demerit applied if applicable.'
         };
     }
 
@@ -2021,6 +2028,12 @@ export class TournamentService {
         }
 
         // ✅ Send cancellation emails to all confirmed participants
+        // Debug: Log all participants and their payment statuses
+        this.logger.log(`Total participants in tournament: ${tournament.participants.length}`);
+        tournament.participants.forEach((p, index) => {
+            this.logger.log(`Participant ${index + 1}: paymentStatus = "${p.paymentStatus}"`);
+        });
+
         const confirmedParticipants = tournament.participants.filter(
             p => p.paymentStatus === 'confirmed' || p.paymentStatus === 'refunded'
         );
@@ -2045,6 +2058,8 @@ export class TournamentService {
                         refundAmount: tournament.registrationFee
                     });
                     this.logger.log(`✅ Cancellation email sent to ${user.email}`);
+                } else {
+                    this.logger.warn(`⚠️ User ${participant.user} has no email address`);
                 }
             } catch (emailError) {
                 this.logger.error(`❌ Failed to send cancellation email to participant ${participant.user}:`, emailError);

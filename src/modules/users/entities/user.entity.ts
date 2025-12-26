@@ -74,6 +74,12 @@ export class User extends BaseEntity {
 
   @Prop({ type: String, enum: ['FREE', 'PREMIUM'], default: 'FREE' })
   tournamentTier: 'FREE' | 'PREMIUM';
+
+  @Prop({ type: Date })
+  lastCancellationDate?: Date;
+
+  @Prop({ type: Date })
+  demeritUntil?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
