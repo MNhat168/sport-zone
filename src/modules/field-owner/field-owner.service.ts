@@ -25,6 +25,7 @@ import {
   CreateFieldDto,
   UpdateFieldDto,
   CreateFieldWithFilesDto,
+  UpdateFieldWithFilesDto,
   OwnerFieldsResponseDto,
 } from '../fields/dtos/fields.dto';
 import {
@@ -58,6 +59,8 @@ import { CreatePayOSUrlDto } from '../transactions/dto/payos.dto';
 import { generatePayOSOrderCode } from '../transactions/utils/payos.utils';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 import { Court } from '../courts/entities/court.entity';
+import { BookingStatus } from '@common/enums/booking.enum';
+import { SportType } from '@common/enums/sport-type.enum';
 
 @Injectable()
 export class FieldOwnerService {
@@ -136,9 +139,18 @@ export class FieldOwnerService {
         .limit(limit)
         .exec();
 
+      // Fetch courts for each field to populate numberOfCourts
+      const fieldsWithCourts = await Promise.all(fields.map(async (field) => {
+        const courts = await this.courtModel.find({ field: field._id }).countDocuments();
+        return {
+          ...field.toObject(),
+          numberOfCourts: courts
+        };
+      }));
+
       const totalPages = Math.ceil(total / limit);
 
-      const fieldsDto: FieldsDto[] = fields.map((field) => {
+      const fieldsDto: FieldsDto[] = fieldsWithCourts.map((field: any) => {
         const price = this.priceFormatService.formatPrice(field.basePrice);
 
         const validImages = (field.images || []).filter((img: string) => {
@@ -1144,7 +1156,7 @@ export class FieldOwnerService {
       }
 
       const updateData: any = { ...updateFieldDto };
-      if (updateFieldDto.amenities !== undefined) {
+      if (updateFieldDto.amenities) {
         if (updateFieldDto.amenities.length > 0) {
           const validAmenities = updateFieldDto.amenities.map((amenityDto) => {
             if (!Types.ObjectId.isValid(amenityDto.amenityId)) {
@@ -1164,10 +1176,16 @@ export class FieldOwnerService {
         }
       }
 
-      if (updateFieldDto.location) {
-        updateData.location = this.validateAndNormalizeLocation(updateFieldDto.location);
+      // Handle court count update
+      if (updateFieldDto.numberOfCourts !== undefined) {
+        await this.syncCourts(fieldId, Number(updateFieldDto.numberOfCourts));
       }
 
+      if (updateFieldDto.location) {
+        updateData.location = this.fieldsService.validateAndNormalizeLocation(
+          updateFieldDto.location,
+        );
+      }
       const updatedField = await this.fieldModel.findByIdAndUpdate(
         fieldId,
         { $set: updateData },
@@ -1207,6 +1225,229 @@ export class FieldOwnerService {
       }
       this.logger.error('Error updating field', error);
       throw new InternalServerErrorException('Failed to update field');
+    }
+  }
+
+  async updateWithFiles(
+    fieldId: string,
+    updateDto: UpdateFieldWithFilesDto,
+    files: { avatar?: IFile[], gallery?: IFile[] },
+    ownerId: string,
+  ): Promise<FieldsDto> {
+    try {
+      const field = await this.fieldModel.findById(fieldId);
+
+      if (!field) {
+        throw new NotFoundException('Field not found');
+      }
+
+      if (field.owner.toString() !== ownerId) {
+        throw new UnauthorizedException('Only field owner can update field information');
+      }
+
+      // 1. Process new files
+      const newGalleryUrls: string[] = [];
+      let newAvatarUrl: string | null = null;
+
+      if (files.avatar && files.avatar.length > 0) {
+        newAvatarUrl = await this.awsS3Service.uploadACLImage(files.avatar[0]);
+      }
+
+      if (files.gallery && files.gallery.length > 0) {
+        for (const file of files.gallery) {
+          const url = await this.awsS3Service.uploadACLImage(file);
+          newGalleryUrls.push(url);
+        }
+      }
+
+      // 2. Process kept images
+      let keptImages: string[] = [];
+      if (updateDto.keptImages) {
+        try {
+          keptImages = JSON.parse(updateDto.keptImages);
+          if (!Array.isArray(keptImages)) {
+            keptImages = [];
+          }
+        } catch (e) {
+          this.logger.warn('Failed to parse keptImages', e);
+          keptImages = [];
+        }
+      }
+
+      let finalImages: string[] = [];
+      if (newAvatarUrl) {
+        finalImages = [newAvatarUrl, ...keptImages, ...newGalleryUrls];
+      } else {
+        finalImages = [...keptImages, ...newGalleryUrls];
+      }
+
+      const updateData: any = {};
+
+      const hasFiles = (files.avatar && files.avatar.length > 0) || (files.gallery && files.gallery.length > 0);
+      if (hasFiles || updateDto.keptImages !== undefined) {
+        updateData.images = finalImages;
+      }
+
+      // 3. Process other fields
+      if (updateDto.name) updateData.name = updateDto.name;
+      if (updateDto.sportType) updateData.sportType = updateDto.sportType;
+      if (updateDto.description) updateData.description = updateDto.description;
+      if (updateDto.basePrice) updateData.basePrice = Number(updateDto.basePrice);
+      if (updateDto.slotDuration) updateData.slotDuration = Number(updateDto.slotDuration);
+      if (updateDto.minSlots) updateData.minSlots = Number(updateDto.minSlots);
+      if (updateDto.maxSlots) updateData.maxSlots = Number(updateDto.maxSlots);
+      if (updateDto.isActive !== undefined) updateData.isActive = updateDto.isActive === 'true';
+
+      if (updateDto.location) {
+        try {
+          const locationObj = JSON.parse(updateDto.location);
+          updateData.location = this.validateAndNormalizeLocation(locationObj);
+        } catch (e) {
+          throw new BadRequestException('Invalid location format (JSON required)');
+        }
+      }
+
+      if (updateDto.operatingHours) {
+        try {
+          const oh = JSON.parse(updateDto.operatingHours);
+          if (Array.isArray(oh)) {
+            updateData.operatingHours = oh.map((h: any) => ({
+              ...h,
+              duration: Number(h.duration)
+            }));
+          }
+        } catch (e) {
+          throw new BadRequestException('Invalid operatingHours format');
+        }
+      }
+
+      if (updateDto.priceRanges) {
+        try {
+          const pr = JSON.parse(updateDto.priceRanges);
+          if (Array.isArray(pr)) {
+            updateData.priceRanges = pr.map((r: any) => ({
+              ...r,
+              multiplier: Number(r.multiplier)
+            }));
+          }
+        } catch (e) {
+          throw new BadRequestException('Invalid priceRanges format');
+        }
+      }
+
+      if (updateDto.amenities) {
+        try {
+          const am = JSON.parse(updateDto.amenities);
+          if (Array.isArray(am)) {
+            updateData.amenities = am.map((a: any) => ({
+              amenity: new Types.ObjectId(a.amenityId),
+              price: Number(a.price)
+            }));
+          }
+        } catch (e) {
+          throw new BadRequestException('Invalid amenities format');
+        }
+      }
+
+
+      // Handle specific courts deletion FIRST (before numberOfCourts)
+      // This ensures syncCourts gets the correct current count after deletions
+      if (updateDto.courtsToDelete) {
+        try {
+          const courtIds = JSON.parse(updateDto.courtsToDelete);
+          if (Array.isArray(courtIds) && courtIds.length > 0) {
+            const courtObjectIds = courtIds.map(id => new Types.ObjectId(id));
+
+            // Validate courts belong to this field
+            const courtsToDelete = await this.courtModel.find({
+              _id: { $in: courtObjectIds },
+              field: new Types.ObjectId(fieldId)
+            }).exec();
+
+            if (courtsToDelete.length !== courtIds.length) {
+              throw new BadRequestException('Một số court không thuộc sân này hoặc không tồn tại');
+            }
+
+            // Check for active bookings on these courts
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+
+            const activeBookings = await this.bookingModel.findOne({
+              court: { $in: courtObjectIds },
+              status: { $in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] },
+              date: { $gte: todayStart }
+            }).exec();
+
+            if (activeBookings) {
+              const courtNumbers = courtsToDelete.map(c => c.courtNumber).join(', ');
+              throw new BadRequestException(
+                `Không thể xóa các sân có lịch đặt đang hoạt động. Vui lòng kiểm tra sân: ${courtNumbers}`
+              );
+            }
+
+            // Delete the courts
+            await this.courtModel.deleteMany({
+              _id: { $in: courtObjectIds }
+            });
+
+            this.logger.log(`Deleted ${courtsToDelete.length} courts from field ${fieldId}`);
+          }
+        } catch (e) {
+          if (e instanceof BadRequestException) {
+            throw e;
+          }
+          this.logger.warn('Failed to parse courtsToDelete', e);
+          throw new BadRequestException('Invalid courtsToDelete format (JSON array required)');
+        }
+      }
+
+      // Handle court count update AFTER deletions
+      if (updateDto.numberOfCourts !== undefined) {
+        await this.syncCourts(fieldId, Number(updateDto.numberOfCourts));
+      }
+
+
+      const updatedField = await this.fieldModel.findByIdAndUpdate(
+        fieldId,
+        { $set: updateData },
+        { new: true },
+      );
+
+      if (!updatedField) {
+        throw new NotFoundException('Field not found');
+      }
+
+      this.fieldsService.clearCache(fieldId);
+
+      return {
+        id: (updatedField._id as Types.ObjectId).toString(),
+        owner: updatedField.owner.toString(),
+        name: updatedField.name,
+        sportType: updatedField.sportType,
+        description: updatedField.description,
+        location: updatedField.location,
+        images: updatedField.images,
+        operatingHours: updatedField.operatingHours,
+        slotDuration: updatedField.slotDuration,
+        minSlots: updatedField.minSlots,
+        maxSlots: updatedField.maxSlots,
+        priceRanges: updatedField.priceRanges,
+        basePrice: updatedField.basePrice,
+        isActive: updatedField.isActive,
+        isAdminVerify: updatedField.isAdminVerify ?? false,
+        maintenanceNote: updatedField.maintenanceNote,
+        maintenanceUntil: updatedField.maintenanceUntil,
+        rating: updatedField.rating,
+        totalReviews: updatedField.totalReviews,
+        createdAt: updatedField.createdAt,
+        updatedAt: updatedField.updatedAt,
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof UnauthorizedException || error instanceof BadRequestException) {
+        throw error;
+      }
+      this.logger.error('Error updating field with files', error);
+      throw new InternalServerErrorException('Failed to update field with files');
     }
   }
 
@@ -2021,12 +2262,39 @@ export class FieldOwnerService {
     }
   }
 
+  /**
+   * Auto-heal bank account: promote to VERIFIED if payment is paid but status is still pending
+   * @private
+   */
+  private async autoHealBankAccount(account: any): Promise<void> {
+    if (
+      account.verificationPaymentStatus === 'paid' &&
+      account.status === BankAccountStatus.PENDING
+    ) {
+      this.logger.warn(
+        `[Auto-Heal] Field owner bank account ${account._id} has paid verification but status is still pending. Promoting to VERIFIED...`,
+      );
+      account.status = BankAccountStatus.VERIFIED;
+      account.isValidatedByPayOS = true;
+      if (!account.verifiedAt) {
+        account.verifiedAt = new Date();
+      }
+      await account.save();
+      this.logger.log(`[Auto-Heal] ✅ Field owner bank account ${account._id} promoted to VERIFIED`);
+    }
+  }
+
   async getBankAccountsByFieldOwner(profileId: string): Promise<BankAccountResponseDto[]> {
     try {
       const accounts = await this.bankAccountModel
         .find({ fieldOwner: new Types.ObjectId(profileId) })
         .sort({ isDefault: -1, createdAt: -1 })
         .exec();
+
+      // ✅ AUTO-HEAL: Promote to VERIFIED if payment is paid but status is still pending
+      for (const account of accounts) {
+        await this.autoHealBankAccount(account);
+      }
 
       return accounts.map((account) => this.mapToBankAccountDto(account));
     } catch (error) {
@@ -2062,6 +2330,18 @@ export class FieldOwnerService {
         );
         throw new InternalServerErrorException('Frontend URL is not configured');
       }
+
+      // ✅ FIX: Update bank account with verification order code FIRST
+      // This ensures the webhook can find the bank account by verificationOrderCode
+      // even if it arrives very quickly after payment creation
+      bankAccount.verificationOrderCode = String(orderCode);
+      bankAccount.verificationPaymentStatus = 'pending';
+      bankAccount.verificationAmount = verificationAmount;
+      await bankAccount.save();
+
+      this.logger.log(
+        `Updated bank account ${bankAccountId} with verificationOrderCode=${orderCode} before creating PayOS link`,
+      );
 
       // Create fee transaction record FIRST to ensure it exists
       // This ensures we don't have "gap" where payment exists but transaction record doesn't
@@ -2127,10 +2407,7 @@ export class FieldOwnerService {
         cancelUrl: `${frontendUrl}/field-owner/wallet`,
       });
 
-      // Update bank account with verification order code
-      bankAccount.verificationOrderCode = String(orderCode);
-      bankAccount.verificationPaymentStatus = 'pending';
-      bankAccount.verificationAmount = verificationAmount;
+      // Update bank account with PayOS payment link URLs
       bankAccount.verificationUrl = paymentLink.checkoutUrl;
       bankAccount.verificationQrCode = paymentLink.qrCodeUrl || '';
       await bankAccount.save();
@@ -2171,20 +2448,46 @@ export class FieldOwnerService {
     try {
       this.logger.log(`[Verification Webhook] Processing orderCode: ${orderCode}, status: ${webhookData.status}`);
 
-      // Find bank account by verification order code
-      const bankAccount = await this.bankAccountModel
-        .findOne({
-          verificationOrderCode: String(orderCode),
-        })
-        .exec();
+      // ✅ RETRY LOGIC: Handle edge case where webhook arrives before DB save completes
+      let bankAccount: (BankAccount & { _id: any }) | null = null;
+      const maxRetries = 3;
+      const retryDelayMs = 500;
+
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        // Find bank account by verification order code
+        bankAccount = await this.bankAccountModel
+          .findOne({
+            verificationOrderCode: String(orderCode),
+          })
+          .exec();
+
+        if (bankAccount) {
+          break; // Found it!
+        }
+
+        if (attempt < maxRetries) {
+          this.logger.warn(
+            `[Verification Webhook] Bank account not found for orderCode ${orderCode} (attempt ${attempt}/${maxRetries}). ` +
+            `Retrying in ${retryDelayMs}ms...`,
+          );
+          await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+        }
+      }
 
       if (!bankAccount) {
-        this.logger.warn(`[Verification Webhook] Bank account not found for verification orderCode: ${orderCode}`);
+        this.logger.error(
+          `[Verification Webhook] ❌ Bank account not found for verification orderCode: ${orderCode} after ${maxRetries} attempts. ` +
+          `This may indicate a data consistency issue.`,
+        );
         return;
       }
 
+      // Determine owner type (coach vs field owner)
+      const ownerType = bankAccount.coach ? 'coach' : 'field owner';
+      const ownerId = bankAccount.coach || bankAccount.fieldOwner;
+
       this.logger.log(
-        `[Verification Webhook] Found bank account ${bankAccount._id} for field owner ${bankAccount.fieldOwner}. ` +
+        `[Verification Webhook] Found bank account ${bankAccount._id} for ${ownerType} ${ownerId}. ` +
         `Registered account: ${bankAccount.accountNumber}, Current status: ${bankAccount.status}`,
       );
 
@@ -2316,21 +2619,8 @@ export class FieldOwnerService {
         throw new NotFoundException('Bank account not found');
       }
 
-      // Auto-heal: if payment is marked as paid but status is still pending, promote to VERIFIED
-      if (
-        bankAccount.verificationPaymentStatus === 'paid' &&
-        bankAccount.status === BankAccountStatus.PENDING
-      ) {
-        this.logger.warn(
-          `Bank account ${bankAccountId} has paid verification but status is still pending. Promoting to VERIFIED...`,
-        );
-        bankAccount.status = BankAccountStatus.VERIFIED;
-        bankAccount.isValidatedByPayOS = true;
-        if (!bankAccount.verifiedAt) {
-          bankAccount.verifiedAt = new Date();
-        }
-        await bankAccount.save();
-      }
+      // Note: Auto-heal logic removed - now handled by getBankAccountsByFieldOwner()
+      // This method just returns current state
 
       const needsVerification =
         bankAccount.status === BankAccountStatus.PENDING &&
@@ -2722,6 +3012,94 @@ export class FieldOwnerService {
       reviewedBy: request.reviewedBy?.toString(),
       rejectionReason: request.rejectionReason,
     };
+  }
+
+  /**
+   * Sync courts for a field based on the desired number of courts
+   * @param fieldId The field ID
+   * @param targetCount The desired number of courts
+   */
+  private async syncCourts(fieldId: string, targetCount: number) {
+    if (isNaN(targetCount) || targetCount < 0) {
+      throw new BadRequestException('Invalid number of courts');
+    }
+
+    const fieldObjectId = new Types.ObjectId(fieldId);
+
+    // Fetch all existing courts (active and inactive if any, but usually we care about active or all)
+    // We sort by courtNumber to easily identify which ones to remove from the end
+    const currentCourts = await this.courtModel
+      .find({ field: fieldObjectId })
+      .sort({ courtNumber: 1 })
+      .exec();
+
+    const currentCount = currentCourts.length;
+
+    if (targetCount === currentCount) {
+      return;
+    }
+
+    if (targetCount > currentCount) {
+      // Add new courts
+      const courtsToAdd: any[] = [];
+      const field = await this.fieldModel.findById(fieldId).select('sportType').exec();
+      const sportType = (field?.sportType as SportType) || SportType.FOOTBALL; // Default fallback
+
+      // Find the maximum court number to avoid duplicate key errors
+      const maxCourtNumber = currentCourts.length > 0
+        ? Math.max(...currentCourts.map(c => c.courtNumber))
+        : 0;
+
+      const courtsNeeded = targetCount - currentCount;
+      for (let i = 1; i <= courtsNeeded; i++) {
+        const courtNumber = maxCourtNumber + i;
+        courtsToAdd.push({
+          name: `Sân ${courtNumber}`,
+          courtNumber: courtNumber,
+          field: fieldObjectId,
+          isActive: true, // Default active
+          sportType: sportType
+        });
+      }
+
+      if (courtsToAdd.length > 0) {
+        await this.courtModel.insertMany(courtsToAdd);
+        this.logger.log(`Added ${courtsToAdd.length} courts to field ${fieldId}`);
+      }
+
+
+    } else if (targetCount < currentCount) {
+      // Remove excess courts from the end (highest court numbers)
+      const courtsToRemove = currentCourts.slice(targetCount); // Get elements from index targetCount to end
+      const courtIdsToRemove = courtsToRemove.map(c => c._id);
+      const courtNumbersToRemove = courtsToRemove.map(c => c.courtNumber).join(', ');
+
+      this.logger.log(`Attempting to remove courts: ${courtNumbersToRemove} from field ${fieldId}`);
+
+      // CHECK FOR BOOKINGS ON THESE COURTS
+      // We check for active bookings that are relevant
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+
+      const activeBookings = await this.bookingModel.findOne({
+        court: { $in: courtIdsToRemove },
+        status: { $in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] },
+        date: { $gte: todayStart }
+      }).exec();
+
+      if (activeBookings) {
+        throw new BadRequestException(
+          `Không thể giảm số lượng sân vì đang có lịch đặt trên các sân sẽ bị xóa (Sân ${courtNumbersToRemove}). Vui lòng kiểm tra và hủy lịch đặt trước.`
+        );
+      }
+
+      // If safe, delete them
+      await this.courtModel.deleteMany({
+        _id: { $in: courtIdsToRemove }
+      });
+
+      this.logger.log(`Deleted ${courtsToRemove.length} courts from field ${fieldId}`);
+    }
   }
 
   private mapToBankAccountDto(account: BankAccount): BankAccountResponseDto {

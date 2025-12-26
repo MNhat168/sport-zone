@@ -1131,6 +1131,31 @@ export class TransactionsController {
                     }
                 );
 
+                // ✅ CHECK FOR BANK VERIFICATION: Process bank account verification if this is a verification payment
+                const isVerificationPayment = updated.metadata?.verificationType &&
+                    (updated.metadata.verificationType === 'BANK_ACCOUNT_VERIFICATION' ||
+                        updated.metadata.verificationType === 'COACH_BANK_ACCOUNT_VERIFICATION');
+
+                if (isVerificationPayment && payosTransaction.status === 'PAID') {
+                    console.log(`[PayOS Return] 🔍 Detected bank account verification payment for orderCode: ${orderCode}`);
+                    try {
+                        await this.fieldOwnerService.processVerificationWebhook(
+                            orderCode,
+                            {
+                                counterAccountNumber: payosTransaction.accountNumber,
+                                counterAccountName: undefined, // PayOS doesn't provide this in query response
+                                amount: payosTransaction.amount,
+                                status: 'PAID',
+                                reference: payosTransaction.reference,
+                                transactionDateTime: payosTransaction.transactionDateTime,
+                            },
+                        );
+                        console.log(`[PayOS Return] ✅ Bank account verification processed for orderCode: ${orderCode}`);
+                    } catch (verificationError) {
+                        console.error(`[PayOS Return] ❌ Error processing bank account verification:`, verificationError);
+                    }
+                }
+
                 // ✅ ENHANCED IDEMPOTENCY CHECK: Only update if status has actually changed
                 if (shouldEmitFailedEvent) {
                     const bookingIdStr = updated.booking

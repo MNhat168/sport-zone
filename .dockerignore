@@ -1,0 +1,13 @@
+node_modules
+dist
+.git
+.github
+.gitignore
+.dockerignore
+Dockerfile
+README.md
+docs
+test
+scripts
+keys.zip
+*.md

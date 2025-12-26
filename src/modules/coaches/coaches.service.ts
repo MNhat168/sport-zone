@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { User } from 'src/modules/users/entities/user.entity';
@@ -18,6 +19,17 @@ import {
 } from './dtos/coach-registration.dto';
 import { RegistrationStatus } from '@common/enums/field-owner-registration.enum';
 import { EmailService } from 'src/modules/email/email.service';
+import { BankAccountStatus } from '@common/enums/bank-account.enum';
+import {
+  CreateBankAccountDto,
+  UpdateBankAccountDto,
+  BankAccountResponseDto,
+} from '../field-owner/dtos/bank-account.dto';
+import { PayOSService } from '../transactions/payos.service';
+import { Transaction } from '../transactions/entities/transaction.entity';
+import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum';
+import { PaymentMethod } from 'src/common/enums/payment-method.enum';
+import { generatePayOSOrderCode } from '../transactions/utils/payos.utils';
 @Injectable()
 export class CoachesService {
   private readonly logger = new Logger(CoachesService.name);
@@ -33,7 +45,11 @@ export class CoachesService {
     private lessonTypeModel: Model<LessonType>,
     @InjectModel(CoachRegistrationRequest.name)
     private registrationRequestModel: Model<CoachRegistrationRequest>,
+    @InjectModel(Transaction.name)
+    private transactionModel: Model<Transaction>,
     private readonly emailService: EmailService,
+    private readonly payosService: PayOSService,
+    private readonly configService: ConfigService,
   ) { }
 
   async findAll(query?: {
@@ -742,6 +758,624 @@ export class CoachesService {
       processedBy: request.processedBy?.toString(),
       reviewedAt: request.reviewedAt,
       reviewedBy: request.reviewedBy?.toString(),
+    };
+  }
+
+  // ==================== Bank Account Methods for Coach ====================
+
+  /**
+   * Add bank account for coach
+   */
+  async addBankAccountForCoach(
+    userId: string,
+    dto: CreateBankAccountDto,
+  ): Promise<BankAccountResponseDto> {
+    try {
+      if (!dto.verificationDocument) {
+        throw new BadRequestException('Vui lòng cung cấp ảnh/QR tài khoản ngân hàng để rút tiền');
+      }
+
+      // Find coach profile
+      const coachProfile = await this.coachProfileModel
+        .findOne({ user: new Types.ObjectId(userId) })
+        .exec();
+
+      if (!coachProfile) {
+        throw new NotFoundException('Coach profile not found');
+      }
+
+      const coachId = (coachProfile._id as Types.ObjectId).toString();
+
+      // Check for duplicate bank account
+      const existingAccount = await this.bankAccountModel.findOne({
+        coach: new Types.ObjectId(coachId),
+        accountNumber: dto.accountNumber,
+        bankCode: dto.bankCode,
+      }).exec();
+
+      if (existingAccount) {
+        throw new BadRequestException(
+          `Tài khoản ngân hàng ${dto.accountNumber} (${dto.bankCode}) đã được khai báo. Vui lòng kiểm tra lại.`
+        );
+      }
+
+      const bankAccount = new this.bankAccountModel({
+        coach: new Types.ObjectId(coachId),
+        bankCode: dto.bankCode,
+        bankName: dto.bankName,
+        accountNumber: dto.accountNumber,
+        accountName: dto.accountName,
+        branch: dto.branch,
+        verificationDocument: dto.verificationDocument,
+        status: BankAccountStatus.PENDING,
+        isDefault: dto.isDefault ?? false,
+        verificationAmount: 10000,
+        verificationPaymentStatus: 'pending',
+      });
+
+      const savedAccount = await bankAccount.save();
+
+      // Create verification payment
+      let verificationUrl: string | undefined;
+      let verificationQrCode: string | undefined;
+
+      if (!dto.skipVerification) {
+        try {
+          const verification = await this.createVerificationPaymentForCoach(
+            (savedAccount._id as Types.ObjectId).toString(),
+            userId,
+          );
+          verificationUrl = verification.verificationUrl;
+          verificationQrCode = verification.verificationQrCode;
+        } catch (verificationError) {
+          this.logger.warn(
+            `Failed to create verification payment for bank account ${savedAccount._id}:`,
+            verificationError,
+          );
+        }
+      }
+
+      const response = this.mapToBankAccountDto(savedAccount);
+      response.verificationUrl = verificationUrl;
+      response.verificationQrCode = verificationQrCode;
+      response.needsVerification = !dto.skipVerification;
+      response.verificationPaymentStatus = savedAccount.verificationPaymentStatus || 'pending';
+      response.verificationOrderCode = savedAccount.verificationOrderCode;
+
+      return response;
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error('Error adding bank account for coach', error);
+      throw new InternalServerErrorException('Failed to add bank account');
+    }
+  }
+
+
+  /**
+   * Auto-heal bank account: promote to VERIFIED if payment is paid but status is still pending
+   * @private
+   */
+  private async autoHealBankAccount(account: any): Promise<void> {
+    if (
+      account.verificationPaymentStatus === 'paid' &&
+      account.status === BankAccountStatus.PENDING
+    ) {
+      this.logger.warn(
+        `[Auto-Heal] Coach bank account ${account._id} has paid verification but status is still pending. Promoting to VERIFIED...`,
+      );
+      account.status = BankAccountStatus.VERIFIED;
+      account.isValidatedByPayOS = true;
+      if (!account.verifiedAt) {
+        account.verifiedAt = new Date();
+      }
+      await account.save();
+      this.logger.log(`[Auto-Heal] ✅ Coach bank account ${account._id} promoted to VERIFIED`);
+    }
+  }
+
+  /**
+   * Get bank accounts for coach
+   */
+  async getBankAccountsForCoach(userId: string): Promise<BankAccountResponseDto[]> {
+    try {
+      // Find coach profile
+      const coachProfile = await this.coachProfileModel
+        .findOne({ user: new Types.ObjectId(userId) })
+        .exec();
+
+      if (!coachProfile) {
+        throw new NotFoundException('Coach profile not found');
+      }
+
+      const coachId = (coachProfile._id as Types.ObjectId).toString();
+
+      const accounts = await this.bankAccountModel
+        .find({ coach: new Types.ObjectId(coachId) })
+        .sort({ isDefault: -1, createdAt: -1 })
+        .exec();
+
+      // ✅ AUTO-HEAL: Promote to VERIFIED if payment is paid but status is still pending
+      for (const account of accounts) {
+        await this.autoHealBankAccount(account);
+      }
+
+      return accounts.map((account) => this.mapToBankAccountDto(account));
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error('Error getting bank accounts for coach', error);
+      throw new InternalServerErrorException('Failed to get bank accounts');
+    }
+  }
+
+  /**
+   * Update bank account for coach
+   */
+  async updateBankAccountForCoach(
+    userId: string,
+    accountId: string,
+    dto: UpdateBankAccountDto,
+  ): Promise<BankAccountResponseDto> {
+    try {
+      // Find coach profile
+      const coachProfile = await this.coachProfileModel
+        .findOne({ user: new Types.ObjectId(userId) })
+        .exec();
+
+      if (!coachProfile) {
+        throw new NotFoundException('Coach profile not found');
+      }
+
+      const coachId = (coachProfile._id as Types.ObjectId).toString();
+
+      const bankAccount = await this.bankAccountModel.findById(accountId).exec();
+
+      if (!bankAccount) {
+        throw new NotFoundException('Bank account not found');
+      }
+
+      // Verify account belongs to the coach
+      const accountOwnerId = (bankAccount.coach as Types.ObjectId)?.toString();
+      if (accountOwnerId !== coachId) {
+        throw new ForbiddenException('You do not have permission to update this bank account');
+      }
+
+      // Track if account details changed (to reset status)
+      const detailsChanged =
+        (dto.accountName && dto.accountName !== bankAccount.accountName) ||
+        (dto.accountNumber && dto.accountNumber !== bankAccount.accountNumber) ||
+        (dto.bankCode && dto.bankCode !== bankAccount.bankCode) ||
+        (dto.bankName && dto.bankName !== bankAccount.bankName);
+
+      // Update provided fields
+      if (dto.accountName !== undefined) bankAccount.accountName = dto.accountName;
+      if (dto.accountNumber !== undefined) bankAccount.accountNumber = dto.accountNumber;
+      if (dto.bankCode !== undefined) bankAccount.bankCode = dto.bankCode;
+      if (dto.bankName !== undefined) bankAccount.bankName = dto.bankName;
+      if (dto.branch !== undefined) bankAccount.branch = dto.branch;
+      if (dto.verificationDocument !== undefined) bankAccount.verificationDocument = dto.verificationDocument;
+
+      // Reset status to PENDING if account details changed
+      if (detailsChanged) {
+        bankAccount.status = BankAccountStatus.PENDING;
+        bankAccount.isValidatedByPayOS = false;
+        bankAccount.accountNameFromPayOS = undefined;
+        bankAccount.verifiedAt = undefined;
+        bankAccount.verifiedBy = undefined;
+        bankAccount.rejectionReason = undefined;
+        bankAccount.notes = undefined;
+      }
+
+      // Handle isDefault update
+      if (dto.isDefault !== undefined && dto.isDefault === true) {
+        await this.bankAccountModel.updateMany(
+          {
+            coach: new Types.ObjectId(coachId),
+            _id: { $ne: new Types.ObjectId(accountId) },
+          },
+          { isDefault: false },
+        );
+        bankAccount.isDefault = true;
+      } else if (dto.isDefault !== undefined) {
+        bankAccount.isDefault = dto.isDefault;
+      }
+
+      const updatedAccount = await bankAccount.save();
+
+      return this.mapToBankAccountDto(updatedAccount);
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
+        throw error;
+      }
+      this.logger.error('Error updating bank account for coach', error);
+      throw new InternalServerErrorException('Failed to update bank account');
+    }
+  }
+
+  /**
+   * Delete bank account for coach
+   */
+  async deleteBankAccountForCoach(
+    userId: string,
+    accountId: string,
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      // Find coach profile
+      const coachProfile = await this.coachProfileModel
+        .findOne({ user: new Types.ObjectId(userId) })
+        .exec();
+
+      if (!coachProfile) {
+        throw new NotFoundException('Coach profile not found');
+      }
+
+      const coachId = (coachProfile._id as Types.ObjectId).toString();
+
+      const bankAccount = await this.bankAccountModel.findById(accountId).exec();
+
+      if (!bankAccount) {
+        throw new NotFoundException('Bank account not found');
+      }
+
+      // Verify account belongs to the coach
+      const accountOwnerId = (bankAccount.coach as Types.ObjectId)?.toString();
+      if (accountOwnerId !== coachId) {
+        throw new ForbiddenException('You do not have permission to delete this bank account');
+      }
+
+      const wasDefault = bankAccount.isDefault;
+
+      // Delete the bank account document
+      await this.bankAccountModel.findByIdAndDelete(accountId);
+
+      // If deleted account was default, set next verified account as default if available
+      if (wasDefault) {
+        const nextVerifiedAccount = await this.bankAccountModel
+          .findOne({
+            coach: new Types.ObjectId(coachId),
+            status: BankAccountStatus.VERIFIED,
+          })
+          .sort({ createdAt: -1 })
+          .exec();
+
+        if (nextVerifiedAccount) {
+          nextVerifiedAccount.isDefault = true;
+          await nextVerifiedAccount.save();
+        } else {
+          const anyAccount = await this.bankAccountModel
+            .findOne({ coach: new Types.ObjectId(coachId) })
+            .sort({ createdAt: -1 })
+            .exec();
+
+          if (anyAccount) {
+            anyAccount.isDefault = true;
+            await anyAccount.save();
+          }
+        }
+      }
+
+      return { success: true, message: 'Bank account deleted successfully' };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
+        throw error;
+      }
+      this.logger.error('Error deleting bank account for coach', error);
+      throw new InternalServerErrorException('Failed to delete bank account');
+    }
+  }
+
+  /**
+   * Set default bank account for coach
+   */
+  async setDefaultBankAccountForCoach(
+    userId: string,
+    accountId: string,
+  ): Promise<BankAccountResponseDto> {
+    try {
+      // Find coach profile
+      const coachProfile = await this.coachProfileModel
+        .findOne({ user: new Types.ObjectId(userId) })
+        .exec();
+
+      if (!coachProfile) {
+        throw new NotFoundException('Coach profile not found');
+      }
+
+      const coachId = (coachProfile._id as Types.ObjectId).toString();
+
+      const bankAccount = await this.bankAccountModel.findById(accountId).exec();
+
+      if (!bankAccount) {
+        throw new NotFoundException('Bank account not found');
+      }
+
+      // Verify account belongs to the coach
+      const accountOwnerId = (bankAccount.coach as Types.ObjectId)?.toString();
+      if (accountOwnerId !== coachId) {
+        throw new ForbiddenException('You do not have permission to modify this bank account');
+      }
+
+      // Set all other accounts' isDefault to false
+      await this.bankAccountModel.updateMany(
+        {
+          coach: new Types.ObjectId(coachId),
+          _id: { $ne: new Types.ObjectId(accountId) },
+        },
+        { isDefault: false },
+      );
+
+      // Set target account's isDefault to true
+      bankAccount.isDefault = true;
+      const updatedAccount = await bankAccount.save();
+
+      return this.mapToBankAccountDto(updatedAccount);
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
+        throw error;
+      }
+      this.logger.error('Error setting default bank account for coach', error);
+      throw new InternalServerErrorException('Failed to set default bank account');
+    }
+  }
+
+  /**
+   * Get verification status for coach bank account
+   */
+  async getVerificationStatusForCoach(
+    userId: string,
+    accountId: string,
+  ): Promise<{
+    needsVerification: boolean;
+    verificationPaymentStatus?: string;
+    status: string;
+    verificationOrderCode?: string;
+    verificationUrl?: string;
+    verificationQrCode?: string;
+    qrCodeUrl?: string;
+  }> {
+    try {
+      // Find coach profile
+      const coachProfile = await this.coachProfileModel
+        .findOne({ user: new Types.ObjectId(userId) })
+        .exec();
+
+      if (!coachProfile) {
+        throw new NotFoundException('Coach profile not found');
+      }
+
+      const coachId = (coachProfile._id as Types.ObjectId).toString();
+
+      const bankAccount = await this.bankAccountModel.findById(accountId).exec();
+      if (!bankAccount) {
+        throw new NotFoundException('Bank account not found');
+      }
+
+      // Verify ownership
+      const accountOwnerId = (bankAccount.coach as Types.ObjectId)?.toString();
+      if (accountOwnerId !== coachId) {
+        throw new ForbiddenException('You do not have permission to view this bank account');
+      }
+
+      // Note: Auto-heal logic removed - now handled by getBankAccountsForCoach()
+      // This method just returns current state
+
+      const needsVerification =
+        bankAccount.status === BankAccountStatus.PENDING &&
+        bankAccount.verificationPaymentStatus !== 'paid';
+
+      if (!needsVerification) {
+        return {
+          needsVerification: false,
+          verificationPaymentStatus: bankAccount.verificationPaymentStatus,
+          status: bankAccount.status,
+          verificationOrderCode: bankAccount.verificationOrderCode,
+          verificationUrl: bankAccount.verificationUrl,
+          verificationQrCode: bankAccount.verificationQrCode,
+          qrCodeUrl: bankAccount.verificationQrCode,
+        };
+      }
+
+      // If verification payment exists, return status
+      if (bankAccount.verificationOrderCode) {
+        if (
+          bankAccount.verificationPaymentStatus !== 'paid' &&
+          (!bankAccount.verificationUrl || !bankAccount.verificationQrCode)
+        ) {
+          this.logger.warn(
+            `Bank account ${accountId} has order code but missing URL/QR. Regenerating payment link...`,
+          );
+          const verification = await this.createVerificationPaymentForCoach(accountId, userId);
+          return {
+            needsVerification: true,
+            verificationPaymentStatus: 'pending',
+            status: 'pending',
+            verificationOrderCode: String(verification.orderCode),
+            verificationUrl: verification.verificationUrl,
+            verificationQrCode: verification.verificationQrCode,
+            qrCodeUrl: verification.verificationQrCode,
+          };
+        }
+
+        const paymentStatus = bankAccount.verificationPaymentStatus || 'pending';
+        const status = paymentStatus === 'paid' ? 'verified' : paymentStatus;
+
+        return {
+          needsVerification: true,
+          verificationPaymentStatus: paymentStatus,
+          status,
+          verificationOrderCode: bankAccount.verificationOrderCode,
+          verificationUrl: bankAccount.verificationUrl,
+          verificationQrCode: bankAccount.verificationQrCode,
+          qrCodeUrl: bankAccount.verificationQrCode,
+        };
+      }
+
+      // No verification payment created yet - create one now
+      this.logger.log(`Bank account ${accountId} needs verification but has no payment. Creating one...`);
+      const verification = await this.createVerificationPaymentForCoach(accountId, userId);
+
+      return {
+        needsVerification: true,
+        verificationPaymentStatus: 'pending',
+        status: 'pending',
+        verificationOrderCode: String(verification.orderCode),
+        verificationUrl: verification.verificationUrl,
+        verificationQrCode: verification.verificationQrCode,
+        qrCodeUrl: verification.verificationQrCode,
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
+        throw error;
+      }
+      this.logger.error('Error getting verification status for coach', error);
+      throw new InternalServerErrorException('Failed to get verification status');
+    }
+  }
+
+  /**
+   * Create verification payment for coach bank account
+   */
+  private async createVerificationPaymentForCoach(
+    bankAccountId: string,
+    userId: string,
+  ): Promise<{
+    verificationUrl: string;
+    verificationQrCode: string;
+    orderCode: number;
+  }> {
+    try {
+      const bankAccount = await this.bankAccountModel.findById(bankAccountId).exec();
+      if (!bankAccount) {
+        throw new NotFoundException('Bank account not found');
+      }
+
+      const orderCode = generatePayOSOrderCode();
+      const verificationAmount = bankAccount.verificationAmount || 10000;
+
+      const frontendUrl = this.configService.get<string>('app.frontendUrl');
+      if (!frontendUrl) {
+        this.logger.error('app.frontendUrl is not configured.');
+        throw new InternalServerErrorException('Frontend URL is not configured');
+      }
+
+      // ✅ FIX: Update bank account with verification order code FIRST
+      // This ensures the webhook can find the bank account by verificationOrderCode
+      // even if it arrives very quickly after payment creation
+      bankAccount.verificationOrderCode = String(orderCode);
+      bankAccount.verificationPaymentStatus = 'pending';
+      bankAccount.verificationAmount = verificationAmount;
+      await bankAccount.save();
+
+      this.logger.log(
+        `Updated bank account ${bankAccountId} with verificationOrderCode=${orderCode} before creating PayOS link`,
+      );
+
+      // Create transaction record
+      try {
+        const verificationTransaction = new this.transactionModel({
+          booking: undefined,
+          user: new Types.ObjectId(userId),
+          amount: verificationAmount,
+          direction: 'in',
+          method: PaymentMethod.PAYOS,
+          type: TransactionType.FEE,
+          status: TransactionStatus.PENDING,
+          externalTransactionId: String(orderCode),
+          notes: 'Coach bank account verification fee',
+          metadata: {
+            bankAccountId: (bankAccount._id as Types.ObjectId).toString(),
+            verificationType: 'COACH_BANK_ACCOUNT_VERIFICATION',
+            verificationAmount,
+          },
+        });
+
+        await verificationTransaction.save();
+        this.logger.log(
+          `Created coach bank account verification fee transaction for bank account ${bankAccountId} (orderCode=${orderCode})`,
+        );
+      } catch (txError) {
+        this.logger.error(
+          `Failed to create verification fee transaction for coach bank account ${bankAccountId}:`,
+          txError,
+        );
+        throw new InternalServerErrorException('Failed to initialize verification transaction');
+      }
+
+      // Create PayOS payment link
+      const paymentLink = await this.payosService.createPaymentUrl({
+        orderCode,
+        orderId: `coach-bank-verify-${bankAccountId}`,
+        amount: verificationAmount,
+        description: 'BANKACCVERIFY',
+        items: [
+          {
+            name: 'Coach bank account verification fee',
+            quantity: 1,
+            price: verificationAmount,
+          },
+        ],
+        returnUrl: `${frontendUrl}/coach-wallet`,
+        cancelUrl: `${frontendUrl}/coach-wallet`,
+      });
+
+      // Update bank account with PayOS payment link URLs
+      bankAccount.verificationUrl = paymentLink.checkoutUrl;
+      bankAccount.verificationQrCode = paymentLink.qrCodeUrl || '';
+      await bankAccount.save();
+
+      this.logger.log(
+        `Created verification payment for coach bank account ${bankAccountId}: orderCode=${orderCode}`,
+      );
+
+      return {
+        verificationUrl: paymentLink.checkoutUrl,
+        verificationQrCode: paymentLink.qrCodeUrl || '',
+        orderCode,
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error('Error creating verification payment for coach', error);
+      throw new InternalServerErrorException('Failed to create verification payment');
+    }
+  }
+
+  /**
+   * Map bank account entity to DTO
+   */
+  private mapToBankAccountDto(account: BankAccount): BankAccountResponseDto {
+    const needsVerification =
+      account.status === BankAccountStatus.PENDING &&
+      account.verificationPaymentStatus !== 'paid';
+
+    return {
+      id: (account._id as Types.ObjectId).toString(),
+      fieldOwner: (account.coach as Types.ObjectId)?.toString() || '', // Using coach instead of fieldOwner
+      bankCode: account.bankCode,
+      bankName: account.bankName,
+      accountNumber: account.accountNumber,
+      accountName: account.accountName,
+      branch: account.branch,
+      verificationDocument: account.verificationDocument,
+      status: account.status,
+      isDefault: account.isDefault,
+      accountNameFromPayOS: account.accountNameFromPayOS,
+      isValidatedByPayOS: account.isValidatedByPayOS,
+      verifiedBy: account.verifiedBy?._id?.toString() || account.verifiedBy?.toString(),
+      notes: account.notes,
+      rejectionReason: account.rejectionReason,
+      verifiedAt: account.verifiedAt,
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+      needsVerification,
+      verificationPaymentStatus: account.verificationPaymentStatus,
+      verificationOrderCode: account.verificationOrderCode,
+      verificationUrl: account.verificationUrl,
+      verificationQrCode: account.verificationQrCode,
     };
   }
 }

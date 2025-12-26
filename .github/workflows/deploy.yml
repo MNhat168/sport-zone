@@ -1,0 +1,98 @@
+name: Deploy Backend to Lightsail
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'Dockerfile'
+      - '.github/workflows/deploy.yml'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Lightsail via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USERNAME }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            # Login to GHCR
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # Pull the latest image
+            docker pull ghcr.io/${{ github.repository }}:latest
+            
+            # Stop and remove existing container if running
+            docker stop sport-zone-backend || true
+            docker rm sport-zone-backend || true
+            
+            # Create .env.prod file if secret exists
+            if [ ! -z "${{ secrets.ENV_FILE }}" ]; then
+              echo "${{ secrets.ENV_FILE }}" > .env.prod
+            fi
+
+            # Run the new container
+            # Using --network host or mapping ports. Assuming port 3000.
+            # Make sure .env.prod is passed if it exists
+            if [ -f .env.prod ]; then
+              docker run -d \
+                --name sport-zone-backend \
+                --restart unless-stopped \
+                -p 3000:3000 \
+                --env-file .env.prod \
+                ghcr.io/${{ github.repository }}:latest
+            else
+              docker run -d \
+                --name sport-zone-backend \
+                --restart unless-stopped \
+                -p 3000:3000 \
+                ghcr.io/${{ github.repository }}:latest
+            fi
+            
+            # Cleanup unused images
+            docker image prune -f
