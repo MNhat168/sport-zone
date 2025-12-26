@@ -62,7 +62,7 @@ export class EmailService {
 	}
 
 	/**
-	 * Gửi email yêu cầu thanh toán cho booking (sau khi chủ sân accept ghi chú)
+	 * Gửi email yêu cầu thanh toán cho booking sân/coach (chuyển khoản hoặc các phương thức khác)
 	 */
 	async sendBookingPaymentRequest(payload: {
 		to: string;
@@ -72,8 +72,8 @@ export class EmailService {
 		pricing: { totalFormatted: string };
 		paymentLink: string;
 		paymentMethod?: PaymentMethod | string;
-		expiresAt?: string; // formatted datetime string
-		expiresInMinutes?: number; // minutes until expiration
+		expiresAt?: string;
+		expiresInMinutes?: number;
 	}) {
 		let methodLabel = 'Thanh toán trực tuyến';
 		if (payload.paymentMethod !== undefined) {
@@ -83,6 +83,7 @@ export class EmailService {
 				methodLabel = payload.paymentMethod;
 			}
 		}
+
 		await this.sendMail({
 			to: payload.to,
 			subject: 'Yêu cầu thanh toán đặt sân - SportZone',
@@ -94,6 +95,36 @@ export class EmailService {
 				booking: payload.booking,
 				pricing: payload.pricing,
 				payment: { methodLabel, link: payload.paymentLink, expiresAt: payload.expiresAt, expiresInMinutes: payload.expiresInMinutes },
+			},
+		});
+	}
+
+	/**
+	 * Gửi email yêu cầu thanh toán cho booking sân + HLV (field_coach) qua PayOS
+	 * Được gửi sau khi HLV accept booking
+	 */
+	async sendFieldCoachPaymentRequest(payload: {
+		to: string;
+		field: { name: string; address?: string };
+		coach: { name: string };
+		customer: { fullName: string };
+		booking: { date: string; startTime: string; endTime: string };
+		pricing: { totalFormatted: string };
+		paymentLink: string;
+		expiresAt?: string;
+		expiresInMinutes?: number;
+	}) {
+		await this.sendMail({
+			to: payload.to,
+			subject: 'HLV đã chấp nhận - Thanh toán qua PayOS - SportZone',
+			template: 'field-coach-payment-request.hbs',
+			context: {
+				field: payload.field,
+				coach: payload.coach,
+				customer: payload.customer,
+				booking: payload.booking,
+				pricing: payload.pricing,
+				payment: { link: payload.paymentLink, expiresAt: payload.expiresAt, expiresInMinutes: payload.expiresInMinutes },
 			},
 		});
 	}
