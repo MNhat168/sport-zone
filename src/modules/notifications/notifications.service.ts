@@ -89,4 +89,8 @@ export class NotificationsService {
     }
     return notification;
   }
+
+  async findOne(condition: any): Promise<Notification | null> {
+    return this.notificationRepository.findOneByCondition(condition);
+  }
 }

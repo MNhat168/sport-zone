@@ -68,7 +68,7 @@ export class BookingsController {
    * Helper method to extract user ID from JWT payload
    */
   private getUserId(req: any): string {
-    const userId = req.user?.userId || req.user?._id || req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       throw new BadRequestException('User ID not found in request');
     }
@@ -182,7 +182,7 @@ export class BookingsController {
     @Body() bookingData: CreateFieldBookingV2Dto,
   ): Promise<Booking> {
     // ✅ Optional authentication - get userId if user is logged in
-    const userId = req.user?.userId || req.user?._id || req.user?.id || null;
+    const userId = req.user?.userId || null;
 
     // ✅ Validate guest info if not authenticated
     if (!userId && !bookingData.guestEmail) {
@@ -223,7 +223,7 @@ export class BookingsController {
     @UploadedFile() paymentProof?: Express.Multer.File,
   ): Promise<Booking> {
     // ✅ Optional authentication - get userId if user is logged in
-    const userId = req.user?.userId || req.user?._id || req.user?.id || null;
+    const userId = req.user?.userId || null;
 
     // ✅ Validate guest info if not authenticated
     if (!userId && !bookingData.guestEmail) {
@@ -337,7 +337,7 @@ export class BookingsController {
     @Request() req: any,
     @Param('bookingId') bookingId: string,
   ) {
-    const userId = req.user?.userId || req.user?._id || req.user?.id || null;
+    const userId = req.user?.userId || null;
     return await this.bookingsService.createPayOSPaymentForBooking(userId, bookingId);
   }
 
@@ -372,7 +372,7 @@ export class BookingsController {
     @UploadedFile() paymentProof?: Express.Multer.File,
   ): Promise<Booking> {
     // ✅ Optional authentication - get userId if user is logged in
-    const userId = req.user?.userId || req.user?._id || req.user?.id || null;
+    const userId = req.user?.userId || null;
 
     // ✅ Validate guest info if not authenticated
     if (!userId && !bookingData.guestEmail) {
@@ -430,7 +430,7 @@ export class BookingsController {
     @Body() bookingData: CreateCoachBookingV2Dto,
   ): Promise<Booking> {
     // ✅ Optional authentication - get userId if user is logged in
-    const userId = req.user?.userId || req.user?._id || req.user?.id || null;
+    const userId = req.user?.userId || null;
 
     // ✅ Validate guest info if not authenticated
     if (!userId && !bookingData.guestEmail) {
@@ -451,7 +451,7 @@ export class BookingsController {
     @Request() req: any,
     @Body() bookingData: CreateCombinedBookingDto,
   ): Promise<Booking> {
-    const userId = req.user?.userId || req.user?._id || req.user?.id || null;
+    const userId = req.user?.userId || null;
     return await this.fieldBookingService.createCombinedBooking(userId, bookingData);
   }
 
@@ -797,6 +797,50 @@ export class BookingsController {
   ): Promise<BookingUpcomingDto | null> {
     const userId = this.getUserId(req);
     return await this.bookingsService.getUpcomingBooking(userId);
+  }
+
+  /**
+   * Get booking by ID (public endpoint for payment status polling)
+   * Used by frontend to check booking status during payment
+   */
+  @Get('bookings/:id')
+  @ApiOperation({
+    summary: 'Get booking by ID',
+    description: 'Retrieve booking details by ID. Used for payment status polling.'
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Booking ID',
+    example: '507f1f77bcf86cd799439011'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Booking details',
+    type: Booking
+  })
+  @ApiResponse({ status: 404, description: 'Booking not found' })
+  async getBookingById(@Param('id') id: string): Promise<Booking> {
+    // Validate booking ID format
+    if (!id || id.trim() === '' || id === 'undefined' || id === 'null') {
+      throw new BadRequestException('Invalid booking ID');
+    }
+
+    if (!/^[0-9a-fA-F]{24}$/.test(id)) {
+      throw new BadRequestException('Invalid booking ID format');
+    }
+
+    const booking = await this.bookingModel
+      .findById(id)
+      .populate('field', 'name address')
+      .populate('court', 'name')
+      .populate('user', 'email fullName')
+      .exec();
+
+    if (!booking) {
+      throw new NotFoundException(`Booking ${id} not found`);
+    }
+
+    return booking;
   }
 
   /**

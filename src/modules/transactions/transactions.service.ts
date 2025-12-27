@@ -239,6 +239,36 @@ export class TransactionsService {
   }
 
   /**
+   * Get latest successful transaction for a booking
+   * Replaces direct access to booking.transaction field
+   */
+  async getLatestSuccessfulTransaction(bookingId: string): Promise<Transaction | null> {
+    return this.transactionModel
+      .findOne({
+        booking: new Types.ObjectId(bookingId),
+        type: TransactionType.PAYMENT,
+        status: TransactionStatus.SUCCEEDED
+      })
+      .sort({ createdAt: -1 })
+      .populate('user', 'fullName email')
+      .exec();
+  }
+
+  /**
+   * Get all transactions for a booking (payment, refunds, etc.)
+   * Useful for getting complete transaction history
+   */
+  async getBookingTransactions(bookingId: string): Promise<Transaction[]> {
+    return this.transactionModel
+      .find({
+        booking: new Types.ObjectId(bookingId)
+      })
+      .sort({ createdAt: -1 })
+      .populate('user', 'fullName email')
+      .exec();
+  }
+
+  /**
    * Lấy transaction theo ID
    */
   /**

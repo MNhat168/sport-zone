@@ -12,7 +12,7 @@ export class CreateFieldBookingLazyDto {
    * ID của sân thể thao
    * @example "507f1f77bcf86cd799439011"
    */
-  @ApiProperty({ 
+  @ApiProperty({
     example: '507f1f77bcf86cd799439011',
     description: 'ID của sân thể thao'
   })
@@ -34,7 +34,7 @@ export class CreateFieldBookingLazyDto {
    * Ngày đặt sân (YYYY-MM-DD)
    * @example "2025-10-15"
    */
-  @ApiProperty({ 
+  @ApiProperty({
     example: '2025-10-15',
     description: 'Ngày đặt sân (YYYY-MM-DD)'
   })
@@ -45,7 +45,7 @@ export class CreateFieldBookingLazyDto {
    * Thời gian bắt đầu (HH:MM)
    * @example "09:00"
    */
-  @ApiProperty({ 
+  @ApiProperty({
     example: '09:00',
     description: 'Thời gian bắt đầu (HH:MM)'
   })
@@ -56,7 +56,7 @@ export class CreateFieldBookingLazyDto {
    * Thời gian kết thúc (HH:MM)
    * @example "11:00"
    */
-  @ApiProperty({ 
+  @ApiProperty({
     example: '11:00',
     description: 'Thời gian kết thúc (HH:MM)'
   })
@@ -66,7 +66,7 @@ export class CreateFieldBookingLazyDto {
   /**
    * Danh sách tiện ích được chọn (tùy chọn)
    */
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     type: [String],
     description: 'Danh sách ID tiện ích được chọn'
   })
@@ -79,10 +79,10 @@ export class CreateFieldBookingLazyDto {
    * Phương thức thanh toán
    * @example 1
    */
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     enum: PaymentMethod,
-    example: PaymentMethod.CASH,
-    description: 'Phương thức thanh toán: 1=cash, 2=ebanking, 3=credit_card, 4=debit_card, 5=momo, 6=zalopay, 7=vnpay, 8=bank_transfer, 9=qr_code'
+    example: PaymentMethod.BANK_TRANSFER,
+    description: 'Phương thức thanh toán: 1=cash, 2=ebanking, 3=credit_card, 4=debit_card, 5=momo, 6=zalopay, 8=bank_transfer, 9=qr_code'
   })
   @IsOptional()
   @IsInt()
@@ -93,7 +93,7 @@ export class CreateFieldBookingLazyDto {
    * Ghi chú thanh toán (tùy chọn)
    * @example "Chuyển khoản qua Techcombank - STK: 1234567890"
    */
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'Ghi chú về thanh toán (số tài khoản, mã giao dịch, etc.)'
   })
   @IsOptional()
@@ -119,7 +119,7 @@ export class FieldAvailabilityQueryDto {
    * Ngày bắt đầu query (YYYY-MM-DD)
    * @example "2025-10-01"
    */
-  @ApiProperty({ 
+  @ApiProperty({
     example: '2025-10-01',
     description: 'Ngày bắt đầu query (YYYY-MM-DD)'
   })
@@ -142,7 +142,7 @@ export class FieldAvailabilityQueryDto {
    * Ngày kết thúc query (YYYY-MM-DD)
    * @example "2025-10-31"
    */
-  @ApiProperty({ 
+  @ApiProperty({
     example: '2025-10-31',
     description: 'Ngày kết thúc query (YYYY-MM-DD)'
   })
@@ -158,7 +158,7 @@ export class MarkHolidayDto {
    * Lý do đánh dấu ngày đặc biệt
    * @example "Bảo trì hệ thống chiếu sáng"
    */
-  @ApiProperty({ 
+  @ApiProperty({
     example: 'Bảo trì hệ thống chiếu sáng',
     description: 'Lý do đánh dấu ngày đặc biệt'
   })

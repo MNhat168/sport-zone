@@ -102,10 +102,6 @@ export class OwnerBookingService {
                 path: 'court',
                 select: 'name courtNumber',
             })
-            .populate({
-                path: 'transaction',
-                select: 'status paymentProofImageUrl paymentProofStatus paymentProofRejectionReason',
-            })
             .lean();
         if (!booking) throw new NotFoundException('Booking not found');
 
@@ -113,6 +109,18 @@ export class OwnerBookingService {
         const ownerProfile = await this.fieldOwnerProfileModel.findOne({ user: new Types.ObjectId(ownerUserId) }).lean();
         const ownerMatches = (field.owner?.toString?.() === ownerUserId) || (!!ownerProfile && field.owner?.toString?.() === ownerProfile._id.toString());
         if (!ownerMatches) throw new BadRequestException('Not authorized to view this booking');
+
+        // ✅ Get transaction using TransactionsService instead of populate
+        const transaction = await this.transactionsService.getPaymentByBookingId(bookingId);
+        if (transaction) {
+            (booking as any).transaction = {
+                status: transaction.status,
+                paymentProofImageUrl: transaction.paymentProofImageUrl,
+                paymentProofStatus: transaction.paymentProofStatus,
+                paymentProofRejectionReason: transaction.paymentProofRejectionReason,
+            };
+        }
+
         return booking;
     }
 
@@ -139,7 +147,8 @@ export class OwnerBookingService {
 
         // Send payment link if method is online (PayOS)
         let paymentLink: string | undefined;
-        const transaction = booking.transaction ? await this.transactionsService.getPaymentById((booking.transaction as any).toString()) : await this.transactionsService.getPaymentByBookingId((booking._id as any).toString());
+        // ✅ Use TransactionsService instead of booking.transaction
+        const transaction = await this.transactionsService.getPaymentByBookingId((booking._id as any).toString());
 
         const amountTotal = (booking as any).bookingAmount !== undefined && (booking as any).platformFee !== undefined
             ? (booking as any).bookingAmount + (booking as any).platformFee
@@ -329,15 +338,18 @@ export class OwnerBookingService {
                     throw new BadRequestException('You do not have permission to verify payment proof for this booking');
                 }
 
-                // Get transaction directly using transactionModel
-                if (!booking.transaction) {
-                    throw new BadRequestException('Booking does not have an associated transaction');
-                }
-
+                // ✅ Get transaction using TransactionsService query instead of booking.transaction
                 const transaction = await this.transactionModel
-                    .findById(booking.transaction)
+                    .findOne({
+                        booking: new Types.ObjectId(bookingId),
+                        type: 'payment'
+                    })
                     .session(session)
                     .exec();
+
+                if (!transaction) {
+                    throw new BadRequestException('Booking does not have an associated transaction');
+                }
 
                 if (!transaction) {
                     throw new BadRequestException('Transaction not found');
@@ -465,15 +477,18 @@ export class OwnerBookingService {
                     throw new BadRequestException('You do not have permission to verify payment proof for this booking');
                 }
 
-                // Get transaction directly using transactionModel
-                if (!booking.transaction) {
-                    throw new BadRequestException('Booking does not have an associated transaction');
-                }
-
+                // ✅ Get transaction using TransactionsService query instead of booking.transaction
                 const transaction = await this.transactionModel
-                    .findById(booking.transaction)
+                    .findOne({
+                        booking: new Types.ObjectId(bookingId),
+                        type: 'payment'
+                    })
                     .session(session)
                     .exec();
+
+                if (!transaction) {
+                    throw new BadRequestException('Booking does not have an associated transaction');
+                }
 
                 if (!transaction) {
                     throw new BadRequestException('Transaction not found');

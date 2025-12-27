@@ -1,5 +1,5 @@
 import { IsString, IsNumber, IsArray, IsBoolean, IsOptional, IsEnum, ValidateNested, IsPositive, Min, Max, IsIn } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { SportType } from 'src/common/enums/sport-type.enum';
 
@@ -177,6 +177,9 @@ export class FieldsDto {
 /**
  * DTO cho việc tạo sân mới
  */
+/**
+ * DTO cho việc tạo sân mới - Hỗ trợ cả JSON và Multipart Form Data
+ */
 export class CreateFieldDto {
     @ApiProperty({ example: 'Sân bóng Phú Nhuận', description: 'Tên sân' })
     @IsString()
@@ -191,97 +194,99 @@ export class CreateFieldDto {
     description: string;
 
     @ApiProperty({ type: LocationDto, description: 'Địa điểm của sân (địa chỉ + toạ độ)' })
+    @Transform(({ value }) => typeof value === 'string' ? JSON.parse(value) : value)
     @ValidateNested()
     @Type(() => LocationDto)
     location: LocationDto;
 
     @ApiPropertyOptional({
         type: [String],
-        example: ['https://example.com/field1.jpg', 'https://example.com/field2.jpg'],
-        description: 'Danh sách URL hình ảnh sân (optional - sẽ được upload nếu có files)'
+        example: ['https://example.com/field1.jpg'],
+        description: 'URL hình ảnh đã có (nếu có)'
     })
     @IsOptional()
+    @Transform(({ value }) => typeof value === 'string' ? JSON.parse(value) : value)
     @IsArray()
     @IsString({ each: true })
     images?: string[];
 
-    @ApiProperty({ type: [DayOperatingHoursDto], description: 'Giờ hoạt động của sân theo ngày' })
+    @ApiProperty({ type: [DayOperatingHoursDto], description: 'Giờ hoạt động' })
+    @Transform(({ value }) => typeof value === 'string' ? JSON.parse(value) : value)
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => DayOperatingHoursDto)
     operatingHours: DayOperatingHoursDto[];
 
     @ApiProperty({ example: 60, description: 'Thời lượng một slot (phút)', minimum: 30, maximum: 180 })
+    @Transform(({ value }) => typeof value === 'string' ? parseInt(value, 10) : value)
     @IsNumber()
     @Min(30)
     @Max(180)
     slotDuration: number;
 
-    @ApiProperty({ example: 1, description: 'Số slot tối thiểu có thể đặt', minimum: 1 })
+    @ApiProperty({ example: 1, description: 'Số slot tối thiểu', minimum: 1 })
+    @Transform(({ value }) => typeof value === 'string' ? parseInt(value, 10) : value)
     @IsNumber()
     @Min(1)
     minSlots: number;
 
-    @ApiProperty({ example: 4, description: 'Số slot tối đa có thể đặt', minimum: 1 })
+    @ApiProperty({ example: 4, description: 'Số slot tối đa', minimum: 1 })
+    @Transform(({ value }) => typeof value === 'string' ? parseInt(value, 10) : value)
     @IsNumber()
     @Min(1)
     maxSlots: number;
 
-    @ApiProperty({
-        type: [DayPriceRangeDto],
-        description: 'Khung giá theo thời gian và ngày',
-        example: [
-            { day: 'monday', start: '06:00', end: '10:00', multiplier: 1.0 },
-            { day: 'monday', start: '18:00', end: '22:00', multiplier: 1.5 }
-        ]
-    })
+    @ApiProperty({ type: [DayPriceRangeDto], description: 'Khung giá' })
+    @Transform(({ value }) => typeof value === 'string' ? JSON.parse(value) : value)
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => DayPriceRangeDto)
     priceRanges: DayPriceRangeDto[];
 
-    @ApiProperty({ example: 150000, description: 'Giá cơ bản mỗi slot (VND)', minimum: 1000 })
+    @ApiProperty({ example: 150000, description: 'Giá cơ bản', minimum: 1000 })
+    @Transform(({ value }) => typeof value === 'string' ? parseInt(value, 10) : value)
     @IsNumber()
     @IsPositive()
     basePrice: number;
 
-    @ApiPropertyOptional({
-        type: [FieldAmenityDto],
-        example: [
-            { amenityId: '507f1f77bcf86cd799439020', price: 150000 },
-            { amenityId: '507f1f77bcf86cd799439021', price: 50000 }
-        ],
-        description: 'Danh sách tiện ích với giá riêng cho sân này'
-    })
+    @ApiPropertyOptional({ type: [FieldAmenityDto], description: 'Tiện ích' })
     @IsOptional()
+    @Transform(({ value }) => typeof value === 'string' ? JSON.parse(value) : value)
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => FieldAmenityDto)
     amenities?: FieldAmenityDto[];
 
-    @ApiPropertyOptional({
-        example: 1,
-        description: 'Số lượng court sẽ được tạo tự động khi tạo sân (0-10, mặc định: 1)',
-        minimum: 0,
-        maximum: 10,
-        default: 1
-    })
+    @ApiPropertyOptional({ example: 1, description: 'Số lượng court', minimum: 0, maximum: 10, default: 1 })
     @IsOptional()
+    @Transform(({ value }) => typeof value === 'string' ? parseInt(value, 10) : value)
     @IsNumber()
     @Min(0)
     @Max(10)
     @Type(() => Number)
     numberOfCourts?: number;
+
+    @ApiPropertyOptional({
+        type: 'array',
+        items: { type: 'string', format: 'binary' },
+        description: 'File hình ảnh đính kèm (Multipart)'
+    })
+    files?: any[];
 }
 
 /**
- * DTO cho việc cập nhật thông tin sân
+ * DTO cho việc cập nhật thông tin sân - Hỗ trợ cả JSON và Multipart Form Data
  */
 export class UpdateFieldDto {
     @ApiPropertyOptional({ example: 'Tên sân được cập nhật', description: 'Tên sân' })
     @IsOptional()
     @IsString()
     name?: string;
+
+    @ApiPropertyOptional({ enum: SportType, example: SportType.FOOTBALL, description: 'Loại thể thao' })
+    @IsOptional()
+    @IsEnum(SportType)
+    sportType?: SportType;
 
     @ApiPropertyOptional({ example: 'Mô tả được cập nhật', description: 'Mô tả sân' })
     @IsOptional()
@@ -294,19 +299,22 @@ export class UpdateFieldDto {
         description: 'Danh sách URL hình ảnh mới'
     })
     @IsOptional()
+    @Transform(({ value }) => typeof value === 'string' ? JSON.parse(value) : value)
     @IsArray()
     @IsString({ each: true })
     images?: string[];
 
-    @ApiPropertyOptional({ type: [DayOperatingHoursDto], description: 'Giờ hoạt động mới theo ngày' })
+    @ApiPropertyOptional({ type: [DayOperatingHoursDto], description: 'Giờ hoạt động mới' })
     @IsOptional()
+    @Transform(({ value }) => typeof value === 'string' ? JSON.parse(value) : value)
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => DayOperatingHoursDto)
     operatingHours?: DayOperatingHoursDto[];
 
-    @ApiPropertyOptional({ example: 90, description: 'Thời lượng slot mới (phút)', minimum: 30, maximum: 180 })
+    @ApiPropertyOptional({ example: 90, description: 'Thời lượng slot mới', minimum: 30, maximum: 180 })
     @IsOptional()
+    @Transform(({ value }) => typeof value === 'string' ? parseInt(value, 10) : value)
     @IsNumber()
     @Min(30)
     @Max(180)
@@ -314,38 +322,36 @@ export class UpdateFieldDto {
 
     @ApiPropertyOptional({ example: 2, description: 'Số slot tối thiểu mới', minimum: 1 })
     @IsOptional()
+    @Transform(({ value }) => typeof value === 'string' ? parseInt(value, 10) : value)
     @IsNumber()
     @Min(1)
     minSlots?: number;
 
     @ApiPropertyOptional({ example: 6, description: 'Số slot tối đa mới', minimum: 1 })
     @IsOptional()
+    @Transform(({ value }) => typeof value === 'string' ? parseInt(value, 10) : value)
     @IsNumber()
     @Min(1)
     maxSlots?: number;
 
-    @ApiPropertyOptional({
-        type: [DayPriceRangeDto],
-        description: 'Khung giá mới theo thời gian và ngày',
-        example: [
-            { day: 'monday', start: '06:00', end: '12:00', multiplier: 1.0 },
-            { day: 'monday', start: '12:00', end: '22:00', multiplier: 1.3 }
-        ]
-    })
+    @ApiPropertyOptional({ type: [DayPriceRangeDto], description: 'Khung giá mới' })
     @IsOptional()
+    @Transform(({ value }) => typeof value === 'string' ? JSON.parse(value) : value)
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => DayPriceRangeDto)
     priceRanges?: DayPriceRangeDto[];
 
-    @ApiPropertyOptional({ example: 180000, description: 'Giá cơ bản mới (VND)', minimum: 1000 })
+    @ApiPropertyOptional({ example: 180000, description: 'Giá cơ bản mới', minimum: 1000 })
     @IsOptional()
+    @Transform(({ value }) => typeof value === 'string' ? parseInt(value, 10) : value)
     @IsNumber()
     @IsPositive()
     basePrice?: number;
 
     @ApiPropertyOptional({ example: true, description: 'Trạng thái hoạt động' })
     @IsOptional()
+    @Transform(({ value }) => value === 'true' ? true : value === 'false' ? false : value)
     @IsBoolean()
     isActive?: boolean;
 
@@ -354,230 +360,55 @@ export class UpdateFieldDto {
     @IsString()
     maintenanceNote?: string;
 
-    @ApiPropertyOptional({ example: '2025-10-20', description: 'Ngày kết thúc bảo trì (YYYY-MM-DD)' })
+    @ApiPropertyOptional({ example: '2025-10-20', description: 'Ngày kết thúc bảo trì' })
     @IsOptional()
+    @Type(() => Date)
     maintenanceUntil?: Date;
 
-    @ApiPropertyOptional({ type: LocationDto, description: 'Địa điểm mới của sân' })
+    @ApiPropertyOptional({ type: LocationDto, description: 'Địa điểm mới' })
     @IsOptional()
+    @Transform(({ value }) => typeof value === 'string' ? JSON.parse(value) : value)
     @ValidateNested()
     @Type(() => LocationDto)
     location?: LocationDto;
 
-    @ApiPropertyOptional({
-        type: [FieldAmenityDto],
-        example: [
-            { amenityId: '507f1f77bcf86cd799439020', price: 150000 },
-            { amenityId: '507f1f77bcf86cd799439021', price: 50000 }
-        ],
-        description: 'Danh sách tiện ích với giá riêng cho sân này'
-    })
+    @ApiPropertyOptional({ type: [FieldAmenityDto], description: 'Tiện ích mới' })
     @IsOptional()
+    @Transform(({ value }) => typeof value === 'string' ? JSON.parse(value) : value)
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => FieldAmenityDto)
     amenities?: FieldAmenityDto[];
 
-    @ApiPropertyOptional({
-        example: 1,
-        description: 'Số lượng court sẽ được cập nhật (0-10)',
-        minimum: 0,
-        maximum: 10
-    })
+    @ApiPropertyOptional({ example: 1, description: 'Số lượng court', minimum: 0, maximum: 10 })
     @IsOptional()
+    @Transform(({ value }) => typeof value === 'string' ? parseInt(value, 10) : value)
     @IsNumber()
     @Min(0)
     @Max(10)
     @Type(() => Number)
     numberOfCourts?: number;
-}
 
-/**
- * DTO cho việc tạo sân mới với hỗ trợ upload ảnh
- */
-export class CreateFieldWithFilesDto {
-    @ApiProperty({ example: 'Sân bóng Phú Nhuận', description: 'Tên sân' })
-    @IsString()
-    name: string;
-
-    @ApiProperty({ enum: SportType, example: SportType.FOOTBALL, description: 'Loại thể thao' })
-    @IsString()
-    sportType: string;
-
-    @ApiProperty({ example: 'Sân bóng đá 11 người, có đèn chiếu sáng', description: 'Mô tả sân' })
-    @IsString()
-    description: string;
-
-    @ApiProperty({
-        example: '{"address":"District 3, Ho Chi Minh City","geo":{"type":"Point","coordinates":[106.700981,10.776889]}}',
-        description: 'Địa điểm của sân (JSON string với address và coordinates)'
-    })
-    @IsString()
-    location: string;
-
-    @ApiProperty({
-        example: '[{"day":"monday","start":"06:00","end":"22:00","duration":60}]',
-        description: 'Giờ hoạt động theo ngày (JSON string)'
-    })
-    @IsString()
-    operatingHours: string;
-
-    @ApiProperty({ example: '60', description: 'Thời lượng một slot (phút)' })
-    @IsString()
-    slotDuration: string;
-
-    @ApiProperty({ example: '1', description: 'Số slot tối thiểu có thể đặt' })
-    @IsString()
-    minSlots: string;
-
-    @ApiProperty({ example: '4', description: 'Số slot tối đa có thể đặt' })
-    @IsString()
-    maxSlots: string;
-
-    @ApiProperty({
-        example: '[{"day":"monday","start":"06:00","end":"10:00","multiplier":1.0},{"day":"monday","start":"18:00","end":"22:00","multiplier":1.5}]',
-        description: 'Khung giá theo thời gian và ngày (JSON string)'
-    })
-    @IsString()
-    priceRanges: string;
-
-    @ApiProperty({ example: '150000', description: 'Giá cơ bản mỗi slot (VND)' })
-    @IsString()
-    basePrice: string;
-
-    @ApiPropertyOptional({
-        example: '[{"amenityId":"507f1f77bcf86cd799439020","price":150000},{"amenityId":"507f1f77bcf86cd799439021","price":50000}]',
-        description: 'Danh sách tiện ích với giá riêng cho sân này (JSON string)'
-    })
+    @ApiPropertyOptional({ description: 'URL hình ảnh giữ lại (Multipart flow)', type: [String] })
     @IsOptional()
-    @IsString()
-    amenities?: string;
+    @Transform(({ value }) => typeof value === 'string' ? JSON.parse(value) : value)
+    @IsArray()
+    @IsString({ each: true })
+    keptImages?: string[];
 
-    @ApiPropertyOptional({
-        example: '1',
-        description: 'Số lượng court sẽ được tạo tự động khi tạo sân (0-10, mặc định: 1)'
-    })
+    @ApiPropertyOptional({ description: 'Court IDs cần xóa (Multipart flow)', type: [String] })
     @IsOptional()
-    @IsString()
-    numberOfCourts?: string;
-
-    @ApiProperty({
-        type: 'array',
-        items: { type: 'string', format: 'binary' },
-        description: 'Danh sách hình ảnh sân (tối đa 10 ảnh)',
-        required: false
-    })
-    images?: Express.Multer.File[];
-}
-
-/**
- * DTO cho việc cập nhật sân với hỗ trợ upload ảnh
- */
-export class UpdateFieldWithFilesDto {
-    @ApiPropertyOptional({ example: 'Sân bóng Phú Nhuận', description: 'Tên sân' })
-    @IsOptional()
-    @IsString()
-    name?: string;
-
-    @ApiPropertyOptional({ enum: SportType, example: SportType.FOOTBALL, description: 'Loại thể thao' })
-    @IsOptional()
-    @IsString()
-    sportType?: string;
-
-    @ApiPropertyOptional({ example: 'Sân bóng đá 11 người, có đèn chiếu sáng', description: 'Mô tả sân' })
-    @IsOptional()
-    @IsString()
-    description?: string;
-
-    @ApiPropertyOptional({
-        example: '{"address":"District 3, Ho Chi Minh City","geo":{"type":"Point","coordinates":[106.700981,10.776889]}}',
-        description: 'Địa điểm của sân (JSON string với address và coordinates)'
-    })
-    @IsOptional()
-    @IsString()
-    location?: string;
-
-    @ApiPropertyOptional({
-        example: '[{"day":"monday","start":"06:00","end":"22:00","duration":60}]',
-        description: 'Giờ hoạt động theo ngày (JSON string)'
-    })
-    @IsOptional()
-    @IsString()
-    operatingHours?: string;
-
-    @ApiPropertyOptional({ example: '60', description: 'Thời lượng một slot (phút)' })
-    @IsOptional()
-    @IsString()
-    slotDuration?: string;
-
-    @ApiPropertyOptional({ example: '1', description: 'Số slot tối thiểu có thể đặt' })
-    @IsOptional()
-    @IsString()
-    minSlots?: string;
-
-    @ApiPropertyOptional({ example: '4', description: 'Số slot tối đa có thể đặt' })
-    @IsOptional()
-    @IsString()
-    maxSlots?: string;
-
-    @ApiPropertyOptional({
-        example: '[{"day":"monday","start":"06:00","end":"10:00","multiplier":1.0},{"day":"monday","start":"18:00","end":"22:00","multiplier":1.5}]',
-        description: 'Khung giá theo thời gian và ngày (JSON string)'
-    })
-    @IsOptional()
-    @IsString()
-    priceRanges?: string;
-
-    @ApiPropertyOptional({ example: '150000', description: 'Giá cơ bản mỗi slot (VND)' })
-    @IsOptional()
-    @IsString()
-    basePrice?: string;
-
-    @ApiPropertyOptional({
-        example: '[{"amenityId":"507f1f77bcf86cd799439020","price":150000},{"amenityId":"507f1f77bcf86cd799439021","price":50000}]',
-        description: 'Danh sách tiện ích với giá riêng cho sân này (JSON string)'
-    })
-    @IsOptional()
-    @IsString()
-    amenities?: string;
-
-    @ApiPropertyOptional({ example: true, description: 'Trạng thái hoạt động (string "true"/"false")' })
-    @IsOptional()
-    @IsString()
-    isActive?: string;
+    @Transform(({ value }) => typeof value === 'string' ? JSON.parse(value) : value)
+    @IsArray()
+    @IsString({ each: true })
+    courtsToDelete?: string[];
 
     @ApiPropertyOptional({
         type: 'array',
         items: { type: 'string', format: 'binary' },
-        description: 'Danh sách hình ảnh sân mới thêm vào (tối đa 10 ảnh)',
-        required: false
+        description: 'File hình ảnh mới đính kèm (Multipart)'
     })
-    images?: Express.Multer.File[];
-
-    @ApiPropertyOptional({
-        type: [String],
-        description: 'Danh sách URL hình ảnh cũ muốn giữ lại (JSON string or array of strings if supported by framework but here JSON string is safer for FormData)',
-        example: '["https://example.com/old1.jpg"]'
-    })
-    @IsOptional()
-    @IsString()
-    keptImages?: string; // Expecting JSON string of string[]
-
-    @ApiPropertyOptional({
-        example: '1',
-        description: 'Số lượng court sẽ được cập nhật (0-10)'
-    })
-    @IsOptional()
-    @IsString()
-    numberOfCourts?: string;
-
-    @ApiPropertyOptional({
-        example: '["507f1f77bcf86cd799439011","507f1f77bcf86cd799439012"]',
-        description: 'Danh sách court IDs cần xóa (JSON string)'
-    })
-    @IsOptional()
-    @IsString()
-    courtsToDelete?: string;
+    files?: any[];
 }
 
 /**

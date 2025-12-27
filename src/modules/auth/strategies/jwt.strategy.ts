@@ -13,7 +13,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           if (!req?.cookies) {
             return null;
           }
-          
+
           // Ưu tiên chọn cookie theo loại client
           // - Admin FE gửi header: X-Client-Type: admin
           // - FE user gửi header: X-Client-Type: web (hoặc không gửi)
@@ -23,7 +23,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           const token = isAdminClient
             ? req.cookies['access_token_admin'] || req.cookies['access_token']
             : req.cookies['access_token'] || req.cookies['access_token_admin'];
-          
+
           return token || null;
         },
         // Từ Authorization header (fallback cho Postman)
@@ -36,12 +36,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
-    return { 
-      _id: payload.userId,      // ✅ Thêm _id để tương thích
-      id: payload.userId,        // ✅ Thêm id để tương thích
-      userId: payload.userId,    // ✅ Giữ userId
-      email: payload.email, 
-      role: payload.role 
+    return {
+      userId: payload.userId,    // ✅ Strict standard
+      email: payload.email,
+      role: payload.role
     };
   }
 }

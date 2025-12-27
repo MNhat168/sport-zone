@@ -11,10 +11,7 @@ import {
   Schedule,
   ScheduleSchema,
 } from 'src/modules/schedules/entities/schedule.entity';
-import {
-  LessonType,
-  LessonTypeSchema,
-} from 'src/modules/lessontypes/entities/lesson-type.entity';
+
 import { BankAccount, BankAccountSchema } from '../field-owner/entities/bank-account.entity';
 import { CoachRegistrationRequest, CoachRegistrationRequestSchema } from './entities/coach-registration-request.entity';
 import { EmailService } from 'src/modules/email/email.service';
@@ -28,7 +25,7 @@ import { TransactionsModule } from '../transactions/transactions.module';
       { name: User.name, schema: UserSchema },
       { name: CoachProfile.name, schema: CoachProfileSchema },
       { name: Schedule.name, schema: ScheduleSchema },
-      { name: LessonType.name, schema: LessonTypeSchema },
+
       { name: BankAccount.name, schema: BankAccountSchema },
       { name: CoachRegistrationRequest.name, schema: CoachRegistrationRequestSchema },
       { name: Transaction.name, schema: TransactionSchema },

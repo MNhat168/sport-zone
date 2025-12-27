@@ -36,11 +36,9 @@ import { AwsS3Service } from '../../service/aws-s3.service';
 import { SubscriptionStatusGuard } from '../../common/guards/subscription-status.guard';
 import {
   CreateFieldDto,
-  CreateFieldWithFilesDto,
   FieldsDto,
   OwnerFieldsResponseDto,
   UpdateFieldDto,
-  UpdateFieldWithFilesDto,
 } from '../fields/dtos/fields.dto';
 import { UpdateFieldVerificationDto } from '../fields/dtos/update-field-verification.dto';
 import {
@@ -105,7 +103,7 @@ export class FieldOwnerController {
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
   ): Promise<OwnerFieldsResponseDto> {
-    const ownerId = req.user._id || req.user.id;
+    const ownerId = req.user.userId;
     return this.fieldOwnerService.findByOwner(ownerId, {
       name,
       sportType,
@@ -126,7 +124,7 @@ export class FieldOwnerController {
     if ((req.user?.role || '').toLowerCase() !== 'field_owner') {
       throw new ForbiddenException('Access denied. Field owner only.');
     }
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     return this.fieldOwnerService.createFieldOwnerProfile(userId, createDto);
   }
 
@@ -138,7 +136,7 @@ export class FieldOwnerController {
     if ((req.user?.role || '').toLowerCase() !== 'field_owner') {
       throw new ForbiddenException('Access denied. Field owner only.');
     }
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     const profile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(userId);
     if (!profile) {
       throw new BadRequestException('Field owner profile not found');
@@ -157,71 +155,44 @@ export class FieldOwnerController {
     if ((req.user?.role || '').toLowerCase() !== 'field_owner') {
       throw new ForbiddenException('Access denied. Field owner only.');
     }
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     return this.fieldOwnerService.updateFieldOwnerProfile(userId, updateDto);
   }
 
   @Post('fields')
+  @UseInterceptors(FilesInterceptor('images', 10))
   @UseGuards(AuthGuard('jwt'), SubscriptionStatusGuard)
   @ApiBearerAuth()
+  @ApiConsumes('application/json', 'multipart/form-data')
   @ApiOperation({ summary: 'Create new field (owner)' })
   async createField(
     @Request() req,
     @Body() createFieldDto: CreateFieldDto,
+    @UploadedFiles() files?: IFile[],
   ): Promise<FieldsDto> {
-    const userId = req.user._id || req.user.id || req.user.userId;
+    const userId = req.user.userId;
     const ownerId = await this.getOwnerProfileId(userId);
-    return this.fieldOwnerService.create(createFieldDto, ownerId);
+    return this.fieldOwnerService.create(createFieldDto, ownerId, files);
   }
 
-  @Post('fields/with-images')
-  @UseInterceptors(FilesInterceptor('images', 10))
-  @UseGuards(AuthGuard('jwt'), SubscriptionStatusGuard)
-  @ApiBearerAuth()
-  @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Create new field with images' })
-  async createFieldWithImages(
-    @Request() req,
-    @Body() createFieldDto: CreateFieldWithFilesDto,
-    @UploadedFiles() files: IFile[],
-  ): Promise<FieldsDto> {
-    const userId = req.user._id || req.user.id || req.user.userId;
-    const ownerId = await this.getOwnerProfileId(userId);
-    return this.fieldOwnerService.createWithFiles(createFieldDto, files, ownerId);
-  }
-
-  @Put('fields/:id')
-  @UseGuards(AuthGuard('jwt'), SubscriptionStatusGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update field info' })
-  async updateField(
-    @Request() req,
-    @Param('id') id: string,
-    @Body() updateFieldDto: UpdateFieldDto,
-  ): Promise<FieldsDto> {
-    const userId = req.user._id || req.user.id || req.user.userId;
-    const ownerId = await this.getOwnerProfileId(userId);
-    return this.fieldOwnerService.update(id, updateFieldDto, ownerId);
-  }
-
-  @Put('fields/:id/with-images')
+  @Patch('fields/:id')
   @UseInterceptors(FileFieldsInterceptor([
     { name: 'avatar', maxCount: 1 },
     { name: 'gallery', maxCount: 10 }
   ]))
   @UseGuards(AuthGuard('jwt'), SubscriptionStatusGuard)
   @ApiBearerAuth()
-  @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Update field with images (avatar + gallery)' })
-  async updateFieldWithImages(
+  @ApiConsumes('application/json', 'multipart/form-data')
+  @ApiOperation({ summary: 'Update field info' })
+  async updateField(
     @Request() req,
     @Param('id') id: string,
-    @Body() updateFieldDto: UpdateFieldWithFilesDto,
-    @UploadedFiles() files: { avatar?: IFile[], gallery?: IFile[] },
+    @Body() updateFieldDto: UpdateFieldDto,
+    @UploadedFiles() files?: { avatar?: IFile[], gallery?: IFile[] },
   ): Promise<FieldsDto> {
-    const userId = req.user._id || req.user.id || req.user.userId;
+    const userId = req.user.userId;
     const ownerId = await this.getOwnerProfileId(userId);
-    return this.fieldOwnerService.updateWithFiles(id, updateFieldDto, files, ownerId);
+    return this.fieldOwnerService.update(id, updateFieldDto, ownerId, files);
   }
 
   @Delete('fields/:id')
@@ -232,7 +203,7 @@ export class FieldOwnerController {
     @Request() req,
     @Param('id') id: string,
   ): Promise<{ success: boolean; message: string }> {
-    const userId = req.user._id || req.user.id || req.user.userId;
+    const userId = req.user.userId;
     const ownerId = await this.getOwnerProfileId(userId);
     return this.fieldOwnerService.delete(id, ownerId);
   }
@@ -251,7 +222,7 @@ export class FieldOwnerController {
       effectiveDate: string;
     },
   ) {
-    const userId = req.user._id || req.user.id || req.user.userId;
+    const userId = req.user.userId;
     const ownerId = await this.getOwnerProfileId(userId);
     const effectiveDate = new Date(body.effectiveDate);
     return this.fieldOwnerService.schedulePriceUpdate(
@@ -291,7 +262,7 @@ export class FieldOwnerController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get today bookings for owner' })
   async getTodayBookings(@Request() req: any) {
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     return this.fieldOwnerService.getTodayBookingsByOwner(userId);
   }
 
@@ -309,7 +280,7 @@ export class FieldOwnerController {
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
   ) {
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     return this.fieldOwnerService.getAllBookingsByOwner(userId, {
       fieldName,
       status,
@@ -337,7 +308,7 @@ export class FieldOwnerController {
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
   ) {
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     return this.fieldOwnerService.getAllBookingsByOwnerWithType(userId, {
       type,
       fieldName,
@@ -359,7 +330,7 @@ export class FieldOwnerController {
     @Param('id') fieldId: string,
     @Body() body: { amenities: Array<{ amenityId: string; price: number }> },
   ) {
-    const userId = req.user._id || req.user.id || req.user.userId;
+    const userId = req.user.userId;
     const ownerId = await this.getOwnerProfileId(userId);
     return this.fieldOwnerService.updateFieldAmenities(fieldId, body.amenities, ownerId);
   }
@@ -372,7 +343,7 @@ export class FieldOwnerController {
     @Request() req: any,
     @Body() dto: CreateFieldOwnerRegistrationDto,
   ): Promise<FieldOwnerRegistrationResponseDto> {
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     this.logger.log(`Creating registration request for user ${userId}`);
     this.logger.debug('Registration DTO:', JSON.stringify(dto, null, 2));
     try {
@@ -388,7 +359,7 @@ export class FieldOwnerController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get current registration request status' })
   async getMyRegistrationRequest(@Request() req: any) {
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     return this.fieldOwnerService.getMyRegistrationRequest(userId);
   }
 
@@ -441,7 +412,7 @@ export class FieldOwnerController {
     @Body() _dto: CreateEkycSessionDto,
   ): Promise<EkycSessionResponseDto> {
     try {
-      const userId = req.user?._id || req.user?.id;
+      const userId = req.user?.userId;
 
       if (!userId) {
         this.logger.error('User ID not found in request', {
@@ -501,7 +472,7 @@ export class FieldOwnerController {
     @Param('sessionId') sessionId: string,
     @Request() req: any,
   ): Promise<EkycStatusResponseDto> {
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
 
     // Get status from didit API (also updates local DB)
     const result = await this.ekycService.getEkycSessionStatus(sessionId);
@@ -524,7 +495,7 @@ export class FieldOwnerController {
     if ((req.user?.role || '').toLowerCase() !== 'field_owner') {
       throw new ForbiddenException('Access denied. Field owner only.');
     }
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     const profile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(userId);
     if (!profile) {
       throw new BadRequestException('Field owner profile not found');
@@ -540,7 +511,7 @@ export class FieldOwnerController {
     if ((req.user?.role || '').toLowerCase() !== 'field_owner') {
       throw new ForbiddenException('Access denied. Field owner only.');
     }
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     const profile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(userId);
     if (!profile) {
       throw new BadRequestException('Field owner profile not found');
@@ -562,7 +533,7 @@ export class FieldOwnerController {
     if ((req.user?.role || '').toLowerCase() !== 'field_owner') {
       throw new ForbiddenException('Access denied. Field owner only.');
     }
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     const profile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(userId);
     if (!profile) {
       throw new BadRequestException('Field owner profile not found');
@@ -579,7 +550,7 @@ export class FieldOwnerController {
     @Request() req: any,
     @Param('id') accountId: string,
   ) {
-    const profile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(req.user.id);
+    const profile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(req.user.userId);
     if (!profile) {
       throw new NotFoundException('Field owner profile not found');
     }
@@ -599,7 +570,7 @@ export class FieldOwnerController {
     if ((req.user?.role || '').toLowerCase() !== 'field_owner') {
       throw new ForbiddenException('Access denied. Field owner only.');
     }
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     const profile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(userId);
     if (!profile) {
       throw new BadRequestException('Field owner profile not found');
@@ -619,7 +590,7 @@ export class FieldOwnerController {
     if ((req.user?.role || '').toLowerCase() !== 'field_owner') {
       throw new ForbiddenException('Access denied. Field owner only.');
     }
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     const profile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(userId);
     if (!profile) {
       throw new BadRequestException('Field owner profile not found');
@@ -692,7 +663,7 @@ export class FieldOwnerController {
     @Param('id') requestId: string,
     @Body() dto: ApproveFieldOwnerRegistrationDto,
   ): Promise<FieldOwnerProfileDto> {
-    const adminId = req.user._id || req.user.id;
+    const adminId = req.user.userId;
     return this.fieldOwnerService.approveRegistrationRequest(requestId, adminId, dto);
   }
 
@@ -705,7 +676,7 @@ export class FieldOwnerController {
     @Param('id') requestId: string,
     @Body() dto: RejectFieldOwnerRegistrationDto,
   ): Promise<FieldOwnerRegistrationResponseDto> {
-    const adminId = req.user._id || req.user.id;
+    const adminId = req.user.userId;
     return this.fieldOwnerService.rejectRegistrationRequest(requestId, adminId, dto);
   }
 
@@ -718,7 +689,7 @@ export class FieldOwnerController {
     @Param('id') accountId: string,
     @Body() dto: UpdateBankAccountStatusDto,
   ): Promise<BankAccountResponseDto> {
-    const adminId = req.user._id || req.user.id;
+    const adminId = req.user.userId;
     return this.fieldOwnerService.updateBankAccountStatus(
       accountId,
       BankAccountStatus.VERIFIED,
@@ -736,7 +707,7 @@ export class FieldOwnerController {
     @Param('id') accountId: string,
     @Body() dto: UpdateBankAccountStatusDto,
   ): Promise<BankAccountResponseDto> {
-    const adminId = req.user._id || req.user.id;
+    const adminId = req.user.userId;
     return this.fieldOwnerService.updateBankAccountStatus(
       accountId,
       BankAccountStatus.REJECTED,

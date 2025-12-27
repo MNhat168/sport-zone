@@ -45,9 +45,6 @@ export class FieldsController {
     @Query('sortBy') sortBy?: string,
     @Query('sortOrder') sortOrder?: 'asc' | 'desc',
   ): Promise<FieldsDto[]> {
-    // Log received parameters for debugging
-    console.log('[FieldsController.findAll] Received params:', { sortBy, sortOrder, name, location, sportType });
-
     // Convert sportTypes to array if it's a string
     const sportTypesArray = sportTypes
       ? (Array.isArray(sportTypes) ? sportTypes : [sportTypes])

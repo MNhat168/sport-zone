@@ -24,8 +24,6 @@ import {
   FieldsDto,
   CreateFieldDto,
   UpdateFieldDto,
-  CreateFieldWithFilesDto,
-  UpdateFieldWithFilesDto,
   OwnerFieldsResponseDto,
 } from '../fields/dtos/fields.dto';
 import {
@@ -859,165 +857,46 @@ export class FieldOwnerService {
     }
   }
 
-  async create(createFieldDto: CreateFieldDto, ownerId: string): Promise<FieldsDto> {
+  async create(
+    createFieldDto: CreateFieldDto,
+    ownerId: string,
+    files?: IFile[],
+  ): Promise<FieldsDto> {
     try {
+      // 1. Handle Images
+      let imageUrls: string[] = createFieldDto.images || [];
+      if (files && files.length > 0) {
+        const uploadPromises = files.map((file) =>
+          this.awsS3Service.uploadImageFromBuffer(file.buffer, file.mimetype),
+        );
+        const uploadedUrls = await Promise.all(uploadPromises);
+        imageUrls = [...imageUrls, ...uploadedUrls];
+      }
+
+      // Enforce at least one image
+      if (imageUrls.length === 0) {
+        throw new BadRequestException('At least one image is required for the field.');
+      }
+
+      // 2. Validate Location
       const validatedLocation = this.validateAndNormalizeLocation(createFieldDto.location);
 
+      // 3. Process Amenities
       let amenities: Array<{ amenity: Types.ObjectId; price: number }> = [];
       if (createFieldDto.amenities && createFieldDto.amenities.length > 0) {
         amenities = createFieldDto.amenities.map((amenityDto) => {
           if (!Types.ObjectId.isValid(amenityDto.amenityId)) {
             throw new BadRequestException(`Invalid amenity ID format: ${amenityDto.amenityId}`);
           }
-          if (amenityDto.price < 0) {
-            throw new BadRequestException(`Price must be non-negative: ${amenityDto.price}`);
-          }
           return {
             amenity: new Types.ObjectId(amenityDto.amenityId),
-            price: amenityDto.price,
+            price: amenityDto.price || 0,
           };
         });
       }
 
-      const newField = new this.fieldModel({
-        owner: new Types.ObjectId(ownerId),
-        name: createFieldDto.name,
-        sportType: createFieldDto.sportType,
-        description: createFieldDto.description,
-        location: validatedLocation,
-        images: createFieldDto.images || [],
-        operatingHours: createFieldDto.operatingHours,
-        slotDuration: createFieldDto.slotDuration,
-        minSlots: createFieldDto.minSlots,
-        maxSlots: createFieldDto.maxSlots,
-        priceRanges: createFieldDto.priceRanges,
-        basePrice: createFieldDto.basePrice,
-        amenities,
-        isActive: true,
-        rating: 0,
-        totalReviews: 0,
-      });
-
-      const savedField = await newField.save();
-
-      // Create courts if numberOfCourts is specified and > 0
-      const numberOfCourts = createFieldDto.numberOfCourts ?? 1;
-      if (numberOfCourts > 0) {
-        try {
-          const fieldId = (savedField._id as Types.ObjectId).toString();
-          const fieldName = savedField.name;
-
-          // Create courts - they inherit pricing from Field
-          const courtPromises: Promise<any>[] = [];
-          for (let i = 1; i <= numberOfCourts; i++) {
-            const courtName = `Court ${i}`;
-            courtPromises.push(
-              this.courtModel.create({
-                field: savedField._id,
-                name: courtName,
-                courtNumber: i,
-                isActive: true,
-              })
-            );
-          }
-
-          await Promise.all(courtPromises);
-          this.logger.log(`Successfully created ${numberOfCourts} court(s) for field ${fieldId}`);
-        } catch (courtError) {
-          // Log error but don't fail the field creation
-          this.logger.error(`Failed to create courts for field ${savedField._id}:`, courtError);
-          // Field is already created, so we continue
-        }
-      }
-
-      return {
-        id: (savedField._id as Types.ObjectId).toString(),
-        owner: savedField.owner.toString(),
-        name: savedField.name,
-        sportType: savedField.sportType,
-        description: savedField.description,
-        location: savedField.location,
-        images: savedField.images,
-        operatingHours: savedField.operatingHours,
-        slotDuration: savedField.slotDuration,
-        minSlots: savedField.minSlots,
-        maxSlots: savedField.maxSlots,
-        priceRanges: savedField.priceRanges,
-        basePrice: savedField.basePrice,
-        isActive: savedField.isActive,
-        isAdminVerify: savedField.isAdminVerify ?? false,
-        maintenanceNote: savedField.maintenanceNote,
-        maintenanceUntil: savedField.maintenanceUntil,
-        rating: savedField.rating,
-        totalReviews: savedField.totalReviews,
-        createdAt: savedField.createdAt,
-        updatedAt: savedField.updatedAt,
-      };
-    } catch (error) {
-      this.logger.error('Error creating field', error);
-      throw new InternalServerErrorException('Failed to create field');
-    }
-  }
-
-  async createWithFiles(
-    createFieldDto: CreateFieldWithFilesDto,
-    files: IFile[],
-    ownerId: string,
-  ): Promise<FieldsDto> {
-    try {
-      let imageUrls: string[] = [];
-      if (files && files.length > 0) {
-        const uploadPromises = files.map((file) =>
-          this.awsS3Service.uploadImageFromBuffer(file.buffer, file.mimetype),
-        );
-        imageUrls = await Promise.all(uploadPromises);
-      }
-
-      const operatingHours = JSON.parse(createFieldDto.operatingHours);
-      let priceRanges = JSON.parse(createFieldDto.priceRanges);
-      const slotDuration = parseInt(createFieldDto.slotDuration);
-      const minSlots = parseInt(createFieldDto.minSlots);
-      const maxSlots = parseInt(createFieldDto.maxSlots);
-      const basePrice = parseInt(createFieldDto.basePrice);
-
-      let location;
-      try {
-        location = JSON.parse(createFieldDto.location);
-      } catch {
-        location = {
-          address: createFieldDto.location,
-          geo: {
-            type: 'Point',
-            coordinates: [0, 0],
-          },
-        };
-      }
-
-      const validatedLocation = this.validateAndNormalizeLocation(location);
-
-      let amenities: Array<{ amenity: Types.ObjectId; price: number }> = [];
-      if (createFieldDto.amenities) {
-        try {
-          const amenitiesArray = JSON.parse(createFieldDto.amenities);
-          if (Array.isArray(amenitiesArray) && amenitiesArray.length > 0) {
-            amenities = amenitiesArray.map((amenityDto) => {
-              if (!Types.ObjectId.isValid(amenityDto.amenityId)) {
-                throw new BadRequestException(`Invalid amenity ID format: ${amenityDto.amenityId}`);
-              }
-              if (amenityDto.price < 0) {
-                throw new BadRequestException(`Price must be non-negative: ${amenityDto.price}`);
-              }
-              return {
-                amenity: new Types.ObjectId(amenityDto.amenityId),
-                price: amenityDto.price,
-              };
-            });
-          }
-        } catch {
-          throw new BadRequestException('Invalid amenities JSON format');
-        }
-      }
-
+      // 4. Validate Operating Hours
+      const operatingHours = createFieldDto.operatingHours;
       if (!Array.isArray(operatingHours) || operatingHours.length === 0) {
         throw new BadRequestException('Invalid operating hours format - must be array of day objects');
       }
@@ -1034,6 +913,8 @@ export class FieldOwnerService {
         }
       }
 
+      // 5. Process Price Ranges
+      let priceRanges = createFieldDto.priceRanges || [];
       if (priceRanges && Array.isArray(priceRanges) && priceRanges.length > 0) {
         for (const range of priceRanges) {
           if (!validDays.includes(range.day)) {
@@ -1046,6 +927,7 @@ export class FieldOwnerService {
           }
         }
 
+        // Fill in missing days for price ranges if not provided
         for (const dayHours of operatingHours) {
           const dayRanges = priceRanges.filter((pr: any) => pr.day === dayHours.day);
           if (dayRanges.length === 0) {
@@ -1066,10 +948,7 @@ export class FieldOwnerService {
         }));
       }
 
-      if (isNaN(slotDuration) || isNaN(minSlots) || isNaN(maxSlots) || isNaN(basePrice)) {
-        throw new BadRequestException('Invalid numeric values');
-      }
-
+      // 6. Create Field
       const newField = new this.fieldModel({
         owner: new Types.ObjectId(ownerId),
         name: createFieldDto.name,
@@ -1078,11 +957,11 @@ export class FieldOwnerService {
         location: validatedLocation,
         images: imageUrls,
         operatingHours,
-        slotDuration,
-        minSlots,
-        maxSlots,
+        slotDuration: createFieldDto.slotDuration,
+        minSlots: createFieldDto.minSlots,
+        maxSlots: createFieldDto.maxSlots,
         priceRanges,
-        basePrice,
+        basePrice: createFieldDto.basePrice,
         amenities,
         isActive: true,
         rating: 0,
@@ -1091,158 +970,77 @@ export class FieldOwnerService {
 
       const savedField = await newField.save();
 
-      // Create courts if numberOfCourts is specified and > 0
-      const numberOfCourts = createFieldDto.numberOfCourts ? parseInt(createFieldDto.numberOfCourts) : 1;
+      // 7. Create Courts
+      const numberOfCourts = createFieldDto.numberOfCourts ?? 1;
       if (numberOfCourts > 0) {
         try {
-          const fieldId = (savedField._id as Types.ObjectId).toString();
-          const fieldName = savedField.name;
-
-          // Create courts - they inherit pricing from Field
           const courtPromises: Promise<any>[] = [];
           for (let i = 1; i <= numberOfCourts; i++) {
-            const courtName = `Court ${i}`;
             courtPromises.push(
               this.courtModel.create({
                 field: savedField._id,
-                name: courtName,
+                name: `Court ${i}`,
                 courtNumber: i,
                 isActive: true,
-              })
+              }),
             );
           }
-
           await Promise.all(courtPromises);
-          this.logger.log(`Successfully created ${numberOfCourts} court(s) for field ${fieldId}`);
+          this.logger.log(`Successfully created ${numberOfCourts} court(s) for field ${savedField._id}`);
         } catch (courtError) {
-          // Log error but don't fail the field creation
           this.logger.error(`Failed to create courts for field ${savedField._id}:`, courtError);
-          // Field is already created, so we continue
         }
       }
 
-      return {
-        id: (savedField._id as Types.ObjectId).toString(),
-        owner: savedField.owner.toString(),
-        name: savedField.name,
-        sportType: savedField.sportType,
-        description: savedField.description,
-        location: savedField.location,
-        images: savedField.images,
-        operatingHours: savedField.operatingHours,
-        slotDuration: savedField.slotDuration,
-        minSlots: savedField.minSlots,
-        maxSlots: savedField.maxSlots,
-        priceRanges: savedField.priceRanges,
-        basePrice: savedField.basePrice,
-        isActive: savedField.isActive,
-        isAdminVerify: savedField.isAdminVerify ?? false,
-        maintenanceNote: savedField.maintenanceNote,
-        maintenanceUntil: savedField.maintenanceUntil,
-        rating: savedField.rating,
-        totalReviews: savedField.totalReviews,
-        createdAt: savedField.createdAt,
-        updatedAt: savedField.updatedAt,
-      };
+      return this.mapToFieldsDto(savedField);
     } catch (error) {
-      this.logger.error('Error creating field with files', error);
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      throw new InternalServerErrorException('Failed to create field with images');
+      this.logger.error('Error creating field', error);
+      if (error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException('Failed to create field');
     }
   }
 
-  async update(fieldId: string, updateFieldDto: UpdateFieldDto, ownerId: string): Promise<FieldsDto> {
-    try {
-      const field = await this.fieldModel.findById(fieldId);
-
-      if (!field) {
-        throw new NotFoundException('Field not found');
-      }
-
-      if (field.owner.toString() !== ownerId) {
-        throw new UnauthorizedException('Only field owner can update field information');
-      }
-
-      const updateData: any = { ...updateFieldDto };
-      if (updateFieldDto.amenities) {
-        if (updateFieldDto.amenities.length > 0) {
-          const validAmenities = updateFieldDto.amenities.map((amenityDto) => {
-            if (!Types.ObjectId.isValid(amenityDto.amenityId)) {
-              throw new BadRequestException(`Invalid amenity ID format: ${amenityDto.amenityId}`);
-            }
-            if (amenityDto.price < 0) {
-              throw new BadRequestException(`Price must be non-negative: ${amenityDto.price}`);
-            }
-            return {
-              amenity: new Types.ObjectId(amenityDto.amenityId),
-              price: amenityDto.price,
-            };
-          });
-          updateData.amenities = validAmenities;
-        } else {
-          updateData.amenities = [];
-        }
-      }
-
-      // Handle court count update
-      if (updateFieldDto.numberOfCourts !== undefined) {
-        await this.syncCourts(fieldId, Number(updateFieldDto.numberOfCourts));
-      }
-
-      if (updateFieldDto.location) {
-        updateData.location = this.fieldsService.validateAndNormalizeLocation(
-          updateFieldDto.location,
-        );
-      }
-      const updatedField = await this.fieldModel.findByIdAndUpdate(
-        fieldId,
-        { $set: updateData },
-        { new: true },
-      );
-
-      if (!updatedField) {
-        throw new NotFoundException('Field not found');
-      }
-
-      return {
-        id: (updatedField._id as Types.ObjectId).toString(),
-        owner: updatedField.owner.toString(),
-        name: updatedField.name,
-        sportType: updatedField.sportType,
-        description: updatedField.description,
-        location: updatedField.location,
-        images: updatedField.images,
-        operatingHours: updatedField.operatingHours,
-        slotDuration: updatedField.slotDuration,
-        minSlots: updatedField.minSlots,
-        maxSlots: updatedField.maxSlots,
-        priceRanges: updatedField.priceRanges,
-        basePrice: updatedField.basePrice,
-        isActive: updatedField.isActive,
-        isAdminVerify: updatedField.isAdminVerify ?? false,
-        maintenanceNote: updatedField.maintenanceNote,
-        maintenanceUntil: updatedField.maintenanceUntil,
-        rating: updatedField.rating,
-        totalReviews: updatedField.totalReviews,
-        createdAt: updatedField.createdAt,
-        updatedAt: updatedField.updatedAt,
-      };
-    } catch (error) {
-      if (error instanceof NotFoundException || error instanceof UnauthorizedException) {
-        throw error;
-      }
-      this.logger.error('Error updating field', error);
-      throw new InternalServerErrorException('Failed to update field');
-    }
+  // Helper to map Field model to FieldsDto
+  private mapToFieldsDto(field: any): FieldsDto {
+    const price = this.priceFormatService.formatPrice(field.basePrice);
+    return {
+      id: field._id?.toString() || '',
+      owner: field.owner?.toString() || '',
+      name: field.name,
+      sportType: field.sportType,
+      description: field.description,
+      location: field.location,
+      images: field.images || [],
+      operatingHours: field.operatingHours,
+      slotDuration: field.slotDuration,
+      minSlots: field.minSlots,
+      maxSlots: field.maxSlots,
+      priceRanges: field.priceRanges,
+      basePrice: field.basePrice,
+      price,
+      isActive: field.isActive,
+      isAdminVerify: field.isAdminVerify ?? false,
+      maintenanceNote: field.maintenanceNote,
+      maintenanceUntil: field.maintenanceUntil,
+      rating: field.rating,
+      totalReviews: field.totalReviews,
+      createdAt: field.createdAt,
+      updatedAt: field.updatedAt,
+      amenities: Array.isArray(field.amenities)
+        ? field.amenities.map((a: any) => ({
+          amenityId: a.amenity?._id?.toString() || a.amenity?.toString(),
+          name: (a.amenity as any)?.name,
+          price: a.price || 0,
+        }))
+        : [],
+    };
   }
 
-  async updateWithFiles(
+  async update(
     fieldId: string,
-    updateDto: UpdateFieldWithFilesDto,
-    files: { avatar?: IFile[], gallery?: IFile[] },
+    updateFieldDto: UpdateFieldDto,
     ownerId: string,
+    files?: { avatar?: IFile[]; gallery?: IFile[] } | IFile[],
   ): Promise<FieldsDto> {
     try {
       const field = await this.fieldModel.findById(fieldId);
@@ -1255,209 +1053,116 @@ export class FieldOwnerService {
         throw new UnauthorizedException('Only field owner can update field information');
       }
 
-      // 1. Process new files
-      const newGalleryUrls: string[] = [];
-      let newAvatarUrl: string | null = null;
-
-      if (files.avatar && files.avatar.length > 0) {
-        newAvatarUrl = await this.awsS3Service.uploadACLImage(files.avatar[0]);
-      }
-
-      if (files.gallery && files.gallery.length > 0) {
-        for (const file of files.gallery) {
-          const url = await this.awsS3Service.uploadACLImage(file);
-          newGalleryUrls.push(url);
-        }
-      }
-
-      // 2. Process kept images
-      let keptImages: string[] = [];
-      if (updateDto.keptImages) {
-        try {
-          keptImages = JSON.parse(updateDto.keptImages);
-          if (!Array.isArray(keptImages)) {
-            keptImages = [];
-          }
-        } catch (e) {
-          this.logger.warn('Failed to parse keptImages', e);
-          keptImages = [];
-        }
-      }
-
-      let finalImages: string[] = [];
-      if (newAvatarUrl) {
-        finalImages = [newAvatarUrl, ...keptImages, ...newGalleryUrls];
-      } else {
-        finalImages = [...keptImages, ...newGalleryUrls];
-      }
-
       const updateData: any = {};
 
-      const hasFiles = (files.avatar && files.avatar.length > 0) || (files.gallery && files.gallery.length > 0);
-      if (hasFiles || updateDto.keptImages !== undefined) {
-        updateData.images = finalImages;
+      // 1. Handle Images
+      let finalImages: string[] = field.images || [];
+
+      // If keptImages is provided, it replaces the CURRENT images
+      if (updateFieldDto.keptImages !== undefined) {
+        finalImages = updateFieldDto.keptImages;
       }
 
-      // 3. Process other fields
-      if (updateDto.name) updateData.name = updateDto.name;
-      if (updateDto.sportType) updateData.sportType = updateDto.sportType;
-      if (updateDto.description) updateData.description = updateDto.description;
-      if (updateDto.basePrice) updateData.basePrice = Number(updateDto.basePrice);
-      if (updateDto.slotDuration) updateData.slotDuration = Number(updateDto.slotDuration);
-      if (updateDto.minSlots) updateData.minSlots = Number(updateDto.minSlots);
-      if (updateDto.maxSlots) updateData.maxSlots = Number(updateDto.maxSlots);
-      if (updateDto.isActive !== undefined) updateData.isActive = updateDto.isActive === 'true';
-
-      if (updateDto.location) {
-        try {
-          const locationObj = JSON.parse(updateDto.location);
-          updateData.location = this.validateAndNormalizeLocation(locationObj);
-        } catch (e) {
-          throw new BadRequestException('Invalid location format (JSON required)');
-        }
-      }
-
-      if (updateDto.operatingHours) {
-        try {
-          const oh = JSON.parse(updateDto.operatingHours);
-          if (Array.isArray(oh)) {
-            updateData.operatingHours = oh.map((h: any) => ({
-              ...h,
-              duration: Number(h.duration)
-            }));
+      const newImages: string[] = [];
+      if (files) {
+        if (Array.isArray(files)) {
+          // Simple array of files
+          const uploadPromises = files.map((file) =>
+            this.awsS3Service.uploadACLImage(file),
+          );
+          newImages.push(...(await Promise.all(uploadPromises)));
+        } else {
+          // Avatar and Gallery fields
+          if (files.avatar && files.avatar.length > 0) {
+            const avatarUrl = await this.awsS3Service.uploadACLImage(files.avatar[0]);
+            newImages.unshift(avatarUrl); // Avatar usually goes first
           }
-        } catch (e) {
-          throw new BadRequestException('Invalid operatingHours format');
-        }
-      }
-
-      if (updateDto.priceRanges) {
-        try {
-          const pr = JSON.parse(updateDto.priceRanges);
-          if (Array.isArray(pr)) {
-            updateData.priceRanges = pr.map((r: any) => ({
-              ...r,
-              multiplier: Number(r.multiplier)
-            }));
-          }
-        } catch (e) {
-          throw new BadRequestException('Invalid priceRanges format');
-        }
-      }
-
-      if (updateDto.amenities) {
-        try {
-          const am = JSON.parse(updateDto.amenities);
-          if (Array.isArray(am)) {
-            updateData.amenities = am.map((a: any) => ({
-              amenity: new Types.ObjectId(a.amenityId),
-              price: Number(a.price)
-            }));
-          }
-        } catch (e) {
-          throw new BadRequestException('Invalid amenities format');
-        }
-      }
-
-
-      // Handle specific courts deletion FIRST (before numberOfCourts)
-      // This ensures syncCourts gets the correct current count after deletions
-      if (updateDto.courtsToDelete) {
-        try {
-          const courtIds = JSON.parse(updateDto.courtsToDelete);
-          if (Array.isArray(courtIds) && courtIds.length > 0) {
-            const courtObjectIds = courtIds.map(id => new Types.ObjectId(id));
-
-            // Validate courts belong to this field
-            const courtsToDelete = await this.courtModel.find({
-              _id: { $in: courtObjectIds },
-              field: new Types.ObjectId(fieldId)
-            }).exec();
-
-            if (courtsToDelete.length !== courtIds.length) {
-              throw new BadRequestException('Một số court không thuộc sân này hoặc không tồn tại');
+          if (files.gallery && files.gallery.length > 0) {
+            for (const file of files.gallery) {
+              const url = await this.awsS3Service.uploadACLImage(file);
+              newImages.push(url);
             }
-
-            // Check for active bookings on these courts
-            const todayStart = new Date();
-            todayStart.setHours(0, 0, 0, 0);
-
-            const activeBookings = await this.bookingModel.findOne({
-              court: { $in: courtObjectIds },
-              status: { $in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] },
-              date: { $gte: todayStart }
-            }).exec();
-
-            if (activeBookings) {
-              const courtNumbers = courtsToDelete.map(c => c.courtNumber).join(', ');
-              throw new BadRequestException(
-                `Không thể xóa các sân có lịch đặt đang hoạt động. Vui lòng kiểm tra sân: ${courtNumbers}`
-              );
-            }
-
-            // Delete the courts
-            await this.courtModel.deleteMany({
-              _id: { $in: courtObjectIds }
-            });
-
-            this.logger.log(`Deleted ${courtsToDelete.length} courts from field ${fieldId}`);
           }
-        } catch (e) {
-          if (e instanceof BadRequestException) {
-            throw e;
-          }
-          this.logger.warn('Failed to parse courtsToDelete', e);
-          throw new BadRequestException('Invalid courtsToDelete format (JSON array required)');
         }
       }
 
-      // Handle court count update AFTER deletions
-      if (updateDto.numberOfCourts !== undefined) {
-        await this.syncCourts(fieldId, Number(updateDto.numberOfCourts));
+      // If we have new images or keptImages was explicitly provided, update the images array
+      if (newImages.length > 0 || updateFieldDto.keptImages !== undefined) {
+        updateData.images = [...newImages, ...finalImages];
       }
 
+      // 2. Process Basic Fields
+      const excludeFields = ['images', 'keptImages', 'courtsToDelete', 'amenities', 'location', 'numberOfCourts', 'files'];
+      for (const [key, value] of Object.entries(updateFieldDto)) {
+        if (!excludeFields.includes(key) && value !== undefined) {
+          updateData[key] = value;
+        }
+      }
 
-      const updatedField = await this.fieldModel.findByIdAndUpdate(
-        fieldId,
-        { $set: updateData },
-        { new: true },
-      );
+      // 3. Process Amenities
+      if (updateFieldDto.amenities) {
+        updateData.amenities = updateFieldDto.amenities.map((a) => ({
+          amenity: new Types.ObjectId(a.amenityId),
+          price: a.price || 0,
+        }));
+      }
+
+      // 4. Process Location
+      if (updateFieldDto.location) {
+        updateData.location = this.validateAndNormalizeLocation(updateFieldDto.location);
+      }
+
+      // 5. Handle Court Deletion and Sync
+      if (updateFieldDto.courtsToDelete && updateFieldDto.courtsToDelete.length > 0) {
+        const courtObjectIds = updateFieldDto.courtsToDelete.map(id => new Types.ObjectId(id));
+
+        // Validate courts belong to this field and check for bookings
+        const courtsToDelete = await this.courtModel.find({
+          _id: { $in: courtObjectIds },
+          field: new Types.ObjectId(fieldId)
+        }).exec();
+
+        if (courtsToDelete.length > 0) {
+          const todayStart = new Date();
+          todayStart.setHours(0, 0, 0, 0);
+
+          const activeBookings = await this.bookingModel.findOne({
+            court: { $in: courtObjectIds },
+            status: { $in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] },
+            date: { $gte: todayStart }
+          }).exec();
+
+          if (activeBookings) {
+            throw new BadRequestException('Không thể xóa các sân có lịch đặt đang hoạt động.');
+          }
+
+          await this.courtModel.deleteMany({ _id: { $in: courtObjectIds } });
+          this.logger.log(`Deleted specific courts: ${updateFieldDto.courtsToDelete.join(', ')}`);
+        }
+      }
+
+      if (updateFieldDto.numberOfCourts !== undefined) {
+        await this.syncCourts(fieldId, updateFieldDto.numberOfCourts);
+      }
+
+      const updatedField = await this.fieldModel
+        .findByIdAndUpdate(fieldId, { $set: updateData }, { new: true })
+        .populate('amenities.amenity')
+        .exec();
 
       if (!updatedField) {
-        throw new NotFoundException('Field not found');
+        throw new NotFoundException('Field not found after update');
       }
 
       this.fieldsService.clearCache(fieldId);
 
-      return {
-        id: (updatedField._id as Types.ObjectId).toString(),
-        owner: updatedField.owner.toString(),
-        name: updatedField.name,
-        sportType: updatedField.sportType,
-        description: updatedField.description,
-        location: updatedField.location,
-        images: updatedField.images,
-        operatingHours: updatedField.operatingHours,
-        slotDuration: updatedField.slotDuration,
-        minSlots: updatedField.minSlots,
-        maxSlots: updatedField.maxSlots,
-        priceRanges: updatedField.priceRanges,
-        basePrice: updatedField.basePrice,
-        isActive: updatedField.isActive,
-        isAdminVerify: updatedField.isAdminVerify ?? false,
-        maintenanceNote: updatedField.maintenanceNote,
-        maintenanceUntil: updatedField.maintenanceUntil,
-        rating: updatedField.rating,
-        totalReviews: updatedField.totalReviews,
-        createdAt: updatedField.createdAt,
-        updatedAt: updatedField.updatedAt,
-      };
+      return this.mapToFieldsDto(updatedField);
     } catch (error) {
+      this.logger.error('Error updating field', error);
       if (error instanceof NotFoundException || error instanceof UnauthorizedException || error instanceof BadRequestException) {
         throw error;
       }
-      this.logger.error('Error updating field with files', error);
-      throw new InternalServerErrorException('Failed to update field with files');
+      throw new InternalServerErrorException('Failed to update field');
     }
   }
 

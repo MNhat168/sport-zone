@@ -11,6 +11,7 @@ import { ServiceModule } from '../../service/service.module';
 import { FieldOwnerModule } from '../field-owner/field-owner.module';
 import { CoachProfile, CoachProfileSchema } from '../coaches/entities/coach-profile.entity';
 import { BookingsModule } from '../bookings/bookings.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -24,14 +25,15 @@ import { BookingsModule } from '../bookings/bookings.module';
     forwardRef(() => ServiceModule), // Import để dùng CleanupService
     forwardRef(() => FieldOwnerModule), // Import để dùng FieldOwnerService for bank account verification
     forwardRef(() => BookingsModule), // Import để dùng PaymentHandlerService
+    NotificationsModule, // Import để dùng NotificationsGateway for real-time payment updates
   ],
   controllers: [TransactionsController],
   providers: [
-    TransactionsService, 
+    TransactionsService,
     PayOSService,
   ],
   exports: [TransactionsService, PayOSService], // Export để các module khác sử dụng
 })
-export class TransactionsModule {}
+export class TransactionsModule { }
 
 

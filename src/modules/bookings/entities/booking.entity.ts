@@ -82,6 +82,11 @@ export class Booking extends BaseEntity {
   @Prop({ min: 0 })
   totalPrice?: number;
 
+  /**
+   * @deprecated Use TransactionsService.getPaymentByBookingId(bookingId) instead
+   * This bidirectional reference will be removed in future version
+   * Transaction.booking is the source of truth
+   */
   @Prop({ type: Types.ObjectId, ref: 'Transaction' })
   transaction?: Types.ObjectId;
 

@@ -1,4 +1,4 @@
-import { LessonTypesModule } from './modules/lessontypes/lesson-types.module';
+
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -31,7 +31,7 @@ import { CourtsModule } from './modules/courts/courts.module';
 import { BillingModule } from './modules/billing/billing.module';
 @Module({
   imports: [
-    LessonTypesModule,
+
     ConfigModule.forRoot({
       isGlobal: true, // ← cho phép dùng ở mọi module
       // Dùng .env.prod khi NODE_ENV=production, fallback về .env
@@ -47,39 +47,37 @@ import { BillingModule } from './modules/billing/billing.module';
       serverSelectionTimeoutMS: 30000, // Timeout khi chọn server (30s)
       heartbeatFrequencyMS: 10000, // Kiểm tra kết nối mỗi 10s
       maxIdleTimeMS: 30000, // Đóng connection idle sau 30s
-      
+
       // Retry settings
       retryWrites: true,
       retryReads: true,
-      
-      // Keep connection alive
-      keepAlive: true,
-      keepAliveInitialDelay: 30000,
-      
+
+
+
       connectionFactory: (connection) => {
         const logger = new Logger('MongoDB');
-        
+
         // Event handlers để xử lý connection errors và reconnection
         connection.on('connected', () => {
           logger.log('✅ MongoDB connected successfully');
         });
-        
+
         connection.on('error', (error) => {
           logger.error('❌ MongoDB connection error:', error);
         });
-        
+
         connection.on('disconnected', () => {
           logger.warn('⚠️ MongoDB disconnected. Attempting to reconnect...');
         });
-        
+
         connection.on('reconnected', () => {
           logger.log('✅ MongoDB reconnected successfully');
         });
-        
+
         connection.on('close', () => {
           logger.warn('⚠️ MongoDB connection closed');
         });
-        
+
         // Plugin để format JSON output
         connection.plugin((schema: any) => {
           schema.set('toJSON', {
@@ -91,7 +89,7 @@ import { BillingModule } from './modules/billing/billing.module';
             },
           });
         });
-        
+
         return connection;
       },
     }),

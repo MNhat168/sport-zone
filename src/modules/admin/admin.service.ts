@@ -421,16 +421,10 @@ export class AdminService {
         }
         if (method && method.length > 0) {
             const nameToNumber: Record<string, PaymentMethod> = {
-                cash: PaymentMethod.CASH,
-                ebanking: PaymentMethod.EBANKING,
-                credit_card: PaymentMethod.CREDIT_CARD,
-                debit_card: PaymentMethod.DEBIT_CARD,
-                momo: PaymentMethod.MOMO,
-                zalopay: PaymentMethod.ZALOPAY,
                 bank_transfer: PaymentMethod.BANK_TRANSFER,
-                qr_code: PaymentMethod.QR_CODE,
                 internal: PaymentMethod.INTERNAL,
                 payos: PaymentMethod.PAYOS,
+                wallet: PaymentMethod.WALLET
             };
             const methodNums = method
                 .map((m) => nameToNumber[m])

@@ -183,7 +183,8 @@ export class PaymentHandlerService implements OnModuleInit {
           $set: {
             paymentStatus: 'paid',
             ...(isCoach ? {} : { status: BookingStatus.CONFIRMED }),
-            transaction: new Types.ObjectId(event.paymentId)
+            // ✅ REMOVED: booking.transaction field (bidirectional reference cleanup)
+            // Use TransactionsService.getPaymentByBookingId() or getLatestSuccessfulTransaction() instead
           }
         },
         {

@@ -6,23 +6,11 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Injectable, Logger } from '@nestjs/common';
+import { WEBSOCKET_CORS_CONFIG } from '@common/config/websocket.config';
 
 @Injectable()
 @WebSocketGateway({
-  cors: {
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      const allowedPatterns = [
-        /^https:\/\/sport-zone-fe-deploy\.vercel\.app$/,
-        /^https:\/\/.*\.vercel\.app$/,
-        /^http:\/\/localhost:\d+$/,
-      ];
-      const isAllowed = allowedPatterns.some(pattern => pattern.test(origin));
-      if (isAllowed) return callback(null, true);
-      return callback(new Error('Not allowed by WebSocket CORS'));
-    },
-    credentials: true,
-  },
+  cors: WEBSOCKET_CORS_CONFIG,
   namespace: '/notifications',
 })
 export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisconnect {

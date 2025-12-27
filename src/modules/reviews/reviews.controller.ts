@@ -18,24 +18,24 @@ import { IsString, IsNumber, IsEnum, Min, Max, MinLength, IsOptional, MaxLength 
 export class CreateCoachReviewDto {
   @IsEnum(['coach'])
   type: 'coach';
-  
+
   @IsNumber()
   @Min(1)
   @Max(5)
   rating: number;
-  
+
   @IsString()
   @MinLength(10)
   comment: string;
-  
+
   @IsOptional()
   @IsString()
   @MaxLength(120)
   title?: string;
-  
+
   @IsString()
   coachId: string;
-  
+
   @IsString()
   @IsOptional()
   bookingId: string;
@@ -44,24 +44,24 @@ export class CreateCoachReviewDto {
 export class CreateFieldReviewDto {
   @IsEnum(['field'])
   type: 'field';
-  
+
   @IsNumber()
   @Min(1)
   @Max(5)
   rating: number;
-  
+
   @IsString()
   @MinLength(10)
   comment: string;
-  
+
   @IsOptional()
   @IsString()
   @MaxLength(120)
   title?: string;
-  
+
   @IsString()
   fieldId: string;
-  
+
   @IsString()
   @IsOptional()
   bookingId: string;
@@ -77,13 +77,13 @@ export class ModerateReviewDto {
 
 @Controller('reviews')
 export class ReviewsController {
-  constructor(private readonly reviewsService: ReviewsService) {}
+  constructor(private readonly reviewsService: ReviewsService) { }
 
   //Send coach review
   @UseGuards(AuthGuard('jwt'))
   @Post('coach')
   async createCoachReview(@Request() req, @Body() body: CreateCoachReviewDto) {
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     return this.reviewsService.createCoachReview({
       user: userId,
       coach: body.coachId,
@@ -99,7 +99,7 @@ export class ReviewsController {
   @UseGuards(AuthGuard('jwt'))
   @Post('field')
   async createFieldReview(@Request() req, @Body() body: CreateFieldReviewDto) {
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     return this.reviewsService.createFieldReview({
       user: userId,
       field: body.fieldId,

@@ -140,10 +140,16 @@ export class CleanupService {
     }
 
     // Verify this is a hold booking that can be cancelled
+    // ✅ Check transaction existence using query instead of booking.transaction field
+    const hasTransaction = await this.transactionModel.exists({
+      booking: new Types.ObjectId(bookingId),
+      type: TransactionType.PAYMENT
+    });
+
     const isHoldBooking =
       booking.status === BookingStatus.PENDING &&
       booking.paymentStatus === 'unpaid' &&
-      !booking.transaction &&
+      !hasTransaction &&
       booking.metadata?.paymentMethod === PaymentMethod.BANK_TRANSFER &&
       booking.metadata?.isSlotHold === true;
 
@@ -295,7 +301,7 @@ export class CleanupService {
   })
   async cleanupExpiredBookingsAndPayments(): Promise<void> {
     try {
-      this.logger.log('🔍 [Cron Job] Starting expired bookings and payments cleanup...');
+      this.logger.log('[Cron Job] Starting expired bookings and payments cleanup...');
 
       const nowVN = getCurrentVietnamTimeForDB();
       let totalCancelled = 0;

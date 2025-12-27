@@ -108,7 +108,13 @@ export class SessionBookingService {
 
       // ✅ Auto-create transaction for FIELD_COACH if missing (Combined Booking flow)
       // This ensures we can generate a PayOS payment link
-      if (booking.type === BookingType.FIELD_COACH && !booking.transaction) {
+      // Check if transaction already exists using TransactionsService
+      const existingTransaction = await this.transactionModel.findOne({
+        booking: booking._id,
+        type: TransactionType.PAYMENT
+      }).exec();
+
+      if (booking.type === BookingType.FIELD_COACH && !existingTransaction) {
         try {
           // Generate order code
           const orderCode = generatePayOSOrderCode();
@@ -131,9 +137,8 @@ export class SessionBookingService {
 
           await transaction.save();
 
-          // Update booking with transaction
-          booking.transaction = transaction._id as any;
-          await booking.save();
+          // ✅ REMOVED: booking.transaction assignment (bidirectional reference cleanup)
+          // Transaction.booking is sufficient
 
           this.logger.log(`Auto-created PayOS transaction ${transaction._id} for accepted booking ${booking._id}`);
         } catch (txError) {
@@ -142,10 +147,13 @@ export class SessionBookingService {
       }
 
       // ✅ PayOS Payment Link Generation logic
-      if (booking.type === BookingType.FIELD_COACH && booking.transaction) {
-        // Fetch transaction to check payment method
-        const transaction = await this.transactionModel.findById(booking.transaction);
+      // Query transaction using TransactionsService instead of booking.transaction
+      const transaction = await this.transactionModel.findOne({
+        booking: booking._id,
+        type: TransactionType.PAYMENT
+      }).exec();
 
+      if (booking.type === BookingType.FIELD_COACH && transaction) {
         if (transaction && transaction.method === PaymentMethod.PAYOS && transaction.status === TransactionStatus.PENDING) {
           this.logger.log(`Generating PayOS link for accepted booking ${booking._id}`);
 
