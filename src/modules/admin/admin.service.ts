@@ -1577,9 +1577,14 @@ export class AdminService {
                 case 'month':
                     start = new Date(now.setMonth(now.getMonth() - 1));
                     break;
+                case '3months':
                 case 'quarter':
                     start = new Date(now.setMonth(now.getMonth() - 3));
                     break;
+                case '6months':
+                    start = new Date(now.setMonth(now.getMonth() - 6));
+                    break;
+                case '1year':
                 case 'year':
                     start = new Date(now.setFullYear(now.getFullYear() - 1));
                     break;
@@ -2361,41 +2366,44 @@ export class AdminService {
         dateFilter: any,
         sportType?: string
     ): Promise<any[]> {
-        // ACTUAL QUERY instead of empty array
-        return this.transactionModel.aggregate([
+        // Calculate Revenue and Count directly from Bookings
+        const aggregationPipeline: any[] = [
             {
                 $match: {
-                    status: 'succeeded',
-                    direction: 'in',
+                    status: { $in: ['confirmed', 'completed'] },
+                    // Consider a booking "revenue generating" if it's paid or deposit/full
+                    paymentStatus: { $in: ['paid', 'succeeded', 'confirmed'] },
                     ...dateFilter
                 }
-            },
-            {
-                $lookup: {
-                    from: 'bookings',
-                    localField: 'booking',
-                    foreignField: '_id',
-                    as: 'bookingData'
-                }
-            },
-            { $unwind: '$bookingData' },
-            {
-                $lookup: {
-                    from: 'fields',
-                    localField: 'bookingData.field',
-                    foreignField: '_id',
-                    as: 'fieldData'
-                }
-            },
-            { $unwind: { path: '$fieldData', preserveNullAndEmptyArrays: true } },
+            }
+        ];
+
+        if (sportType) {
+            aggregationPipeline.push(
+                {
+                    $lookup: {
+                        from: 'fields',
+                        localField: 'field',
+                        foreignField: '_id',
+                        as: 'fieldData'
+                    }
+                },
+                { $unwind: { path: '$fieldData', preserveNullAndEmptyArrays: true } },
+                { $match: { 'fieldData.sportType': sportType } }
+            );
+        }
+
+        aggregationPipeline.push(
             {
                 $group: {
                     _id: {
                         year: { $year: '$createdAt' },
                         month: { $month: '$createdAt' }
                     },
-                    revenue: { $sum: '$amount' },
-                    transactionCount: { $sum: 1 }
+                    // Sum totalPrice from the booking itself
+                    revenue: { $sum: '$totalPrice' },
+                    count: { $sum: 1 },
+                    transactionCount: { $sum: 1 } // Treating each paid booking as a transaction event equivalent
                 }
             },
             { $sort: { '_id.year': 1, '_id.month': 1 } },
@@ -2416,35 +2424,29 @@ export class AdminService {
                         ]
                     },
                     revenue: 1,
-                    count: '$transactionCount'
+                    count: 1,
+                    transactionCount: 1
                 }
             }
-        ]);
+        );
+
+        return this.bookingModel.aggregate(aggregationPipeline);
     }
 
     private async getRevenueBySport(dateFilter: any): Promise<any[]> {
-        // ACTUAL QUERY
-        return this.transactionModel.aggregate([
+        // ACTUAL QUERY from Bookings
+        return this.bookingModel.aggregate([
             {
                 $match: {
-                    status: 'succeeded',
-                    direction: 'in',
+                    status: { $in: ['confirmed', 'completed'] },
+                    paymentStatus: { $in: ['paid', 'succeeded', 'confirmed'] },
                     ...dateFilter
                 }
             },
             {
                 $lookup: {
-                    from: 'bookings',
-                    localField: 'booking',
-                    foreignField: '_id',
-                    as: 'bookingData'
-                }
-            },
-            { $unwind: '$bookingData' },
-            {
-                $lookup: {
                     from: 'fields',
-                    localField: 'bookingData.field',
+                    localField: 'field',
                     foreignField: '_id',
                     as: 'fieldData'
                 }
@@ -2453,7 +2455,7 @@ export class AdminService {
             {
                 $group: {
                     _id: '$fieldData.sportType',
-                    revenue: { $sum: '$amount' },
+                    revenue: { $sum: '$totalPrice' },
                     count: { $sum: 1 }
                 }
             },
@@ -2470,28 +2472,19 @@ export class AdminService {
     }
 
     private async getRevenueByType(dateFilter: any): Promise<any[]> {
-        // ACTUAL QUERY
-        return this.transactionModel.aggregate([
+        // ACTUAL QUERY from Bookings
+        return this.bookingModel.aggregate([
             {
                 $match: {
-                    status: 'succeeded',
-                    direction: 'in',
+                    status: { $in: ['confirmed', 'completed'] },
+                    paymentStatus: { $in: ['paid', 'succeeded', 'confirmed'] },
                     ...dateFilter
                 }
             },
             {
-                $lookup: {
-                    from: 'bookings',
-                    localField: 'booking',
-                    foreignField: '_id',
-                    as: 'bookingData'
-                }
-            },
-            { $unwind: '$bookingData' },
-            {
                 $group: {
-                    _id: '$bookingData.type',
-                    revenue: { $sum: '$amount' },
+                    _id: '$type',
+                    revenue: { $sum: '$totalPrice' },
                     count: { $sum: 1 }
                 }
             },
@@ -2597,13 +2590,26 @@ export class AdminService {
 
     private convertToPlatformAnalyticsDto(aiResult: any): PlatformAnalyticsDto {
         // Ensure revenueByType has correct types
-        const revenueByType = Array.isArray(aiResult.revenueAnalysis?.revenueByType)
-            ? aiResult.revenueAnalysis.revenueByType.map((item: any) => ({
-                type: this.validateRevenueTypeDto(item.type),
-                revenue: item.revenue || 0,
-                percentage: item.percentage || 0
-            }))
-            : [];
+        // Ensure revenueByType has correct types and merge duplicates
+        const revenueByTypeMap = new Map<string, any>();
+
+        if (Array.isArray(aiResult.revenueAnalysis?.revenueByType)) {
+            aiResult.revenueAnalysis.revenueByType.forEach((item: any) => {
+                const type = this.validateRevenueTypeDto(item.type);
+                const existing = revenueByTypeMap.get(type) || {
+                    type,
+                    revenue: 0,
+                    percentage: 0
+                };
+
+                existing.revenue += (item.revenue || 0);
+                existing.percentage += (item.percentage || 0);
+
+                revenueByTypeMap.set(type, existing);
+            });
+        }
+
+        const revenueByType = Array.from(revenueByTypeMap.values());
 
         return {
             summary: aiResult.summary || {
@@ -2654,7 +2660,7 @@ export class AdminService {
 
     // Add missing method signatures
     async getRevenueAnalysis(filter?: AnalyticsFilterDto): Promise<RevenueAnalysisDto> {
-        const { startDate, endDate, sportType, timeRange = 'month' } = filter || {};
+        const { startDate, endDate, sportType, timeRange = 'year' } = filter || {};
         const dateFilter = this.buildDateFilter(startDate, endDate, timeRange);
 
         const [
