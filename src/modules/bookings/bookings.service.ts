@@ -1319,4 +1319,72 @@ export class BookingsService {
    * This prevents email delays from causing transaction timeouts
    */
   // Removed old sendBookingEmailsAsync in favor of unified BookingEmailService
+
+  /**
+   * Initiate PayOS payment for an existing booking (e.g. held booking)
+   */
+  async createPayOSPaymentForBooking(
+    userId: string | null,
+    bookingId: string
+  ): Promise<{ checkoutUrl: string; paymentLinkId: string; orderCode: number }> {
+    // 1. Find booking
+    const booking = await this.bookingModel.findById(bookingId).populate('field').exec();
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    // 2. Validate booking state
+    // Allow if status is PENDING (held)
+    // If it's cancelled or completed, reject
+    if (booking.status === BookingStatus.CANCELLED || booking.status === BookingStatus.COMPLETED) {
+      throw new BadRequestException(`Booking is ${booking.status}, cannot proceed with payment`);
+    }
+
+    // Check if already paid
+    if (booking.paymentStatus === 'paid') {
+      throw new BadRequestException('Booking is already paid');
+    }
+
+    // 3. Create Transaction
+    // Generate a unique order code for this attempt
+    const orderCode = Number(String(Date.now()).slice(-6) + Math.floor(Math.random() * 1000));
+    const totalPrice = booking.totalPrice || booking.bookingAmount || 0;
+
+    // Create pending transaction
+    const transaction = await this.transactionsService.createPayment({
+      bookingId: (booking._id as any).toString(),
+      userId: userId || booking.user?.toString() || new Types.ObjectId().toString(), // handle guest or missing user
+      amount: totalPrice,
+      method: PaymentMethod.PAYOS,
+      paymentNote: `Payment for booking ${bookingId}`,
+      externalTransactionId: orderCode.toString(),
+    });
+
+    // 4. Create PayOS Link
+    const fieldName = (booking.field as any)?.name || 'Field';
+    const paymentLinkRes = await this.payOSService.createPaymentUrl({
+      orderId: bookingId, // DTO requires orderId string
+      orderCode: orderCode,
+      amount: totalPrice,
+      description: `Book ${bookingId.slice(-6)}`,
+      items: [
+        {
+          name: `Booking ${fieldName} - ${new Date(booking.date).toLocaleDateString()}`,
+          quantity: 1,
+          price: totalPrice,
+        }
+      ],
+      // Use defaults from PayOSService config
+    });
+
+    // 5. Update booking with transaction
+    booking.transaction = transaction._id as any;
+    await booking.save();
+
+    return {
+      checkoutUrl: paymentLinkRes.checkoutUrl,
+      paymentLinkId: paymentLinkRes.paymentLinkId,
+      orderCode: orderCode
+    };
+  }
 }
