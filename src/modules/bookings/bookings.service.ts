@@ -100,10 +100,7 @@ export class BookingsService {
     private readonly bookingQueryService: BookingQueryService,
     private readonly bookingCancellationService: BookingCancellationService,
     private readonly paymentProofService: PaymentProofService,
-  ) {
-    // Setup payment event listeners - CRITICAL for booking confirmation
-    this.setupPaymentEventListeners();
-  }
+  ) { }
 
   /**
    * Create or find guest user for anonymous bookings
@@ -208,17 +205,6 @@ export class BookingsService {
    */
   async ownerRejectBooking(ownerUserId: string, bookingId: string, reason?: string) {
     return this.ownerBookingService.ownerRejectBooking(ownerUserId, bookingId, reason);
-  }
-
-  /**
-   * Setup payment event listeners
-   * CRITICAL: These listeners update booking status when payment completes
-   */
-  private setupPaymentEventListeners() {
-    this.eventEmitter.on('payment.success', this.handlePaymentSuccess.bind(this));
-    this.eventEmitter.on('payment.failed', this.handlePaymentFailed.bind(this));
-
-    this.logger.log('✅ Payment event listeners registered');
   }
 
 
@@ -1116,202 +1102,7 @@ export class BookingsService {
     return days[date.getDay()];
   }
 
-  // ============================================================================
-  // PAYMENT EVENT HANDLERS - CRITICAL FOR BOOKING CONFIRMATION
-  // ============================================================================
 
-  /**
-   * Handle payment success event
-   * Updates booking status from PENDING to CONFIRMED
-   * ✅ SECURITY: Idempotent with atomic update to prevent race conditions
-   */
-  private async handlePaymentSuccess(event: {
-    paymentId: string;
-    bookingId: string;
-    userId: string;
-    amount: number;
-    method?: string;
-    transactionId?: string;
-  }) {
-    try {
-      this.logger.log(`[Payment Success] Processing for booking ${event.bookingId}`);
-
-      // Validate bookingId format
-      if (!Types.ObjectId.isValid(event.bookingId)) {
-        // This might be a tournament payment or other type, so we just ignore it for bookings
-        // instead of logging an error
-        return;
-      }
-
-      // ✅ SECURITY: Atomic update with condition check (prevents race condition)
-      // This ensures only ONE update happens even if webhook is called multiple times
-      // Determine booking type to decide lifecycle change
-      const current = await this.bookingModel.findById(event.bookingId).select('type status').exec();
-      // COACH bookings stay PENDING until coach verifies
-      // FIELD_COACH bookings stay CONFIRMED (already set when coach accepted)
-      // Other bookings move to CONFIRMED
-      const isCoachOnly = current && String((current as any).type) === String(BookingType.COACH);
-      const isFieldCoach = current && String((current as any).type) === String(BookingType.FIELD_COACH);
-
-      const updateResult = await this.bookingModel.findOneAndUpdate(
-        {
-          _id: new Types.ObjectId(event.bookingId),
-        },
-        {
-          $set: {
-            paymentStatus: 'paid',
-            // Only update status to CONFIRMED for FIELD bookings (not COACH or FIELD_COACH)
-            ...(isCoachOnly || isFieldCoach ? {} : { status: BookingStatus.CONFIRMED }),
-            transaction: new Types.ObjectId(event.paymentId)
-          }
-        },
-        {
-          new: true, // Return updated document
-          // ✅ SECURITY: Write concern for durability
-          writeConcern: { w: 'majority', j: true }
-        }
-      ).exec();
-
-      // ✅ SECURITY: Idempotency check - if no update, already processed
-      if (!updateResult) {
-        const booking = await this.bookingModel.findById(event.bookingId);
-        if (!booking) {
-          this.logger.error(`[Payment Success] Booking ${event.bookingId} not found`);
-          return;
-        }
-
-        if (booking.status === BookingStatus.CONFIRMED) {
-          this.logger.warn(`[Payment Success] Booking ${event.bookingId} already confirmed (idempotent)`);
-          return;
-        }
-
-        this.logger.error(`[Payment Success] Failed to update booking ${event.bookingId}`);
-        return;
-      }
-
-      this.logger.log(`[Payment Success] ✅ Booking ${event.bookingId} confirmed successfully`);
-
-      // Emit booking confirmed event for other services
-      this.eventEmitter.emit('booking.confirmed', {
-        bookingId: event.bookingId,
-        userId: event.userId,
-        fieldId: updateResult.field?.toString() || null,
-        date: updateResult.date,
-      });
-
-      // Send confirmation emails to field owner and customer
-      try {
-        // Populate booking with field and user details
-        const populatedBooking = await this.bookingModel
-          .findById(event.bookingId)
-          .populate('field')
-          .populate('user', 'fullName email phone')
-          .exec();
-
-        if (populatedBooking && populatedBooking.field && populatedBooking.user) {
-          const field = populatedBooking.field as any;
-          const customerUser = populatedBooking.user as any;
-
-          const toVnd = (amount: number) => amount.toLocaleString('vi-VN') + '₫';
-          const emailPayload = {
-            field: { name: field.name, address: field.location?.address || '' },
-            customer: { fullName: customerUser.fullName, phone: customerUser.phone, email: customerUser.email },
-            booking: {
-              date: populatedBooking.date.toLocaleDateString('vi-VN'),
-              startTime: populatedBooking.startTime,
-              endTime: populatedBooking.endTime,
-              services: [],
-            },
-            pricing: {
-              services: [],
-              fieldPriceFormatted: toVnd(populatedBooking.totalPrice || 0),
-              totalFormatted: toVnd(populatedBooking.totalPrice || 0),
-            },
-            paymentMethod: event.method,
-          };          // Get field owner email (non-blocking)
-          const ownerProfileId = field.owner?.toString();
-          if (ownerProfileId) {
-            let fieldOwnerProfile = await this.fieldOwnerProfileModel
-              .findById(ownerProfileId)
-              .lean()
-              .exec();
-
-            if (!fieldOwnerProfile) {
-              fieldOwnerProfile = await this.fieldOwnerProfileModel
-                .findOne({ user: new Types.ObjectId(ownerProfileId) })
-                .lean()
-                .exec();
-            }
-
-            let ownerEmail: string | undefined;
-            if (fieldOwnerProfile?.user) {
-              const ownerUser = await this.userModel
-                .findById(fieldOwnerProfile.user)
-                .select('email')
-                .lean()
-                .exec();
-              ownerEmail = ownerUser?.email;
-            }
-
-            // Send emails (non-blocking, errors logged but don't fail the transaction)
-            if (ownerEmail) {
-              await this.emailService.sendFieldOwnerBookingNotification({
-                ...emailPayload,
-                to: ownerEmail,
-              }).catch(err => this.logger.warn('Failed to send owner email', err));
-            }
-
-            if (customerUser.email) {
-              await this.emailService.sendCustomerBookingConfirmation({
-                ...emailPayload,
-                to: customerUser.email,
-                preheader: 'Thanh toán thành công - Xác nhận đặt sân',
-              }).catch(err => this.logger.warn('Failed to send customer email', err));
-            }
-          }
-        }
-      } catch (mailErr) {
-        // ✅ SECURITY: Email failures don't affect booking confirmation
-        this.logger.warn('[Payment Success] Failed to send confirmation emails (non-critical)', mailErr);
-      }
-
-    } catch (error) {
-      // ✅ SECURITY: Log errors but don't throw - payment webhooks shouldn't fail
-      this.logger.error('[Payment Success] Error processing payment success event', error);
-    }
-  }
-
-  /**
-   * Handle payment failed event
-   * Cancels booking and releases schedule slots
-   */
-  private async handlePaymentFailed(event: {
-    paymentId: string;
-    bookingId: string;
-    userId: string;
-    amount: number;
-    method?: string;
-    transactionId?: string;
-    reason: string;
-  }) {
-    try {
-      this.logger.log(`[Payment Failed] Processing for booking ${event.bookingId}`);
-
-      // Cancel booking and release slots using centralized cleanup service
-      // CleanupService handles all validation and idempotency checks
-      await this.cleanupService.cancelBookingAndReleaseSlots(
-        event.bookingId,
-        event.reason || 'Payment failed',
-        event.paymentId
-      );
-
-      this.logger.log(`[Payment Failed] ⚠️ Booking ${event.bookingId} cancelled due to payment failure`);
-
-    } catch (error) {
-      this.logger.error('[Payment Failed] Error handling payment failure', error);
-      // Don't throw - we don't want to fail the payment update
-    }
-  }
 
 
   /**
@@ -1378,7 +1169,8 @@ export class BookingsService {
     });
 
     // 5. Update booking with transaction
-    booking.transaction = transaction._id as any;
+    // ✅ REMOVED: booking.transaction (bidirectional reference cleanup)
+    // Use TransactionsService.getPaymentByBookingId(bookingId) instead
     await booking.save();
 
     return {

@@ -44,12 +44,12 @@ export class PayOSService {
         if (!checksumKey) missingConfigs.push('PAYOS_CHECKSUM_KEY');
 
         if (missingConfigs.length > 0) {
-            this.logger.error(`[PayOS Config] âŒ Missing required environment variables: ${missingConfigs.join(', ')}`);
+            this.logger.error(`[PayOS Config] Missing required environment variables: ${missingConfigs.join(', ')}`);
             throw new BadRequestException(`PayOS is not configured. Missing: ${missingConfigs.join(', ')}`);
         }
 
         // Log configuration status (without exposing secrets)
-        this.logger.debug(`[PayOS Config] âœ… Configuration loaded`);
+        this.logger.debug(`[PayOS Config] Configuration loaded`);
         this.logger.debug(`[PayOS Config]   - Client ID: ${clientId!.substring(0, 4)}****`);
         this.logger.debug(`[PayOS Config]   - API Key: ${apiKey!.length} chars`);
         this.logger.debug(`[PayOS Config]   - Checksum Key: ${checksumKey!.length} chars`);
@@ -155,7 +155,7 @@ export class PayOSService {
 
             const result = response.data.data;
 
-            this.logger.log(`[Create Payment URL] âœ… Payment link created successfully`);
+            this.logger.log(`[Create Payment URL] Payment link created successfully`);
             this.logger.debug(`[Create Payment URL] Payment Link ID: ${result.paymentLinkId}`);
 
             return {
@@ -168,7 +168,7 @@ export class PayOSService {
             };
         } catch (error) {
             const errorMessage = this.extractErrorMessage(error);
-            this.logger.error(`[Create Payment URL] âŒ Error: ${errorMessage}`);
+            this.logger.error(`[Create Payment URL] Error: ${errorMessage}`);
 
             if (axios.isAxiosError(error)) {
                 const axiosError = error as AxiosError;

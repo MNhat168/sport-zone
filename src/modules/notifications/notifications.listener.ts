@@ -438,6 +438,21 @@ export class NotificationListener {
     // Clean up message formatting
     message = message.replace(/ ,/g, ',').replace(/\.\./g, '.');
 
+    // ✅ IDEMPOTENCY CHECK: Avoid duplicate notifications for the same payment
+    // Check if a payment success notification already exists for this recipient and paymentId
+    if (payload.paymentId) {
+      const existing = await this.notificationsService.findOne({
+        recipient: new Types.ObjectId(userIdStr),
+        'metadata.paymentId': payload.paymentId,
+        type: { $in: [NotificationType.PAYMENT_SUCCESS, NotificationType.BOOKING_CONFIRMED] }
+      });
+
+      if (existing) {
+        this.logger.log(`[Payment Success] Skipping duplicate notification for payment ${payload.paymentId}`);
+        return;
+      }
+    }
+
     await this.notificationsService.create({
       recipient: new Types.ObjectId(userIdStr),
       type: isFieldBooking ? NotificationType.BOOKING_CONFIRMED : NotificationType.PAYMENT_SUCCESS,

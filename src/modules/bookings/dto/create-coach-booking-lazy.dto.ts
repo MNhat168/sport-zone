@@ -23,7 +23,7 @@ export class CreateCoachBookingLazyDto {
   @IsString()
   endTime: string;
 
-  @ApiPropertyOptional({ enum: PaymentMethod, example: PaymentMethod.CASH, description: 'Phương thức thanh toán' })
+  @ApiPropertyOptional({ enum: PaymentMethod, example: PaymentMethod.BANK_TRANSFER, description: 'Phương thức thanh toán' })
   @IsOptional()
   @IsInt()
   @IsEnum(PaymentMethod)

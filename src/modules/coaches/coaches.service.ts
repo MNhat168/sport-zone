@@ -9,7 +9,7 @@ import { BankAccount } from '../field-owner/entities/bank-account.entity';
 import { CoachesDto } from './dtos/coaches.dto';
 import { SportType } from 'src/common/enums/sport-type.enum';
 import { Schedule } from 'src/modules/schedules/entities/schedule.entity';
-import { LessonType } from 'src/modules/lessontypes/entities/lesson-type.entity';
+
 import { CoachRegistrationRequest } from './entities/coach-registration-request.entity';
 import {
   CreateCoachRegistrationDto,
@@ -41,8 +41,7 @@ export class CoachesService {
     private coachProfileModel: Model<CoachProfile>,
     @InjectModel(BankAccount.name)
     private bankAccountModel: Model<BankAccount>,
-    @InjectModel(LessonType.name)
-    private lessonTypeModel: Model<LessonType>,
+
     @InjectModel(CoachRegistrationRequest.name)
     private registrationRequestModel: Model<CoachRegistrationRequest>,
     @InjectModel(Transaction.name)
@@ -207,13 +206,7 @@ export class CoachesService {
       .lean();
     const availableSlots = schedule?.bookedSlots ?? [];
 
-    // Fetch lesson types from LessonType entity (user as string)
-    const lessonTypes = await this.lessonTypeModel
-      .find({ user: user._id.toString() })
-      .lean();
-    // Logging for debugging lessonTypes fetch
-    console.log('getCoachById - user._id:', user._id);
-    console.log('getCoachById - lessonTypes:', lessonTypes);
+
 
     return {
       id: user._id.toString(),
@@ -232,7 +225,6 @@ export class CoachesService {
       completedSessions: profile?.completedSessions ?? 0,
       memberSince: (profile as any)?.createdAt ?? '',
       availableSlots,
-      lessonTypes,
       price: profile?.hourlyRate ?? 0,
       sports: profile?.sports ?? [],
       rank: profile?.rank ?? 'novice',
@@ -398,9 +390,9 @@ export class CoachesService {
           })
           .select('_id')
           .lean();
-        
+
         const userIds = users.map(u => u._id);
-        
+
         filter.$or = [
           { user: { $in: userIds } },
           { 'location.address': { $regex: search, $options: 'i' } },

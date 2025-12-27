@@ -172,16 +172,9 @@ export class CoachBookingService {
                 // Determine booking status based on payment method and note
                 // ✅ CRITICAL: Online payments (PayOS, etc.) must be PENDING until payment succeeds
                 // Only CASH payments can be CONFIRMED immediately (if no note)
-                const paymentMethod = dto.paymentMethod ?? PaymentMethod.CASH;
-                const isOnlinePayment = [
-                    PaymentMethod.PAYOS,
-                    PaymentMethod.MOMO,
-                    PaymentMethod.ZALOPAY,
-                    PaymentMethod.EBANKING,
-                    PaymentMethod.CREDIT_CARD,
-                    PaymentMethod.DEBIT_CARD,
-                    PaymentMethod.QR_CODE,
-                ].includes(paymentMethod as any);
+                // Only CASH payments can be CONFIRMED immediately (if no note)
+                const paymentMethod = dto.paymentMethod ?? PaymentMethod.BANK_TRANSFER;
+                const isOnlinePayment = paymentMethod === PaymentMethod.PAYOS;
 
                 // Booking status logic:
                 // - Online payments: Always PENDING (wait for payment confirmation)
@@ -317,7 +310,7 @@ export class CoachBookingService {
 
         // ✅ Send emails AFTER transaction commits successfully (non-blocking)
         // This prevents email delays from causing transaction timeouts
-        const shouldSendNow = (dto.paymentMethod ?? PaymentMethod.CASH) === PaymentMethod.CASH;
+        const shouldSendNow = (dto.paymentMethod ?? PaymentMethod.BANK_TRANSFER) === PaymentMethod.BANK_TRANSFER;
         if (shouldSendNow) {
             // Unified confirmation emails via single handler
             const methodLabel = typeof dto.paymentMethod === 'number'
@@ -890,5 +883,5 @@ export class CoachBookingService {
         return bookings as unknown as Booking[];
     }
 
-    
+
 }

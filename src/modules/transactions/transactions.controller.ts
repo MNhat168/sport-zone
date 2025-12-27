@@ -26,6 +26,7 @@ import { FieldOwnerService } from '../field-owner/field-owner.service';
 import { Response } from 'express';
 import { CleanupService } from '../../service/cleanup.service';
 import { Transaction } from './entities/transaction.entity';
+import { NotificationsGateway } from '../notifications/notifications.gateway';
 
 @ApiTags('Transactions')
 @Controller('transactions')
@@ -41,6 +42,7 @@ export class TransactionsController {
         private readonly fieldOwnerService: FieldOwnerService,
         @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
         @InjectModel(Transaction.name) private readonly transactionModel: Model<Transaction>,
+        private readonly notificationsGateway: NotificationsGateway,
     ) { }
 
     /**
@@ -690,7 +692,7 @@ export class TransactionsController {
     async createPayOSPayment(@Body() dto: CreatePayOSUrlDto): Promise<PayOSPaymentLinkResponseDto> {
         console.log(`[Create PayOS Payment] Received orderId: ${dto.orderId}`);
 
-        // ✅ CRITICAL: dto.orderId is the PAYMENT ID (transaction ID), not booking ID
+        // CRITICAL: dto.orderId is the PAYMENT ID (transaction ID), not booking ID
         // Lookup transaction by payment ID to get externalTransactionId (PayOS orderCode)
         const transaction = await this.transactionsService.getPaymentById(dto.orderId);
 
@@ -715,7 +717,7 @@ export class TransactionsController {
      * Helper method to create PayOS payment link with transaction
      */
     private async createPaymentLinkWithTransaction(dto: CreatePayOSUrlDto, transaction: any): Promise<PayOSPaymentLinkResponseDto> {
-        // ✅ If transaction has externalTransactionId, use it as PayOS orderCode
+        // If transaction has externalTransactionId, use it as PayOS orderCode
         // Otherwise, generate a new one (fallback for backward compatibility)
         let orderCodeToUse: number;
 
@@ -738,7 +740,7 @@ export class TransactionsController {
             console.log(`[Create PayOS Payment] Generated new orderCode: ${orderCodeToUse}`);
         }
 
-        // ✅ Create payment link with the orderCode
+        // Create payment link with the orderCode
         // Pass orderCode to PayOSService so it uses the same orderCode
         const result = await this.payosService.createPaymentUrl({
             ...dto,
@@ -769,7 +771,7 @@ export class TransactionsController {
             const webhookData = body.data;
 
             if (!receivedSignature) {
-                console.warn('[PayOS Webhook] ❌ Missing signature');
+                console.warn('[PayOS Webhook] Missing signature');
                 return {
                     code: '97',
                     desc: 'Missing signature',
@@ -777,7 +779,7 @@ export class TransactionsController {
             }
 
             if (!webhookData) {
-                console.warn('[PayOS Webhook] ❌ Missing data');
+                console.warn('[PayOS Webhook] Missing data');
                 return {
                     code: '99',
                     desc: 'Invalid webhook data',
@@ -792,14 +794,14 @@ export class TransactionsController {
             const verificationResult = this.payosService.verifyCallback(webhookData, receivedSignature);
 
             if (!verificationResult.isValid) {
-                console.warn(`[PayOS Webhook] ❌ Invalid signature for order ${webhookData.orderCode}`);
+                console.warn(`[PayOS Webhook] Invalid signature for order ${webhookData.orderCode}`);
                 return {
                     code: '97',
                     desc: 'Invalid signature',
                 };
             }
 
-            console.log(`[PayOS Webhook] ✅ Signature verified for order ${webhookData.orderCode}`);
+            console.log(`[PayOS Webhook] Signature verified for order ${webhookData.orderCode}`);
             console.log(`[PayOS Webhook] Description received: "${webhookData.description}"`);
 
             // Check if this is a bank account verification payment
@@ -807,7 +809,7 @@ export class TransactionsController {
             const isVerificationPayment = webhookData.description?.startsWith('BANKACCVERIFY');
 
             if (isVerificationPayment) {
-                console.log(`[PayOS Webhook] 🔍 Detected bank account verification payment for orderCode: ${webhookData.orderCode}`);
+                console.log(`[PayOS Webhook] Detected bank account verification payment for orderCode: ${webhookData.orderCode}`);
                 console.log(`[PayOS Webhook] Webhook status: ${webhookData.status}`);
                 console.log(`[PayOS Webhook] Counter account number: ${webhookData.counterAccountNumber || webhookData.accountNumber || 'NOT PROVIDED'}`);
                 console.log(`[PayOS Webhook] Counter account name: ${webhookData.counterAccountName || 'NOT PROVIDED'}`);
@@ -835,16 +837,16 @@ export class TransactionsController {
                             transactionDateTime: webhookData.transactionDateTime,
                         },
                     );
-                    console.log(`[PayOS Webhook] ✅ Bank account verification processed for orderCode: ${webhookData.orderCode}`);
+                    console.log(`[PayOS Webhook] Bank account verification processed for orderCode: ${webhookData.orderCode}`);
 
-                    // ✅ CRITICAL: Return success immediately for verification payments
+                    // CRITICAL: Return success immediately for verification payments
                     // Do NOT proceed to booking-related logic below
                     return {
                         code: '00',
                         desc: 'Verification payment processed successfully',
                     };
                 } catch (verificationError) {
-                    console.error(`[PayOS Webhook] ❌ Error processing bank account verification:`, verificationError);
+                    console.error(`[PayOS Webhook] Error processing bank account verification:`, verificationError);
 
                     // Return error to PayOS so it retries later
                     // This gives the BankAccount record time to be saved if it's a timing issue
@@ -854,7 +856,7 @@ export class TransactionsController {
                     };
                 }
             } else {
-                console.log(`[PayOS Webhook] ℹ️ Not a verification payment (description: "${webhookData.description}")`);
+                console.log(`[PayOS Webhook] Not a verification payment (description: "${webhookData.description}")`);
             }
 
             // Find transaction by externalTransactionId (PayOS order code)
@@ -865,7 +867,7 @@ export class TransactionsController {
             if (!transaction) {
                 // For verification payments, it's OK if transaction doesn't exist
                 if (isVerificationPayment) {
-                    console.log(`[PayOS Webhook] ℹ️ Verification payment processed (no transaction record needed)`);
+                    console.log(`[PayOS Webhook] Verification payment processed (no transaction record needed)`);
                     return {
                         code: '00',
                         desc: 'Verification payment processed',
@@ -881,7 +883,7 @@ export class TransactionsController {
 
             // Check if already processed
             if (transaction.status === TransactionStatus.SUCCEEDED || transaction.status === TransactionStatus.FAILED) {
-                console.log(`[PayOS Webhook] ℹ️ Transaction already processed: ${transaction.status}`);
+                console.log(`[PayOS Webhook] Transaction already processed: ${transaction.status}`);
                 return {
                     code: '02',
                     desc: 'Transaction already processed',
@@ -913,7 +915,7 @@ export class TransactionsController {
                 }
             );
 
-            // ✅ Extract tournamentId from transaction metadata if present
+            // Extract tournamentId from transaction metadata if present
             const tournamentId = updated.metadata?.tournamentId
                 ? String(updated.metadata.tournamentId)
                 : undefined;
@@ -944,7 +946,7 @@ export class TransactionsController {
                 this.eventEmitter.emit('payment.failed', {
                     paymentId: String(updated._id),
                     bookingId: bookingIdStr,
-                    tournamentId: tournamentId, // ✅ Include tournamentId if present
+                    tournamentId: tournamentId, // Include tournamentId if present
                     userId: userIdStr,
                     amount: updated.amount,
                     method: updated.method,
@@ -952,13 +954,13 @@ export class TransactionsController {
                     reason,
                 });
 
-                console.log(`[PayOS Webhook] ❌ Payment failed (${payosStatus}), emitted payment.failed event`);
+                console.log(`[PayOS Webhook] Payment failed (${payosStatus}), emitted payment.failed event`);
                 if (tournamentId) {
                     console.log(`[PayOS Webhook] Tournament ID included in failed event: ${tournamentId}`);
                 }
             }
 
-            // ✅ CRITICAL: Verify transaction was actually updated to SUCCEEDED before emitting event
+            // CRITICAL: Verify transaction was actually updated to SUCCEEDED before emitting event
             // This ensures transaction status is committed before booking is updated
             if (newStatus === TransactionStatus.SUCCEEDED) {
                 // Double-check transaction status to ensure it's actually succeeded
@@ -967,7 +969,7 @@ export class TransactionsController {
                 );
 
                 if (!verifiedTransaction) {
-                    console.error(`[PayOS Webhook] ❌ Transaction ${updated._id} not found after update`);
+                    console.error(`[PayOS Webhook] Transaction ${updated._id} not found after update`);
                     return {
                         code: '99',
                         desc: 'Transaction verification failed',
@@ -976,7 +978,7 @@ export class TransactionsController {
 
                 if (verifiedTransaction.status !== TransactionStatus.SUCCEEDED) {
                     console.error(
-                        `[PayOS Webhook] ❌ Transaction ${updated._id} status mismatch: ` +
+                        `[PayOS Webhook] Transaction ${updated._id} status mismatch: ` +
                         `expected SUCCEEDED, got ${verifiedTransaction.status}`
                     );
                     return {
@@ -985,22 +987,22 @@ export class TransactionsController {
                     };
                 }
 
-                console.log(`[PayOS Webhook] ✅ Transaction ${updated._id} verified as SUCCEEDED, emitting event`);
+                console.log(`[PayOS Webhook] Transaction ${updated._id} verified as SUCCEEDED, emitting event`);
 
-                // ✅ Extract tournamentId from verified transaction metadata
+                // Extract tournamentId from verified transaction metadata
                 const verifiedTournamentId = verifiedTransaction.metadata?.tournamentId
                     ? String(verifiedTransaction.metadata.tournamentId)
                     : tournamentId; // Fallback to previously extracted tournamentId
 
-                // ✅ CRITICAL: Do NOT emit payment.success for verification payments
+                // CRITICAL: Do NOT emit payment.success for verification payments
                 // Check if this is a verification transaction (bank account or coach bank account)
                 const isVerificationTx = verifiedTransaction.metadata?.verificationType &&
                     (verifiedTransaction.metadata.verificationType === 'BANK_ACCOUNT_VERIFICATION' ||
                         verifiedTransaction.metadata.verificationType === 'COACH_BANK_ACCOUNT_VERIFICATION');
 
                 if (isVerificationTx) {
-                    console.log(`[PayOS Webhook] ℹ️ Skipping payment.success emission for verification transaction ${updated._id}`);
-                    console.log(`[PayOS Webhook] ✅ Verification transaction updated successfully`);
+                    console.log(`[PayOS Webhook] Skipping payment.success emission for verification transaction ${updated._id}`);
+                    console.log(`[PayOS Webhook] Verification transaction updated successfully`);
                     return {
                         code: '00',
                         desc: 'Verification transaction updated successfully',
@@ -1023,7 +1025,7 @@ export class TransactionsController {
                             : String(updated.user))
                     : undefined;
 
-                // ✅ Only emit event after transaction is verified as SUCCEEDED
+                // Only emit event after transaction is verified as SUCCEEDED
                 // Include tournamentId in event payload if present
                 this.eventEmitter.emit('payment.success', {
                     paymentId: String(updated._id),
@@ -1036,20 +1038,24 @@ export class TransactionsController {
                 });
 
                 if (verifiedTournamentId) {
-                    console.log(`[PayOS Webhook] ✅ Tournament ID included in success event: ${verifiedTournamentId}`);
+                    console.log(`[PayOS Webhook] Tournament ID included in success event: ${verifiedTournamentId}`);
                 } else {
-                    console.log(`[PayOS Webhook] ℹ️ No tournament ID found in transaction metadata`);
+                    console.log(`[PayOS Webhook] No tournament ID found in transaction metadata`);
                 }
+
+                // Successfully emitted payment.success event
+                // This will be handled by NotificationListener to create a persistent notification
+                // and by PaymentHandlerService to confirm the booking.
             }
 
-            console.log(`[PayOS Webhook] ✅ Transaction updated: ${newStatus}`);
+            console.log(`[PayOS Webhook] Transaction updated: ${newStatus}`);
 
             return {
                 code: '00',
                 desc: 'Success',
             };
         } catch (error) {
-            console.error(`[PayOS Webhook] ❌ Error: ${error.message}`);
+            console.error(`[PayOS Webhook] Error: ${error.message}`);
             return {
                 code: '99',
                 desc: 'System error',

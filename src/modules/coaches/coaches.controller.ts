@@ -65,7 +65,7 @@ export class CoachesController {
     @Request() req: any,
     @Body() dto: CreateCoachRegistrationDto,
   ): Promise<CoachRegistrationResponseDto> {
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     this.logger.log(`Creating coach registration request for user ${userId}`);
     try {
       return await this.coachesService.createRegistrationRequest(userId, dto);
@@ -80,7 +80,7 @@ export class CoachesController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get current user coach registration request status' })
   async getMyRegistrationRequest(@Request() req: any): Promise<CoachRegistrationResponseDto> {
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     return this.coachesService.getMyRegistrationRequest(userId);
   }
 
@@ -120,7 +120,7 @@ export class CoachesController {
     @Param('id') requestId: string,
     @Body() dto: ApproveCoachRegistrationDto,
   ): Promise<any> {
-    const adminId = req.user._id || req.user.id;
+    const adminId = req.user.userId;
     return this.coachesService.approveRegistrationRequest(requestId, adminId, dto);
   }
 
@@ -134,7 +134,7 @@ export class CoachesController {
     @Param('id') requestId: string,
     @Body() dto: { reason: string },
   ): Promise<CoachRegistrationResponseDto> {
-    const adminId = req.user._id || req.user.id;
+    const adminId = req.user.userId;
     return this.coachesService.rejectRegistrationRequest(requestId, adminId, dto.reason);
   }
 
@@ -230,7 +230,7 @@ export class CoachesController {
     }
 
     // Verify current user owns this coach profile
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     const coach = await this.coachesService.getCoachById(id);
     if (!coach) {
       throw new NotFoundException('Coach profile not found');
@@ -263,7 +263,7 @@ export class CoachesController {
     @Param('index') index: string,
     @Request() req: any,
   ): Promise<{ success: boolean }> {
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.userId;
     const coach = await this.coachesService.getCoachById(id);
 
     if (!coach) {

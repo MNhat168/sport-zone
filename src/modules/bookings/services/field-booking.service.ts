@@ -148,14 +148,9 @@ export class FieldBookingService {
         // Determine booking status based on payment method and note
         // ✅ CRITICAL: Online payments (PayOS, etc.) must be PENDING until payment succeeds
         // Only CASH payments can be CONFIRMED immediately (if no note)
-        const paymentMethod = bookingData.paymentMethod ?? PaymentMethod.CASH;
-        const isOnlinePayment = paymentMethod === PaymentMethod.PAYOS ||
-          paymentMethod === PaymentMethod.MOMO ||
-          paymentMethod === PaymentMethod.ZALOPAY ||
-          paymentMethod === PaymentMethod.EBANKING ||
-          paymentMethod === PaymentMethod.CREDIT_CARD ||
-          paymentMethod === PaymentMethod.DEBIT_CARD ||
-          paymentMethod === PaymentMethod.QR_CODE;
+        // Only CASH payments can be CONFIRMED immediately (if no note)
+        const paymentMethod = bookingData.paymentMethod ?? PaymentMethod.BANK_TRANSFER;
+        const isOnlinePayment = paymentMethod === PaymentMethod.PAYOS;
 
         // Booking status logic:
         // - Online payments: Always PENDING (wait for payment confirmation)
@@ -216,13 +211,14 @@ export class FieldBookingService {
           bookingId: (booking._id as Types.ObjectId).toString(),
           userId: userId,
           amount: totalAmount,
-          method: bookingData.paymentMethod ?? PaymentMethod.CASH,
+          method: bookingData.paymentMethod ?? PaymentMethod.BANK_TRANSFER,
           paymentNote: bookingData.paymentNote,
           externalTransactionId, // ✅ Pass PayOS orderCode
         }, session);
 
         // Update booking with transaction reference
-        booking.transaction = payment._id as Types.ObjectId;
+        // ✅ REMOVED: booking.transaction (bidirectional reference cleanup)
+        // Use TransactionsService.getPaymentByBookingId(bookingId) instead
         await booking.save({ session });
 
         // ✅ CRITICAL SECURITY: Atomic update with optimistic locking
@@ -296,7 +292,7 @@ export class FieldBookingService {
 
     // ✅ Send emails AFTER transaction commits successfully (non-blocking)
     // This prevents email delays from causing transaction timeouts
-    const shouldSendNow = (bookingData.paymentMethod ?? PaymentMethod.CASH) === PaymentMethod.CASH;
+    const shouldSendNow = (bookingData.paymentMethod ?? PaymentMethod.BANK_TRANSFER) === PaymentMethod.BANK_TRANSFER;
     if (shouldSendNow) {
       // Unified confirmation emails via single handler
       const methodLabel = typeof bookingData.paymentMethod === 'number'
