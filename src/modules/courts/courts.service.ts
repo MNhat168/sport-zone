@@ -25,7 +25,7 @@ export class CourtsService {
     @InjectModel(Court.name) private readonly courtModel: Model<Court>,
     @InjectModel(Field.name) private readonly fieldModel: Model<Field>,
     @InjectModel(FieldOwnerProfile.name) private readonly fieldOwnerProfileModel: Model<FieldOwnerProfile>,
-  ) {}
+  ) { }
 
   private normalizeUser(user: any): RequestUser {
     const userId = user?._id?.toString?.() || user?.id || user?.userId;
@@ -67,16 +67,7 @@ export class CourtsService {
     return field;
   }
 
-  private sanitizePricingOverride(pricingOverride?: CreateCourtDto['pricingOverride']) {
-    if (!pricingOverride) return undefined;
-    const hasBasePrice = pricingOverride.basePrice !== undefined && pricingOverride.basePrice !== null;
-    const hasRanges = Array.isArray(pricingOverride.priceRanges) && pricingOverride.priceRanges.length > 0;
-    if (!hasBasePrice && !hasRanges) return undefined;
-    return {
-      ...(hasBasePrice ? { basePrice: pricingOverride.basePrice } : {}),
-      ...(hasRanges ? { priceRanges: pricingOverride.priceRanges } : {}),
-    };
-  }
+
 
   async create(fieldId: string, dto: CreateCourtDto, rawUser: any): Promise<Court> {
     const user = this.normalizeUser(rawUser);
@@ -87,13 +78,10 @@ export class CourtsService {
       throw new BadRequestException('Court number already exists for this field');
     }
 
-    const pricingOverride = this.sanitizePricingOverride(dto.pricingOverride);
-
     const court = await this.courtModel.create({
       field: new Types.ObjectId(fieldId),
       name: dto.name,
       courtNumber: dto.courtNumber,
-      pricingOverride,
     });
 
     return court;
@@ -148,11 +136,6 @@ export class CourtsService {
       }
     }
 
-    const pricingOverride = this.sanitizePricingOverride(dto.pricingOverride);
-
-    if (pricingOverride !== undefined) {
-      court.pricingOverride = pricingOverride;
-    }
     if (dto.name !== undefined) court.name = dto.name;
     if (dto.courtNumber !== undefined) court.courtNumber = dto.courtNumber;
     if (dto.isActive !== undefined) court.isActive = dto.isActive;

@@ -567,4 +567,14 @@ export class UsersService {
 
     return { message: 'Đổi mật khẩu thành công' };
   }
+
+  async deactivate(id: string): Promise<{ message: string }> {
+    const user = await this.userRepository.findById(id);
+    if (!user) throw new NotFoundException('User not found');
+
+    const updated = await this.userRepository.update(id, { isActive: false });
+    if (!updated) throw new BadRequestException('Failed to deactivate user');
+
+    return { message: 'Tài khoản đã được vô hiệu hóa thành công' };
+  }
 }

@@ -375,6 +375,100 @@ export class CoachesService {
     return hours * 60 + minutes;
   }
 
+  /**
+   * Get all coach profiles for admin with pagination and filtering
+   */
+  async getAllCoachProfiles(
+    page: number = 1,
+    limit: number = 10,
+    search?: string,
+    isVerified?: boolean,
+    sortBy: string = 'createdAt',
+    sortOrder: 'asc' | 'desc' = 'desc',
+  ) {
+    try {
+      const filter: any = {};
+
+      if (search) {
+        // Search by user fullName or profile location
+        const users = await this.userModel
+          .find({
+            role: UserRole.COACH,
+            fullName: { $regex: search, $options: 'i' }
+          })
+          .select('_id')
+          .lean();
+        
+        const userIds = users.map(u => u._id);
+        
+        filter.$or = [
+          { user: { $in: userIds } },
+          { 'location.address': { $regex: search, $options: 'i' } },
+        ];
+      }
+
+      if (isVerified !== undefined) {
+        filter.bankVerified = isVerified;
+      }
+
+      const sortValue = sortOrder === 'asc' ? 1 : -1;
+      const sortField = ['rating', 'hourlyRate', 'createdAt'].includes(sortBy) ? sortBy : 'createdAt';
+
+      const skip = (page - 1) * limit;
+
+      const [profiles, total] = await Promise.all([
+        this.coachProfileModel
+          .find(filter)
+          .populate('user', 'fullName email phone role avatarUrl')
+          .sort({ [sortField]: sortValue })
+          .skip(skip)
+          .limit(limit)
+          .exec(),
+        this.coachProfileModel.countDocuments(filter),
+      ]);
+
+      const data = profiles
+        .filter((profile) => profile.user !== null)
+        .map((profile) => {
+          const user = profile.user as any;
+          return {
+            id: (profile._id as Types.ObjectId).toString(),
+            userId: user._id.toString(),
+            fullName: user.fullName,
+            email: user.email,
+            phone: user.phone,
+            avatarUrl: user.avatarUrl,
+            sports: profile.sports,
+            certification: profile.certification,
+            hourlyRate: profile.hourlyRate,
+            bio: profile.bio,
+            experience: profile.experience,
+            location: profile.location,
+            rating: profile.rating,
+            totalReviews: profile.totalReviews,
+            completedSessions: profile.completedSessions,
+            rank: profile.rank,
+            bankVerified: profile.bankVerified,
+            createdAt: (profile as any).createdAt,
+          };
+        });
+
+      return {
+        data,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error) {
+      this.logger.error('Error getting all coach profiles', error);
+      throw new InternalServerErrorException('Failed to get coach profiles');
+    }
+  }
+
+
   // ==================== Coach Registration Methods ====================
 
   /**

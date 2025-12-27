@@ -256,5 +256,11 @@ export class UsersController {
   ): Promise<GetAllUsersResponseDto> {
     return this.usersService.getAllUsers(query);
   }
-  
+  @UseGuards(JwtAccessTokenGuard)
+  @Patch('deactivate')
+  @ApiOperation({ summary: 'Deactivate current user account' })
+  @ApiResponse({ status: 200, description: 'Account deactivated successfully' })
+  async deactivateMe(@Req() req: any): Promise<{ message: string }> {
+    return this.usersService.deactivate(req.user.userId);
+  }
 }

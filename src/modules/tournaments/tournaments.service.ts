@@ -948,12 +948,12 @@ export class TournamentService {
                 (transaction.metadata?.tournamentId ?
                     String(transaction.metadata.tournamentId) : null);
 
+            (transaction.metadata?.tournamentId ?
+                String(transaction.metadata.tournamentId) : null);
+
             if (!tournamentId) {
-                this.logger.error(`[Tournament Payment Success] ❌ No tournament ID found for transaction:`, {
-                    transactionId: transaction._id,
-                    eventTournamentId: event.tournamentId,
-                    metadata: transaction.metadata
-                });
+                // Not a tournament transaction - likely a field/coach booking
+                this.logger.debug(`[Tournament Payment Success] ℹ️ Ignoring non-tournament transaction: ${transaction._id}`);
                 return;
             }
 
@@ -1362,9 +1362,8 @@ export class TournamentService {
                         amenities: field.amenities || [],
                         operatingHours: field.operatingHours || []
                     },
-                    pricingOverride: court.pricingOverride,
                     isActive: court.isActive,
-                    basePrice: court.pricingOverride?.basePrice || field.basePrice || 0
+                    basePrice: field.basePrice || 0
                 };
             });
 
@@ -1387,13 +1386,13 @@ export class TournamentService {
 
         // Find courts
         const courts = await this.courtModel.find({
-            sportType,
             isActive: true,
         })
             .populate({
                 path: 'field',
                 match: {
-                    'location.address': { $regex: location, $options: 'i' },
+                    sportType: sportType,
+                    'location.address': { $regex: new RegExp(location, 'i') },
                     isActive: true,
                 },
             })
@@ -1425,9 +1424,8 @@ export class TournamentService {
         // Calculate hours from start to end time
         const hours = this.calculateHours(startTime, endTime);
 
-        // Get base price from court's pricing override or field's base price
-        const basePrice = court.pricingOverride?.basePrice ||
-            (court.field?.basePrice || 100000);
+        // Get base price from field's base price
+        const basePrice = court.field?.basePrice || 100000;
 
         // Apply any date-based pricing (weekend/holiday multipliers)
         const dayOfWeek = date.getDay();

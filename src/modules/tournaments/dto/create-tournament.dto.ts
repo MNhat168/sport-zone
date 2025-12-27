@@ -180,13 +180,6 @@ export class CourtSelectionDto {
   @IsOptional()
   @IsString()
   fieldId?: string;
-
-  @ApiProperty({ description: 'Court pricing override (if any)' })
-  @IsOptional()
-  courtPricing?: {
-    basePrice?: number;
-    multiplier?: number;
-  };
 }
 
 // DTO for court availability check
@@ -408,7 +401,6 @@ export class CourtDtoHelpers {
    */
   static calculateTotalCost(
     courts: Array<{
-      pricingOverride?: { basePrice?: number };
       field?: { basePrice?: number };
     }>,
     date: string,
@@ -422,7 +414,7 @@ export class CourtDtoHelpers {
     const weekendMultiplier = isWeekend ? 1.2 : 1.0;
 
     return courts.reduce((total, court) => {
-      const basePrice = court.pricingOverride?.basePrice || court.field?.basePrice || 100000;
+      const basePrice = court.field?.basePrice || 100000;
       const courtCost = basePrice * hours * weekendMultiplier;
       return total + Math.round(courtCost);
     }, 0);
@@ -436,7 +428,7 @@ export class CourtDtoHelpers {
       id: court._id,
       courtNumber: court.courtNumber,
       name: `${court.field?.name || 'Unknown Field'} - Court ${court.courtNumber}`,
-      sportType: court.sportType,
+      sportType: court.field?.sportType,
       field: {
         id: court.field?._id,
         name: court.field?.name,
@@ -446,8 +438,8 @@ export class CourtDtoHelpers {
         basePrice: court.field?.basePrice || 0
       },
       pricing: {
-        basePrice: court.pricingOverride?.basePrice || court.field?.basePrice || 0,
-        hasOverride: !!court.pricingOverride?.basePrice
+        basePrice: court.field?.basePrice || 0,
+        hasOverride: false
       },
       isActive: court.isActive,
       amenities: court.field?.amenities || []

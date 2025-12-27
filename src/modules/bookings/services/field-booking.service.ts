@@ -85,8 +85,7 @@ export class FieldBookingService {
           bookingData.startTime,
           bookingData.endTime,
           field,
-          bookingDate,
-          court.pricingOverride
+          bookingDate
         );
 
         // ✅ SECURITY: Atomic upsert with version initialization (Pure Lazy Creation)
@@ -461,8 +460,7 @@ export class FieldBookingService {
           bookingData.startTime,
           bookingData.endTime,
           field,
-          bookingDate,
-          court.pricingOverride
+          bookingDate
         );
 
         // ✅ SECURITY: Atomic upsert with version initialization (Pure Lazy Creation)
@@ -506,11 +504,11 @@ export class FieldBookingService {
         }
 
         // Calculate amenities fee if provided
-        let amenitiesFee = 0;
-        if (bookingData.selectedAmenities && bookingData.selectedAmenities.length > 0) {
-          // TODO: Calculate amenities fee from Amenity model
-          amenitiesFee = 0; // Placeholder
-        }
+        const amenitiesFee = await this.calculateAmenitiesFee(
+          bookingData.fieldId,
+          bookingData.selectedAmenities || [],
+          session
+        );
 
         // Calculate booking amount and platform fee
         const bookingAmount = pricingInfo.totalPrice + amenitiesFee;
@@ -687,6 +685,35 @@ export class FieldBookingService {
     return court;
   }
 
+  /**
+   * Calculate total amenities fee from selected amenity IDs
+   * Fetches amenity prices from Field's amenities array
+   */
+  private async calculateAmenitiesFee(
+    fieldId: string,
+    amenityIds: string[],
+    session: ClientSession
+  ): Promise<number> {
+    if (!amenityIds || amenityIds.length === 0) return 0;
+
+    // Fetch field with amenities
+    const field = await this.fieldModel
+      .findById(fieldId)
+      .select('amenities')
+      .session(session)
+      .lean();
+
+    if (!field || !field.amenities || field.amenities.length === 0) return 0;
+
+    // Calculate total from field's amenities that match selected IDs
+    const amenityIdStrings = amenityIds.map(id => id.toString());
+    const total = field.amenities
+      .filter(a => amenityIdStrings.includes((a.amenity as Types.ObjectId).toString()))
+      .reduce((sum, a) => sum + (a.price || 0), 0);
+
+    return total;
+  }
+
   // Note: Email sending is now handled by BookingEmailService after transaction commits
   // This prevents email delays from causing transaction timeouts
 
@@ -829,9 +856,16 @@ export class FieldBookingService {
         // --- 3. CALCULATE PRICING ---
         // Field Price
         const fieldPricing = this.availabilityService.calculatePricing(
-          dto.startTime, dto.endTime, field, bookingDate, court.pricingOverride
+          dto.startTime, dto.endTime, field, bookingDate
         );
         fieldPrice = fieldPricing.totalPrice;
+
+        // Amenities Fee - ✅ CALCULATE FROM FIELD
+        const amenitiesFee = await this.calculateAmenitiesFee(
+          dto.fieldId,
+          dto.selectedAmenities || [],
+          session
+        );
 
         // Coach Price
         const startMin = this.availabilityService.timeStringToMinutes(dto.startTime);
@@ -839,7 +873,8 @@ export class FieldBookingService {
         const hours = (endMin - startMin) / 60;
         coachPrice = Math.round((coachConfig.hourlyRate || coachProfile.hourlyRate || 0) * hours);
 
-        const bookingAmount = fieldPrice + coachPrice;
+        // Total = Field + Amenities + Coach
+        const bookingAmount = fieldPrice + amenitiesFee + coachPrice;
         const platformFee = Math.round(bookingAmount * 0.05);
         const totalAmount = bookingAmount + platformFee;
 
@@ -872,12 +907,14 @@ export class FieldBookingService {
           bookingAmount,
           platformFee,
           totalPrice: totalAmount,
+          amenitiesFee,  // ✅ Save amenities fee
+          selectedAmenities: dto.selectedAmenities?.map(id => new Types.ObjectId(id)) || [],  // ✅ Save selected amenities
           note: dto.note,
 
           pricingSnapshot: {
             basePrice: field.basePrice,
             appliedMultiplier: fieldPricing.multiplier,
-            priceBreakdown: `Field: ${fieldPrice} + Coach: ${coachPrice}`
+            priceBreakdown: `Field: ${fieldPrice} + Amenities: ${amenitiesFee} + Coach: ${coachPrice}`  // ✅ Updated breakdown
           },
 
           metadata: {
