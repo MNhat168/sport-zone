@@ -148,15 +148,6 @@ export class AuthController {
     });
 
     // Log cookie config để debug
-    console.log('🍪 [setAuthCookies] Cookie config:', {
-      origin: origin || 'no origin',
-      isLocalhost,
-      isCrossOrigin,
-      hasHttps,
-      sameSite: sameSiteOption,
-      secure: secureOption,
-      host: req?.headers?.host,
-    });
 
     // Log warning nếu cross-origin không có HTTPS
     if (needsCrossSiteCookie && !hasHttps) {

@@ -1,0 +1,15 @@
+{
+  "watch": ["src"],
+  "ext": "ts",
+  "ignore": [
+    "src/**/*.spec.ts",
+    "src/**/*.test.ts",
+    "logs",
+    "dist",
+    "node_modules",
+    "coverage",
+    "*.log", 
+    "src/public/uploads"
+  ],
+  "exec": "nest start"
+}

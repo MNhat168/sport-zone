@@ -24,6 +24,7 @@ import { AmenitiesModule } from './modules/amenities/amenities.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import envConfig from './config/env.config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { Logger } from '@nestjs/common';
 
 import { ChatModule } from '@modules/chat/chat.module';
 import { CourtsModule } from './modules/courts/courts.module';
@@ -38,7 +39,48 @@ import { BillingModule } from './modules/billing/billing.module';
       load: [envConfig], // Load custom config
     }),
     MongooseModule.forRoot(process.env.MONGODB_URI!, {
+      // Connection pool settings - quan trọng cho production (AWS Lightsail)
+      maxPoolSize: 10, // Số lượng connection tối đa trong pool
+      minPoolSize: 2, // Số lượng connection tối thiểu để giữ sẵn
+      socketTimeoutMS: 45000, // Timeout cho socket operations (45s)
+      connectTimeoutMS: 30000, // Timeout khi kết nối ban đầu (30s)
+      serverSelectionTimeoutMS: 30000, // Timeout khi chọn server (30s)
+      heartbeatFrequencyMS: 10000, // Kiểm tra kết nối mỗi 10s
+      maxIdleTimeMS: 30000, // Đóng connection idle sau 30s
+      
+      // Retry settings
+      retryWrites: true,
+      retryReads: true,
+      
+      // Keep connection alive
+      keepAlive: true,
+      keepAliveInitialDelay: 30000,
+      
       connectionFactory: (connection) => {
+        const logger = new Logger('MongoDB');
+        
+        // Event handlers để xử lý connection errors và reconnection
+        connection.on('connected', () => {
+          logger.log('✅ MongoDB connected successfully');
+        });
+        
+        connection.on('error', (error) => {
+          logger.error('❌ MongoDB connection error:', error);
+        });
+        
+        connection.on('disconnected', () => {
+          logger.warn('⚠️ MongoDB disconnected. Attempting to reconnect...');
+        });
+        
+        connection.on('reconnected', () => {
+          logger.log('✅ MongoDB reconnected successfully');
+        });
+        
+        connection.on('close', () => {
+          logger.warn('⚠️ MongoDB connection closed');
+        });
+        
+        // Plugin để format JSON output
         connection.plugin((schema: any) => {
           schema.set('toJSON', {
             virtuals: true,
@@ -49,6 +91,7 @@ import { BillingModule } from './modules/billing/billing.module';
             },
           });
         });
+        
         return connection;
       },
     }),

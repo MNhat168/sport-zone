@@ -319,6 +319,29 @@ export class BookingsController {
   }
 
   /**
+   * Initiate PayOS payment for an existing booking (e.g. held booking)
+   * Creates a transaction and returns PayOS checkout URL
+   */
+  @Post('bookings/:bookingId/payment/payos')
+  @UseGuards(OptionalJwtAuthGuard)
+  @RateLimit({ ttl: 60, limit: 10 })
+  @ApiOperation({
+    summary: 'Initiate PayOS payment for existing booking',
+    description: 'Creates a PayOS payment link for an existing booking (e.g. held slot). Returns checkoutUrl.'
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Payment link created successfully',
+  })
+  async createPayOSPayment(
+    @Request() req: any,
+    @Param('bookingId') bookingId: string,
+  ) {
+    const userId = req.user?.userId || req.user?._id || req.user?.id || null;
+    return await this.bookingsService.createPayOSPaymentForBooking(userId, bookingId);
+  }
+
+  /**
    * Tạo booking coach V2 với chuyển khoản ngân hàng và ảnh chứng minh
    * Sử dụng PaymentMethod.BANK_TRANSFER và yêu cầu upload ảnh chứng minh
    * ✅ SECURITY: Rate limited to prevent booking spam
