@@ -273,6 +273,60 @@ export class FieldsService {
     }
 
     /**
+     * Update field verification status (Admin only)
+     * @param fieldId - Field ID to update
+     * @param isAdminVerify - New verification status
+     * @returns Updated field DTO
+     */
+    async updateVerificationStatus(
+        fieldId: string,
+        isAdminVerify: boolean,
+    ): Promise<FieldsDto> {
+        const field = await this.fieldModel.findByIdAndUpdate(
+            fieldId,
+            { isAdminVerify },
+            { new: true }
+        ).populate('owner').lean().exec();
+
+        if (!field) {
+            throw new NotFoundException('Field not found');
+        }
+
+        // Format and return the updated field
+        const price = this.priceFormatService.formatPrice(field.basePrice);
+        const validImages = (field.images || []).filter((img: string) => {
+            if (!img || typeof img !== 'string') return false;
+            if (img.includes('placeholder') || img.includes('placehold.co')) return false;
+            return img.trim().length > 0;
+        });
+
+        return {
+            id: field._id?.toString() || '',
+            owner: field.owner?.toString() || '',
+            name: field.name,
+            sportType: field.sportType,
+            description: field.description,
+            location: field.location,
+            images: validImages,
+            operatingHours: field.operatingHours,
+            slotDuration: field.slotDuration,
+            minSlots: field.minSlots,
+            maxSlots: field.maxSlots,
+            priceRanges: field.priceRanges,
+            basePrice: field.basePrice,
+            price: price,
+            isActive: field.isActive,
+            isAdminVerify: field.isAdminVerify ?? false,
+            maintenanceNote: field.maintenanceNote,
+            maintenanceUntil: field.maintenanceUntil,
+            rating: field.rating,
+            totalReviews: field.totalReviews,
+            createdAt: field.createdAt,
+            updatedAt: field.updatedAt,
+        } as FieldsDto;
+    }
+
+    /**
      * Lấy danh sách field của field-owner
      * @param ownerId - ID của field owner
      * @param query - Optional query filters

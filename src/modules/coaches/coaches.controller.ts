@@ -138,7 +138,33 @@ export class CoachesController {
     return this.coachesService.rejectRegistrationRequest(requestId, adminId, dto.reason);
   }
 
-  // ==================== End Coach Registration Endpoints ====================
+  @UseGuards(JwtAccessTokenGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Get('admin/profiles')
+  @ApiOperation({ summary: 'Admin: list all coach profiles' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getAllCoachProfiles(
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '10',
+    @Query('search') search?: string,
+    @Query('isVerified') isVerified?: string,
+    @Query('sortBy') sortBy: string = 'createdAt',
+    @Query('sortOrder') sortOrder: 'asc' | 'desc' = 'desc',
+  ) {
+    const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+    const parsedLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
+    const parsedIsVerified = isVerified === 'true' ? true : isVerified === 'false' ? false : undefined;
+    return this.coachesService.getAllCoachProfiles(
+      parsedPage,
+      parsedLimit,
+      search,
+      parsedIsVerified,
+      sortBy,
+      sortOrder,
+    );
+  }
+
 
   /**
    * Public endpoint: GET /coaches/public?sports=football,basketball

@@ -1,14 +1,38 @@
-import { Controller, Get, Query, Param, BadRequestException } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { Controller, Get, Query, Param, BadRequestException, Patch, Body, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { Types } from 'mongoose';
 import { FieldsService } from './fields.service';
 import { FieldsDto } from './dtos/fields.dto';
 import { BankAccountResponseDto } from '../field-owner/dtos/bank-account.dto';
+import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../decorators/roles.decorator';
+import { UserRole } from '@common/enums/user.enum';
 
 @ApiTags('Fields')
 @Controller('fields')
 export class FieldsController {
   constructor(private readonly fieldsService: FieldsService) { }
+
+  @Patch('admin/:id/verify')
+  @UseGuards(JwtAccessTokenGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Toggle field verification status (Admin only)' })
+  @ApiParam({ name: 'id', description: 'Field ID' })
+  @ApiResponse({ status: 200, description: 'Field verification status updated successfully', type: FieldsDto })
+  @ApiResponse({ status: 400, description: 'Invalid field ID format' })
+  @ApiResponse({ status: 404, description: 'Field not found' })
+  async toggleVerification(
+    @Param('id') id: string,
+    @Body() dto: { isAdminVerify: boolean },
+  ): Promise<FieldsDto> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException(`Invalid field ID format: "${id}". Field ID must be a valid MongoDB ObjectId.`);
+    }
+    return this.fieldsService.updateVerificationStatus(id, dto.isAdminVerify);
+  }
+
 
   @Get()
   @ApiOperation({ summary: 'Get all fields with filtering' })
