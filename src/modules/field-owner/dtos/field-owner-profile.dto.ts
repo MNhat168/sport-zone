@@ -23,14 +23,6 @@ export class FieldOwnerProfileDto {
     @ApiProperty({ example: 'District 3, Ho Chi Minh City', description: 'Địa điểm cơ sở vật chất' })
     facilityLocation: string;
 
-    @ApiProperty({
-        type: [String],
-        enum: SportType,
-        example: ['football', 'tennis'],
-        description: 'Các môn thể thao được hỗ trợ'
-    })
-    supportedSports: SportType[];
-
     @ApiProperty({ example: 'Cơ sở vật chất hiện đại với sân bóng đá và tennis', description: 'Mô tả cơ sở vật chất' })
     description: string;
 
@@ -96,16 +88,6 @@ export class CreateFieldOwnerProfileDto {
     @IsString()
     facilityLocation: string;
 
-    @ApiProperty({
-        type: [String],
-        enum: SportType,
-        example: ['football', 'tennis'],
-        description: 'Các môn thể thao được hỗ trợ'
-    })
-    @IsArray()
-    @IsEnum(SportType, { each: true })
-    supportedSports: SportType[];
-
     @ApiProperty({ example: 'Cơ sở vật chất hiện đại với sân bóng đá và tennis', description: 'Mô tả cơ sở vật chất' })
     @IsString()
     description: string;
@@ -156,17 +138,6 @@ export class UpdateFieldOwnerProfileDto {
     @IsOptional()
     @IsString()
     facilityLocation?: string;
-
-    @ApiPropertyOptional({
-        type: [String],
-        enum: SportType,
-        example: ['football', 'tennis', 'badminton'],
-        description: 'Các môn thể thao được hỗ trợ'
-    })
-    @IsOptional()
-    @IsArray()
-    @IsEnum(SportType, { each: true })
-    supportedSports?: SportType[];
 
     @ApiPropertyOptional({ example: 'Cơ sở vật chất hiện đại với sân bóng đá, tennis và cầu lông', description: 'Mô tả cơ sở vật chất' })
     @IsOptional()

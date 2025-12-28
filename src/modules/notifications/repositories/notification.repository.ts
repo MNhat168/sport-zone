@@ -13,7 +13,7 @@ export class NotificationRepository implements NotificationRepositoryInterface {
     ) { }
 
     async findAll(): Promise<Notification[]> {
-        return this.notificationModel.find().exec();
+        return this.notificationModel.find().sort({ createdAt: -1 }).exec();
     }
 
     async findById(id: string): Promise<Notification | null> {
@@ -21,7 +21,7 @@ export class NotificationRepository implements NotificationRepositoryInterface {
     }
 
     async findByCondition(condition: FilterQuery<Notification>): Promise<Notification[]> {
-        return this.notificationModel.find(condition).exec();
+        return this.notificationModel.find(condition).sort({ createdAt: -1 }).exec();
     }
 
     async create(data: CreateNotificationDto): Promise<Notification> {

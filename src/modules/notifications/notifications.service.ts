@@ -46,12 +46,8 @@ export class NotificationsService {
     const notifications = await this.notificationRepository.findByCondition({
       recipient: new Types.ObjectId(userId)
     });
-    // Sort by createdAt descending, handle undefined
-    return notifications.sort((a, b) => {
-      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      return bTime - aTime;
-    });
+    // Sorted by createdAt descending in repository
+    return notifications;
   }
 
   async getUnreadCount(userId: string): Promise<number> {

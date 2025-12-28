@@ -29,9 +29,6 @@ export class FacilityInfo {
     coordinates: [number, number]; // [longitude, latitude] in GeoJSON format
   };
 
-  @Prop({ type: [String], enum: SportType })
-  supportedSports?: SportType[];
-
   @Prop({ required: true })
   description: string;
 

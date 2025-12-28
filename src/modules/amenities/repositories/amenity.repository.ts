@@ -24,7 +24,7 @@ export class AmenityRepository implements AmenityRepositoryInterface {
   }
 
   async findAll(condition?: FilterQuery<Amenity>): Promise<Amenity[]> {
-    return await this.amenityModel.find(condition || {}).exec();
+    return await this.amenityModel.find(condition || {}).sort({ createdAt: -1 }).exec();
   }
 
   async update(id: string, data: Partial<Amenity>): Promise<Amenity | null> {
@@ -44,7 +44,7 @@ export class AmenityRepository implements AmenityRepositoryInterface {
     const skip = (page - 1) * limit;
     
     const [data, total] = await Promise.all([
-      this.amenityModel.find(condition).skip(skip).limit(limit).exec(),
+      this.amenityModel.find(condition).sort({ createdAt: -1 }).skip(skip).limit(limit).exec(),
       this.amenityModel.countDocuments(condition).exec(),
     ]);
 

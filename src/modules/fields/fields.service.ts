@@ -2675,7 +2675,6 @@ export class FieldsService {
                 facility: {
                     facilityName: createDto.facilityName,
                     facilityLocation: createDto.facilityLocation,
-                    supportedSports: createDto.supportedSports,
                     description: createDto.description,
                     amenities: createDto.amenities || [],
                     businessHours: createDto.businessHours,
@@ -2779,7 +2778,6 @@ export class FieldsService {
             const updateData: any = {};
             if (updateDto.facilityName !== undefined) updateData.facilityName = updateDto.facilityName;
             if (updateDto.facilityLocation !== undefined) updateData.facilityLocation = updateDto.facilityLocation;
-            if (updateDto.supportedSports !== undefined) updateData.supportedSports = updateDto.supportedSports;
             if (updateDto.description !== undefined) updateData.description = updateDto.description;
             if (updateDto.amenities !== undefined) updateData.amenities = updateDto.amenities;
             if (updateDto.verificationDocument !== undefined) updateData.verificationDocument = updateDto.verificationDocument;
@@ -2897,7 +2895,6 @@ export class FieldsService {
             userEmail: profile.user?.email || undefined,
             facilityName: profile.facilityName,
             facilityLocation: profile.facilityLocation,
-            supportedSports: profile.supportedSports,
             description: profile.description,
             amenities: profile.amenities,
             rating: profile.rating,
@@ -3217,7 +3214,6 @@ export class FieldsService {
             // Facility information
             facilityName: (request as any).facility?.facilityName,
             facilityLocation: (request as any).facility?.facilityLocation,
-            supportedSports: (request as any).facility?.supportedSports,
             description: (request as any).facility?.description,
             amenities: (request as any).facility?.amenities,
             businessHours: (request as any).facility?.businessHours,
