@@ -1358,7 +1358,6 @@ export class FieldOwnerService {
         facility: {
           facilityName: createDto.facilityName,
           facilityLocation: createDto.facilityLocation,
-          supportedSports: createDto.supportedSports,
           description: createDto.description,
           amenities: createDto.amenities || [],
           businessHours: createDto.businessHours,
@@ -1445,8 +1444,6 @@ export class FieldOwnerService {
       if (updateDto.facilityName !== undefined) facilityUpdate.facilityName = updateDto.facilityName;
       if (updateDto.facilityLocation !== undefined)
         facilityUpdate.facilityLocation = updateDto.facilityLocation;
-      if (updateDto.supportedSports !== undefined)
-        facilityUpdate.supportedSports = updateDto.supportedSports;
       if (updateDto.description !== undefined) facilityUpdate.description = updateDto.description;
       if (updateDto.amenities !== undefined) facilityUpdate.amenities = updateDto.amenities;
       if (updateDto.verificationDocument !== undefined)
@@ -1593,7 +1590,6 @@ export class FieldOwnerService {
               ],
             }
             : undefined,
-          supportedSports: dto.supportedSports || [],
           description: dto.description || '',
           amenities: dto.amenities || [],
           businessHours: dto.businessHours,
@@ -1744,7 +1740,6 @@ export class FieldOwnerService {
       const baseFacility = request.facility || ({} as any);
       const facilityName = dto.facilityName ?? baseFacility.facilityName;
       const facilityLocation = dto.facilityLocation ?? baseFacility.facilityLocation;
-      const supportedSports = dto.supportedSports ?? baseFacility.supportedSports;
       const description = dto.description ?? baseFacility.description;
       const amenities = dto.amenities ?? baseFacility.amenities;
       // Use first field image as verification document for profile
@@ -1758,17 +1753,11 @@ export class FieldOwnerService {
         throw new BadRequestException('Missing required facility information to approve registration');
       }
 
-      // Validate supportedSports if provided
-      if (supportedSports && supportedSports.length === 0) {
-        throw new BadRequestException('Supported sports cannot be empty if provided');
-      }
-
       const profile = new this.fieldOwnerProfileModel({
         user: request.userId,
         facility: {
           facilityName,
           facilityLocation,
-          supportedSports,
           description,
           amenities,
           businessHours,
@@ -1790,7 +1779,6 @@ export class FieldOwnerService {
         ...(request.facility || {}),
         facilityName,
         facilityLocation,
-        supportedSports,
         description,
         amenities,
         businessHours,
@@ -2676,7 +2664,6 @@ export class FieldOwnerService {
       userEmail: profile.user?.email || undefined,
       facilityName: profile.facility?.facilityName ?? profile.facilityName ?? '',
       facilityLocation: profile.facility?.facilityLocation ?? profile.facilityLocation ?? '',
-      supportedSports: profile.facility?.supportedSports ?? profile.supportedSports ?? [],
       description: profile.facility?.description ?? profile.description ?? '',
       amenities: profile.facility?.amenities ?? profile.amenities ?? [],
       rating: profile.rating ?? 0,
@@ -2716,7 +2703,6 @@ export class FieldOwnerService {
           lng: facility.facilityLocationCoordinates.coordinates[0],
         }
         : undefined,
-      supportedSports: facility?.supportedSports,
       description: facility?.description,
       amenities: facility?.amenities,
       businessHours: facility?.businessHours,

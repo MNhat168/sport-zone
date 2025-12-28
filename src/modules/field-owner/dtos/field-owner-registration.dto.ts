@@ -133,17 +133,6 @@ export class CreateFieldOwnerRegistrationDto {
   @Type(() => FacilityLocationCoordinatesDto)
   facilityLocationCoordinates?: FacilityLocationCoordinatesDto;
 
-  @ApiPropertyOptional({
-    type: [String],
-    enum: SportType,
-    example: ['football', 'tennis'],
-    description: 'Các môn thể thao hỗ trợ',
-  })
-  @IsOptional()
-  @IsArray()
-  @IsEnum(SportType, { each: true })
-  supportedSports?: SportType[];
-
   @ApiPropertyOptional({ example: 'Cơ sở vật chất hiện đại với sân bóng đá và tennis', description: 'Mô tả cơ sở vật chất (có thể điền sau khi approve)' })
   @IsOptional()
   @IsString()
@@ -220,17 +209,6 @@ export class UpdateFieldOwnerRegistrationDto {
   @Type(() => FacilityLocationCoordinatesDto)
   facilityLocationCoordinates?: FacilityLocationCoordinatesDto;
 
-  @ApiPropertyOptional({
-    type: [String],
-    enum: SportType,
-    example: ['football', 'tennis'],
-    description: 'Các môn thể thao hỗ trợ',
-  })
-  @IsOptional()
-  @IsArray()
-  @IsEnum(SportType, { each: true })
-  supportedSports?: SportType[];
-
   @ApiPropertyOptional({ example: 'Cơ sở vật chất hiện đại với sân bóng đá và tennis', description: 'Mô tả cơ sở vật chất' })
   @IsOptional()
   @IsString()
@@ -284,17 +262,6 @@ export class ApproveFieldOwnerRegistrationDto {
   @ValidateNested()
   @Type(() => FacilityLocationCoordinatesDto)
   facilityLocationCoordinates?: FacilityLocationCoordinatesDto;
-
-  @ApiPropertyOptional({
-    type: [String],
-    enum: SportType,
-    example: ['football', 'tennis'],
-    description: 'Các môn thể thao hỗ trợ',
-  })
-  @IsOptional()
-  @IsArray()
-  @IsEnum(SportType, { each: true })
-  supportedSports?: SportType[];
 
   @ApiPropertyOptional({ example: 'Cơ sở vật chất hiện đại với sân bóng đá và tennis', description: 'Mô tả cơ sở vật chất' })
   @IsOptional()
@@ -381,14 +348,6 @@ export class FieldOwnerRegistrationResponseDto {
     type: FacilityLocationCoordinatesDto,
   })
   facilityLocationCoordinates?: FacilityLocationCoordinatesDto;
-
-  @ApiPropertyOptional({
-    type: [String],
-    enum: SportType,
-    example: ['football', 'tennis'],
-    description: 'Các môn thể thao hỗ trợ',
-  })
-  supportedSports?: SportType[];
 
   @ApiProperty({ example: 'Cơ sở vật chất hiện đại với sân bóng đá và tennis', description: 'Mô tả cơ sở vật chất' })
   description: string;

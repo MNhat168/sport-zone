@@ -62,7 +62,7 @@ export class CoachesService {
     if (query?.name)
       userFilter.fullName = { $regex: query.name, $options: 'i' };
 
-    const users = await this.userModel.find(userFilter).lean();
+    const users = await this.userModel.find(userFilter).sort({ createdAt: -1 }).lean();
 
     const profileFilter: any = { user: { $in: users.map((u) => u._id) } };
     if (query?.sportType) profileFilter.sports = query.sportType;
@@ -122,7 +122,7 @@ export class CoachesService {
 
 
   async getAllCoaches(): Promise<any[]> {
-    const users = await this.userModel.find({ role: UserRole.COACH }).lean();
+    const users = await this.userModel.find({ role: UserRole.COACH }).sort({ createdAt: -1 }).lean();
     const profiles = await this.coachProfileModel
       .find({ user: { $in: users.map((u) => u._id) } })
       .lean();
@@ -152,7 +152,7 @@ export class CoachesService {
    * @param sports optional array of SportType to filter coaches
    */
   async getAllCoachesPublic(sports?: SportType[]): Promise<any[]> {
-    const users = await this.userModel.find({ role: UserRole.COACH }).lean();
+    const users = await this.userModel.find({ role: UserRole.COACH }).sort({ createdAt: -1 }).lean();
 
     const profileFilter: any = { user: { $in: users.map((u) => u._id) } };
     if (sports && sports.length > 0) {

@@ -12,7 +12,7 @@ export class UserRepository implements UserRepositoryInterface {
   ) { }
 
   findAll(): Promise<User[]> {
-    return this.userModel.find().exec();
+    return this.userModel.find().sort({ createdAt: -1 }).exec();
   }
 
   findById(id: string): Promise<User | null> {
