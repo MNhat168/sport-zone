@@ -87,7 +87,6 @@ export interface PlatformAnalyticsData {
     };
     sportsFieldBookings: { _id: string; count: number }[];
     sportsTournamentParticipation: { _id: string; count: number }[];
-    userFavoriteSports: { _id: string; count: number }[];
     topFieldsByFavorites: {
         fieldId: string;
         name: string;
@@ -287,9 +286,6 @@ export class AiService {
         ## SPORTS TOURNAMENT PARTICIPATION
         ${JSON.stringify(data.sportsTournamentParticipation || [], null, 2)}
         
-        ## USER FAVORITE SPORTS
-        ${JSON.stringify(data.userFavoriteSports || [], null, 2)}
-        
         ## TOP FIELDS BY FAVORITES
         ${JSON.stringify(data.topFieldsByFavorites?.slice(0, 10) || [], null, 2)}
         
@@ -372,15 +368,6 @@ export class AiService {
             if (item._id) {
                 const existing = sportMap.get(item._id) || { sport: item._id, bookings: 0, tournaments: 0, favorites: 0 };
                 existing.tournaments += item.count || 0;
-                sportMap.set(item._id, existing);
-            }
-        });
-
-        // Aggregate user favorites
-        data.userFavoriteSports?.forEach(item => {
-            if (item._id) {
-                const existing = sportMap.get(item._id) || { sport: item._id, bookings: 0, tournaments: 0, favorites: 0 };
-                existing.favorites += item.count || 0;
                 sportMap.set(item._id, existing);
             }
         });
@@ -885,23 +872,12 @@ export class AiService {
     }
 
     private identifyTrendingSports(data: PlatformAnalyticsData): string[] {
-        // Simple trending sports identification based on recent favorites
-        const trending = data.userFavoriteSports
+        // Identify trending sports based on field bookings
+        return data.sportsFieldBookings
             ?.sort((a, b) => (b.count || 0) - (a.count || 0))
             .slice(0, 3)
             .map(item => item._id)
             .filter(Boolean) || [];
-
-        // If no favorites data, use sports with most field bookings
-        if (trending.length === 0) {
-            return data.sportsFieldBookings
-                ?.sort((a, b) => (b.count || 0) - (a.count || 0))
-                .slice(0, 3)
-                .map(item => item._id)
-                .filter(Boolean) || [];
-        }
-
-        return trending;
     }
 
     private generateRecommendationsFromData(data: PlatformAnalyticsData): string[] {

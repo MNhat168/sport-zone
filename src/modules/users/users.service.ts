@@ -113,52 +113,6 @@ export class UsersService {
     return this.userModel.findOne({ email });
   }
 
-  async setFavouriteSports(email: string, favouriteSports: string[]) {
-    // Debug: log the value and type
-    console.log(
-      '[DEBUG] setFavouriteSports received:',
-      favouriteSports,
-      'Type:',
-      typeof favouriteSports,
-      'IsArray:',
-      Array.isArray(favouriteSports),
-    );
-
-    const user = await this.userModel.findOne({ email });
-    if (!user) {
-      throw new BadRequestException('User not found');
-    }
-
-    // Ensure favouriteSports input is an array
-    if (!Array.isArray(favouriteSports)) {
-      throw new BadRequestException('favouriteSports must be an array');
-    }
-
-    // Ensure user's favouriteSports is an array on the document
-    if (!Array.isArray(user.favouriteSports)) {
-      user.favouriteSports = [];
-    }
-
-    const currentSports: string[] = user.favouriteSports as string[];
-
-    // Filter incoming sports to only include strings not already present
-    const newSports = favouriteSports.filter(
-      (s) => typeof s === 'string' && !currentSports.includes(s),
-    );
-
-    if (newSports.length === 0) {
-      // Nothing to add - make this operation idempotent by returning the current user
-      // instead of treating it as an error. This avoids forcing callers to special-case
-      // duplicate submissions and prevents client-side flows (like the favorite-sports
-      // modal) from misbehaving when the selection hasn't changed.
-      return user;
-    }
-
-    user.favouriteSports.push(...newSports);
-    await user.save();
-    return user;
-  }
-
   async setFavouriteCoaches(email: string, favouriteCoaches: string[]) {
     const user = await this.userModel.findOne({ email });
     if (!user) {
@@ -239,57 +193,6 @@ export class UsersService {
 
     if (beforeCount === afterCount) {
       throw new BadRequestException('None of the provided coach IDs were in favourites');
-    }
-
-    await user.save();
-    return user;
-  }
-
-  /**
-   * Remove all favourite sports for the current user
-   * @param email - user email
-   * @returns updated user document
-   */
-  async removeAllFavouriteSports(email: string) {
-    const user = await this.userModel.findOne({ email });
-    if (!user) {
-      throw new BadRequestException('User not found');
-    }
-
-    if (!Array.isArray(user.favouriteSports) || user.favouriteSports.length === 0) {
-      throw new BadRequestException('No favourite sports to remove');
-    }
-
-    user.favouriteSports = [];
-    await user.save();
-    return user;
-  }
-
-  /**
-   * Remove a single favourite sport for the current user
-   * @param email - user email
-   * @param sportId - sport identifier to remove
-   */
-  async removeFavouriteSport(email: string, sportId: string) {
-    const user = await this.userModel.findOne({ email });
-    if (!user) {
-      throw new BadRequestException('User not found');
-    }
-
-    if (typeof sportId !== 'string' || sportId.trim() === '') {
-      throw new BadRequestException('Invalid sport id');
-    }
-
-    if (!Array.isArray(user.favouriteSports) || user.favouriteSports.length === 0) {
-      throw new BadRequestException('No favourite sports to remove');
-    }
-
-    const beforeCount = (user.favouriteSports || []).length;
-    user.favouriteSports = (user.favouriteSports || []).filter((s: any) => (s as any).toString() !== sportId);
-    const afterCount = (user.favouriteSports || []).length;
-
-    if (beforeCount === afterCount) {
-      throw new BadRequestException('Provided sport not found in favourites');
     }
 
     await user.save();

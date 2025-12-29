@@ -32,7 +32,6 @@ import { USER_REPOSITORY } from './interface/users.interface';
 import { Multer } from 'multer';
 import { AuthGuard } from '@nestjs/passport';
 import { UserRole } from '@common/enums/user.enum';
-import { SetFavouriteSportsDto } from './dto/set-favourite-sports.dto';
 import { SetFavouriteCoachesDto } from './dto/set-favourite-coaches.dto';
 import { SetFavouriteFieldsDto } from './dto/set-favourite-fields.dto';
 import { FavouriteCoachDto } from './dto/favourite-coach.dto';
@@ -76,67 +75,6 @@ export class UsersController {
     @Body() body: ChangePasswordDto,
   ) {
     return this.usersService.changePassword(req.user.userId, body);
-  }
-
-  @UseGuards(AuthGuard('jwt'))
-  @Post('favourite-sports')
-  async setFavouriteSports(
-    @Request() req,
-    @Body() body: SetFavouriteSportsDto,
-  ) {
-    const userEmail = req.user.email;
-    const user = await this.usersService.findByEmail(userEmail);
-    if (!user) {
-      throw new BadRequestException('User not found');
-    }
-    if (user.role !== UserRole.USER) {
-      throw new BadRequestException(
-        'Only users with role USER can set favourite fields',
-      );
-    }
-    // Debug: log the received body
-    console.log('[DEBUG] Controller received body:', body);
-    // Add multiple favourite fields, block duplicates
-    return this.usersService.setFavouriteSports(
-      userEmail,
-      body.favouriteSports,
-    );
-  }
-
-  @UseGuards(JwtAccessTokenGuard)
-  @Delete('favourite-sports')
-  @ApiOperation({ summary: 'Remove all favourite sports for current user' })
-  @ApiResponse({ status: 200, description: 'Favourite sports cleared' })
-  async removeAllFavouriteSports(@Request() req) {
-    const userEmail = req.user.email;
-    const user = await this.usersService.findByEmail(userEmail);
-    if (!user) {
-      throw new BadRequestException('User not found');
-    }
-
-    if (user.role !== UserRole.USER) {
-      throw new BadRequestException('Only users with role USER can remove favourite sports');
-    }
-
-    return this.usersService.removeAllFavouriteSports(userEmail);
-  }
-
-  @UseGuards(JwtAccessTokenGuard)
-  @Delete('favourite-sports/:sportId')
-  @ApiOperation({ summary: 'Remove a favourite sport for current user' })
-  @ApiResponse({ status: 200, description: 'Favourite sport removed' })
-  async removeFavouriteSport(@Request() req, @Param('sportId') sportId: string) {
-    const userEmail = req.user.email;
-    const user = await this.usersService.findByEmail(userEmail);
-    if (!user) {
-      throw new BadRequestException('User not found');
-    }
-
-    if (user.role !== UserRole.USER) {
-      throw new BadRequestException('Only users with role USER can remove favourite sports');
-    }
-
-    return this.usersService.removeFavouriteSport(userEmail, sportId);
   }
 
   @UseGuards(JwtAccessTokenGuard)

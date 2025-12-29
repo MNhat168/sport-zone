@@ -34,9 +34,6 @@ export class User extends BaseEntity {
   @Prop({ type: String })
   googleId?: string;
 
-  @Prop({ type: [String] })
-  favouriteSports?: string[];
-
   @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
   favouriteCoaches?: Types.ObjectId[];
 

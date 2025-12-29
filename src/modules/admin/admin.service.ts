@@ -590,7 +590,6 @@ export class AdminService {
             userStats,
             sportsFieldBookings,
             sportsTournamentParticipation,
-            userFavoriteSports,
             topFieldsByFavorites,
             topCoachesByFavorites,
             bookingPatterns,
@@ -603,7 +602,6 @@ export class AdminService {
             this.getUserStatistics(dateFilter),
             this.getSportsFieldBookings(dateFilter, sportType),
             this.getSportsTournamentParticipation(dateFilter, sportType),
-            this.getUserFavoriteSports(),
             this.getTopFieldsByFavorites(dateFilter, sportType),
             this.getTopCoachesByFavorites(dateFilter, sportType),
             this.getBookingPatterns(dateFilter),
@@ -620,7 +618,6 @@ export class AdminService {
                 userStats,
                 sportsFieldBookings,
                 sportsTournamentParticipation,
-                userFavoriteSports,
                 topFieldsByFavorites,
                 topCoachesByFavorites,
                 bookingPatterns,
@@ -636,7 +633,6 @@ export class AdminService {
             userStats: userStats[0] || {},
             sportsFieldBookings: sportsFieldBookings || [],
             sportsTournamentParticipation: sportsTournamentParticipation || [],
-            userFavoriteSports: userFavoriteSports || [],
             topFieldsByFavorites: topFieldsByFavorites || [],
             topCoachesByFavorites: topCoachesByFavorites || [],
             bookingPatterns: bookingPatterns || {},
@@ -657,7 +653,6 @@ export class AdminService {
         userStats: any[],
         sportsFieldBookings: any[],
         sportsTournamentParticipation: any[],
-        userFavoriteSports: any[],
         topFieldsByFavorites: any[],
         topCoachesByFavorites: any[],
         bookingPatterns: any,
@@ -670,8 +665,7 @@ export class AdminService {
 
         const sportsPopularity = this.calculateSportsPopularityFromData(
             sportsFieldBookings,
-            sportsTournamentParticipation,
-            userFavoriteSports
+            sportsTournamentParticipation
         );
         // Calculate growth rate for monthly revenue
         const monthlyRevenueWithGrowth = monthlyRevenueData.map((month, index, array) => {
@@ -739,8 +733,7 @@ export class AdminService {
 
     private calculateSportsPopularityFromData(
         sportsFieldBookings: any[],
-        sportsTournamentParticipation: any[],
-        userFavoriteSports: any[]
+        sportsTournamentParticipation: any[]
     ): Array<{ sport: string; bookings: number; tournaments: number; favorites: number; score: number }> {
         const sportMap = new Map<string, {
             sport: string;
@@ -763,15 +756,6 @@ export class AdminService {
             if (item._id) {
                 const existing = sportMap.get(item._id) || { sport: item._id, bookings: 0, tournaments: 0, favorites: 0 };
                 existing.tournaments += item.count || 0;
-                sportMap.set(item._id, existing);
-            }
-        });
-
-        // Aggregate user favorites
-        userFavoriteSports?.forEach(item => {
-            if (item._id) {
-                const existing = sportMap.get(item._id) || { sport: item._id, bookings: 0, tournaments: 0, favorites: 0 };
-                existing.favorites += item.count || 0;
                 sportMap.set(item._id, existing);
             }
         });
@@ -1840,14 +1824,6 @@ export class AdminService {
                     count: { $sum: { $size: "$participants" } }
                 }
             },
-            { $sort: { count: -1 } }
-        ]);
-    }
-
-    private async getUserFavoriteSports(): Promise<any[]> {
-        return this.userModel.aggregate([
-            { $unwind: "$favouriteSports" },
-            { $group: { _id: "$favouriteSports", count: { $sum: 1 } } },
             { $sort: { count: -1 } }
         ]);
     }
