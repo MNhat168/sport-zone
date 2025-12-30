@@ -139,8 +139,29 @@ export class CleanupService {
       throw new Error(`Booking ${bookingId} not found`);
     }
 
+    // Identify payment method from metadata
+    const paymentMethod = booking.metadata?.paymentMethod;
+
+    // Delegate to specialized handler based on payment method
+    if (paymentMethod === PaymentMethod.PAYOS) {
+      await this.cancelPayOSHold(booking, cancellationReason, maxAgeMinutes);
+    } else {
+      // Default to Bank Transfer logic (or specifically check for BANK_TRANSFER)
+      await this.cancelBankTransferHold(booking, cancellationReason, maxAgeMinutes);
+    }
+  }
+
+  /**
+   * Specifically handles cancellation of BANK_TRANSFER hold bookings
+   */
+  private async cancelBankTransferHold(
+    booking: any,
+    cancellationReason: string,
+    maxAgeMinutes: number
+  ): Promise<void> {
+    const bookingId = booking._id.toString();
+
     // Verify this is a hold booking that can be cancelled
-    // ✅ Check transaction existence using query instead of booking.transaction field
     const hasTransaction = await this.transactionModel.exists({
       booking: new Types.ObjectId(bookingId),
       type: TransactionType.PAYMENT
@@ -150,12 +171,11 @@ export class CleanupService {
       booking.status === BookingStatus.PENDING &&
       booking.paymentStatus === 'unpaid' &&
       !hasTransaction &&
-      booking.metadata?.paymentMethod === PaymentMethod.BANK_TRANSFER &&
       booking.metadata?.isSlotHold === true;
 
     if (!isHoldBooking) {
       throw new Error(
-        'This booking cannot be cancelled via this endpoint. Only PENDING bookings without payment (slot holds) can be cancelled.'
+        'This booking cannot be cancelled via this endpoint. Only PENDING BANK_TRANSFER bookings without payment (slot holds) can be cancelled.'
       );
     }
 
@@ -167,6 +187,49 @@ export class CleanupService {
     }
 
     // Cancel booking and release slots
+    await this.cancelBookingAndReleaseSlots(bookingId, cancellationReason);
+  }
+
+  /**
+   * Specifically handles cancellation of PAYOS hold bookings
+   * Also cancels any pending transactions
+   */
+  private async cancelPayOSHold(
+    booking: any,
+    cancellationReason: string,
+    maxAgeMinutes: number
+  ): Promise<void> {
+    const bookingId = booking._id.toString();
+
+    // Verify booking is not too old (prevent abuse)
+    const bookingAge = Date.now() - new Date(booking.createdAt).getTime();
+    const maxAge = maxAgeMinutes * 60 * 1000;
+    if (bookingAge > maxAge) {
+      throw new Error(`Booking is too old to cancel via this endpoint (max ${maxAgeMinutes} minutes)`);
+    }
+
+    // 1. Cancel any PENDING transactions for this booking
+    const pendingTransactions = await this.transactionModel.find({
+      booking: new Types.ObjectId(bookingId),
+      status: TransactionStatus.PENDING,
+      type: TransactionType.PAYMENT
+    });
+
+    for (const tx of pendingTransactions) {
+      await this.transactionModel.findByIdAndUpdate(tx._id, {
+        status: TransactionStatus.FAILED,
+        notes: `Cancelled due to booking hold cancellation: ${cancellationReason}`,
+        errorMessage: 'Booking hold cancelled',
+        metadata: {
+          ...((tx as any).metadata || {}),
+          cancelledAt: new Date(),
+          cancelReason: 'hold_cancelled'
+        }
+      });
+      this.logger.log(`[Cancel PayOS Hold] Cancelled pending transaction ${tx._id}`);
+    }
+
+    // 2. Cancel booking and release slots
     await this.cancelBookingAndReleaseSlots(bookingId, cancellationReason);
   }
 

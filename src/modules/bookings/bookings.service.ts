@@ -224,6 +224,613 @@ export class BookingsService {
     return this.availabilityService.getFieldAvailability(fieldId, query);
   }
 
+  /**
+   * Create bookings for consecutive days (Turn 1: Simple Recurring Booking)
+   * Same court, same time, multiple consecutive dates
+   * Uses all-or-nothing approach: if any date conflicts, entire request fails
+   */
+  async createConsecutiveDaysBooking(
+    dto: any, // CreateConsecutiveDaysBookingDto
+    userId?: string
+  ) {
+    const session: ClientSession = await this.connection.startSession();
+
+    try {
+      return await session.withTransaction(async () => {
+        // 1. Generate date range
+        const dates = this.generateDateRange(dto.startDate, dto.endDate);
+
+        if (dates.length === 0) {
+          throw new BadRequestException('Invalid date range');
+        }
+
+        if (dates.length > 30) {
+          throw new BadRequestException('Cannot book more than 30 consecutive days at once');
+        }
+
+        // 2. Resolve userId (handle guest bookings)
+        let finalUserId: string;
+        if (!userId) {
+          if (!dto.guestEmail) {
+            throw new BadRequestException('Email is required for guest bookings');
+          }
+          const guestUser = await this.createOrFindGuestUser(
+            dto.guestEmail,
+            dto.guestName,
+            dto.guestPhone,
+            session
+          );
+          finalUserId = (guestUser._id as Types.ObjectId).toString();
+        } else {
+          finalUserId = userId;
+        }
+
+        // 3. Validate field and court
+        const field = await this.fieldModel.findById(dto.fieldId).session(session);
+        if (!field || !field.isActive) {
+          throw new NotFoundException('Field not found or inactive');
+        }
+
+        const court = await this.validateCourt(dto.courtId, dto.fieldId, session);
+
+        // 4. Batch availability check (ALL dates must be available)
+        const conflicts = await this.checkBatchAvailability(
+          dto.courtId,
+          dates,
+          dto.startTime,
+          dto.endTime,
+          session
+        );
+
+        if (conflicts.length > 0) {
+          throw new BadRequestException({
+            message: 'Some dates are not available. Please select different dates or court.',
+            conflicts: conflicts.map(c => ({
+              date: c.date.toISOString().split('T')[0],
+              reason: `Already booked ${c.existingStartTime}-${c.existingEndTime}`
+            }))
+          });
+        }
+
+        // 5. Calculate pricing (same for all dates)
+        const sampleDate = dates[0];
+        this.availabilityService.validateTimeSlots(dto.startTime, dto.endTime, field, sampleDate);
+
+        const numSlots = this.availabilityService.calculateNumSlots(
+          dto.startTime,
+          dto.endTime,
+          field.slotDuration
+        );
+
+        const pricingInfo = this.availabilityService.calculatePricing(
+          dto.startTime,
+          dto.endTime,
+          field,
+          sampleDate
+        );
+
+        // Calculate amenities fee (if provided)
+        const amenitiesFee = 0; // TODO: Calculate from Amenity model
+
+        const bookingAmount = pricingInfo.totalPrice + amenitiesFee;
+        const platformFeeRate = 0.05;
+        const platformFee = Math.round(bookingAmount * platformFeeRate);
+        const pricePerBooking = bookingAmount + platformFee;
+        const totalPrice = pricePerBooking * dates.length;
+
+        // 6. Create recurring group ID (link all bookings)
+        const recurringGroupId = new Types.ObjectId();
+
+        // 7. Create all bookings
+        const bookings: Booking[] = []; // ⭐ Fix: Explicit type
+        for (const date of dates) {
+          const dateStr = date.toISOString().split('T')[0];
+
+          // Upsert schedule for this date
+          await this.scheduleModel.findOneAndUpdate(
+            {
+              field: new Types.ObjectId(dto.fieldId),
+              court: court._id,
+              date: date
+            },
+            {
+              $setOnInsert: {
+                field: new Types.ObjectId(dto.fieldId),
+                court: court._id,
+                date: date,
+                bookedSlots: [],
+                isHoliday: false
+              }
+            },
+            {
+              upsert: true,
+              session
+            }
+          );
+
+          // Create booking
+          const booking = new this.bookingModel({
+            user: new Types.ObjectId(finalUserId),
+            field: new Types.ObjectId(dto.fieldId),
+            court: court._id,
+            date: date,
+            type: BookingType.FIELD,
+            startTime: dto.startTime,
+            endTime: dto.endTime,
+            numSlots,
+            status: BookingStatus.PENDING,
+            paymentStatus: 'unpaid',
+            bookingAmount,
+            platformFee,
+            totalPrice: pricePerBooking,
+            amenitiesFee,
+            selectedAmenities: dto.selectedAmenities?.map(id => new Types.ObjectId(id)) || [],
+            note: dto.note,
+            recurringGroupId, // Link to group
+            pricingSnapshot: {
+              basePrice: field.basePrice,
+              appliedMultiplier: pricingInfo.multiplier,
+              priceBreakdown: pricingInfo.breakdown
+            }
+          });
+
+          await booking.save({ session });
+          bookings.push(booking);
+
+          // Update schedule slots
+          await this.scheduleModel.findOneAndUpdate(
+            {
+              field: new Types.ObjectId(dto.fieldId),
+              court: court._id,
+              date: date
+            },
+            {
+              $push: {
+                bookedSlots: {
+                  startTime: dto.startTime,
+                  endTime: dto.endTime
+                }
+              }
+            },
+            { session }
+          );
+        }
+
+        // 8. Create single transaction for all bookings
+        // ⭐ Fix: Use createPayment() instead of create()
+        const transaction = await this.transactionsService.createPayment({
+          userId: finalUserId,
+          amount: totalPrice,
+          method: dto.paymentMethod || PaymentMethod.PAYOS,
+        }, session);
+
+        // 9. Link transaction to all bookings
+        for (const booking of bookings) {
+          booking.transaction = transaction._id as Types.ObjectId;
+          await booking.save({ session });
+        }
+
+        // Turn 4 Feature 3: Calculate bulk discount
+        const bulkDiscount = this.calculateBulkDiscount(dates.length, totalPrice);
+
+        return {
+          success: true,
+          bookings,
+          transaction,
+          summary: {
+            datesBooked: dates.length,
+            pricePerDay: pricePerBooking,
+            subtotal: totalPrice,
+            discount: {
+              rate: bulkDiscount.discountRate * 100, // percentage
+              amount: bulkDiscount.discountAmount
+            },
+            totalPrice: bulkDiscount.finalTotal,
+            dates: dates.map(d => d.toISOString().split('T')[0]),
+            recurringGroupId: recurringGroupId.toString()
+          }
+        };
+      });
+    } catch (error) {
+      this.logger.error('Error creating consecutive days booking', error);
+      throw error;
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  /**
+   * Create bookings for weekly recurring pattern (Turn 2: Weekly Recurring Booking)
+   * Book specific weekdays for multiple weeks
+   * Example: Book every Monday and Wednesday for 4 weeks
+   * Reuses batch booking logic from Turn 1
+   */
+  async createWeeklyRecurringBooking(
+    dto: any, // CreateWeeklyRecurringBookingDto
+    userId?: string
+  ) {
+    const session: ClientSession = await this.connection.startSession();
+
+    try {
+      return await session.withTransaction(async () => {
+        // 1. Generate dates based on weekdays pattern (Turn 4: pass skipDates)
+        const dates = this.generateWeeklyDates(
+          dto.weekdays,
+          dto.numberOfWeeks,
+          dto.startDate,
+          dto.skipDates || [] // Turn 4: Holiday Skip
+        );
+
+        if (dates.length === 0) {
+          throw new BadRequestException('No valid dates generated from weekdays pattern');
+        }
+
+        if (dates.length > 84) { // 7 days * 12 weeks max
+          throw new BadRequestException('Cannot book more than 84 dates at once (max 12 weeks with all weekdays)');
+        }
+
+        // 2. Resolve userId (handle guest bookings)
+        let finalUserId: string;
+        if (!userId) {
+          if (!dto.guestEmail) {
+            throw new BadRequestException('Email is required for guest bookings');
+          }
+          const guestUser = await this.createOrFindGuestUser(
+            dto.guestEmail,
+            dto.guestName,
+            dto.guestPhone,
+            session
+          );
+          finalUserId = (guestUser._id as Types.ObjectId).toString();
+        } else {
+          finalUserId = userId;
+        }
+
+        // 3. Validate field and court
+        const field = await this.fieldModel.findById(dto.fieldId).session(session);
+        if (!field || !field.isActive) {
+          throw new NotFoundException('Field not found or inactive');
+        }
+
+        const court = await this.validateCourt(dto.courtId, dto.fieldId, session);
+
+        // 4. Batch availability check (ALL dates must be available)
+        const conflicts = await this.checkBatchAvailability(
+          dto.courtId,
+          dates,
+          dto.startTime,
+          dto.endTime,
+          session
+        );
+
+        if (conflicts.length > 0) {
+          throw new BadRequestException({
+            message: 'Some dates are not available. Please select different pattern or court.',
+            conflicts: conflicts.map(c => ({
+              date: c.date.toISOString().split('T')[0],
+              reason: `Already booked ${c.existingStartTime}-${c.existingEndTime}`
+            }))
+          });
+        }
+
+        // 5. Calculate pricing (same for all dates)
+        const sampleDate = dates[0];
+        this.availabilityService.validateTimeSlots(dto.startTime, dto.endTime, field, sampleDate);
+
+        const numSlots = this.availabilityService.calculateNumSlots(
+          dto.startTime,
+          dto.endTime,
+          field.slotDuration
+        );
+
+        const pricingInfo = this.availabilityService.calculatePricing(
+          dto.startTime,
+          dto.endTime,
+          field,
+          sampleDate
+        );
+
+        const amenitiesFee = 0; // TODO: Calculate from Amenity model
+        const bookingAmount = pricingInfo.totalPrice + amenitiesFee;
+        const platformFeeRate = 0.05;
+        const platformFee = Math.round(bookingAmount * platformFeeRate);
+        const pricePerBooking = bookingAmount + platformFee;
+        const totalPrice = pricePerBooking * dates.length;
+
+        // 6. Create recurring group ID (link all bookings)
+        const recurringGroupId = new Types.ObjectId();
+
+        // 7. Create all bookings (reuse logic from createConsecutiveDaysBooking)
+        const bookings: Booking[] = [];
+        for (const date of dates) {
+          const dateStr = date.toISOString().split('T')[0];
+
+          // Upsert schedule for this date
+          await this.scheduleModel.findOneAndUpdate(
+            {
+              field: new Types.ObjectId(dto.fieldId),
+              court: court._id,
+              date: date
+            },
+            {
+              $setOnInsert: {
+                field: new Types.ObjectId(dto.fieldId),
+                court: court._id,
+                date: date,
+                bookedSlots: [],
+                isHoliday: false
+              }
+            },
+            {
+              upsert: true,
+              session
+            }
+          );
+
+          // Create booking
+          const booking = new this.bookingModel({
+            user: new Types.ObjectId(finalUserId),
+            field: new Types.ObjectId(dto.fieldId),
+            court: court._id,
+            date: date,
+            type: BookingType.FIELD,
+            startTime: dto.startTime,
+            endTime: dto.endTime,
+            numSlots,
+            status: BookingStatus.PENDING,
+            paymentStatus: 'unpaid',
+            bookingAmount,
+            platformFee,
+            totalPrice: pricePerBooking,
+            amenitiesFee,
+            selectedAmenities: dto.selectedAmenities?.map(id => new Types.ObjectId(id)) || [],
+            note: dto.note,
+            recurringGroupId, // Link to group
+            pricingSnapshot: {
+              basePrice: field.basePrice,
+              appliedMultiplier: pricingInfo.multiplier,
+              priceBreakdown: pricingInfo.breakdown
+            }
+          });
+
+          await booking.save({ session });
+          bookings.push(booking);
+
+          // Update schedule slots
+          await this.scheduleModel.findOneAndUpdate(
+            {
+              field: new Types.ObjectId(dto.fieldId),
+              court: court._id,
+              date: date
+            },
+            {
+              $push: {
+                bookedSlots: {
+                  startTime: dto.startTime,
+                  endTime: dto.endTime
+                }
+              }
+            },
+            { session }
+          );
+        }
+
+        // 8. Create single transaction for all bookings
+        const transaction = await this.transactionsService.createPayment({
+          userId: finalUserId,
+          amount: totalPrice,
+          method: dto.paymentMethod || PaymentMethod.PAYOS,
+        }, session);
+
+        // 9. Link transaction to all bookings
+        for (const booking of bookings) {
+          booking.transaction = transaction._id as Types.ObjectId;
+          await booking.save({ session });
+        }
+
+        // 10. Build pattern summary
+        const patternDescription = `Every ${dto.weekdays.join(', ')} for ${dto.numberOfWeeks} ${dto.numberOfWeeks === 1 ? 'week' : 'weeks'}`;
+
+        // Turn 4 Feature 3: Calculate bulk discount
+        const bulkDiscount = this.calculateBulkDiscount(dates.length, totalPrice);
+
+        return {
+          success: true,
+          bookings,
+          transaction,
+          summary: {
+            totalBookings: dates.length,
+            pricePerBooking: pricePerBooking,
+            subtotal: totalPrice,
+            discount: {
+              rate: bulkDiscount.discountRate * 100, // percentage
+              amount: bulkDiscount.discountAmount
+            },
+            totalAmount: bulkDiscount.finalTotal,
+            dates: dates.map(d => d.toISOString().split('T')[0]),
+            skippedDates: dto.skipDates || [], // Turn 4: Show skipped dates
+            pattern: patternDescription,
+            weekdays: dto.weekdays,
+            numberOfWeeks: dto.numberOfWeeks,
+            recurringGroupId: recurringGroupId.toString()
+          }
+        };
+      });
+    } catch (error) {
+      this.logger.error('Error creating weekly recurring booking', error);
+      throw error;
+    } finally {
+      await session.endSession();
+    }
+  }
+
+
+  /**
+   * Helper: Generate array of dates from startDate to endDate (inclusive)
+   */
+  private generateDateRange(startDateStr: string, endDateStr: string): Date[] {
+    const start = new Date(startDateStr);
+    const end = new Date(endDateStr);
+
+    if (start > end) {
+      throw new BadRequestException('Start date must be before or equal to end date');
+    }
+
+    const dates: Date[] = [];
+    const current = new Date(start);
+
+    while (current <= end) {
+      dates.push(new Date(current));
+      current.setDate(current.getDate() + 1);
+    }
+
+    return dates;
+  }
+
+  /**
+   * Turn 4 Feature 3: Calculate bulk discount based on number of bookings
+   * Discount tiers:
+   * - 5-10 bookings: 5% off
+   * - 11-20 bookings: 10% off
+   * - 21+ bookings: 15% off
+   */
+  private calculateBulkDiscount(numberOfBookings: number, baseTotal: number): {
+    discountRate: number;
+    discountAmount: number;
+    finalTotal: number;
+  } {
+    let discountRate = 0;
+
+    if (numberOfBookings >= 21) {
+      discountRate = 0.15; // 15% off for 21+ bookings
+    } else if (numberOfBookings >= 11) {
+      discountRate = 0.10; // 10% off for 11-20 bookings
+    } else if (numberOfBookings >= 5) {
+      discountRate = 0.05; // 5% off for 5-10 bookings
+    }
+
+    const discountAmount = Math.round(baseTotal * discountRate);
+    const finalTotal = baseTotal - discountAmount;
+
+    return { discountRate, discountAmount, finalTotal };
+  }
+
+  /**
+   * Helper: Generate array of dates for weekly recurring pattern (Turn 2)
+   * Turn 4 Update: Added skipDates parameter for Holiday Skip Functionality
+   * Example: weekdays=['monday', 'wednesday'], numberOfWeeks=4, startDate='2025-01-13'
+   * Returns: All Mondays and Wednesdays for the next 4 weeks (excluding skipDates)
+   */
+  private generateWeeklyDates(
+    weekdays: string[],
+    numberOfWeeks: number,
+    startDateStr: string,
+    skipDates: string[] = [] // Turn 4: Holiday Skip
+  ): Date[] {
+    const startDate = new Date(startDateStr);
+    const dates: Date[] = [];
+
+    // Normalize skipDates to YYYY-MM-DD format for comparison
+    const skipDateSet = new Set(
+      skipDates.map(d => d.split('T')[0])
+    );
+
+    // Map weekday names to JavaScript day numbers (0=Sunday, 1=Monday, ..., 6=Saturday)
+    const dayMap: Record<string, number> = {
+      sunday: 0,
+      monday: 1,
+      tuesday: 2,
+      wednesday: 3,
+      thursday: 4,
+      friday: 5,
+      saturday: 6
+    };
+
+    // For each week
+    for (let week = 0; week < numberOfWeeks; week++) {
+      // For each weekday in the pattern
+      for (const weekday of weekdays) {
+        const targetDayNumber = dayMap[weekday.toLowerCase()];
+        if (targetDayNumber === undefined) {
+          throw new BadRequestException(`Invalid weekday: ${weekday}`);
+        }
+
+        // Calculate the date for this weekday in this week
+        // Start from the beginning of the current week
+        const weekStart = new Date(startDate);
+        weekStart.setDate(startDate.getDate() + (week * 7));
+
+        // Find the target weekday within this week
+        const currentDayNumber = weekStart.getDay();
+        let daysToAdd = targetDayNumber - currentDayNumber;
+
+        // If target day is before current day in the week, go to next week
+        if (daysToAdd < 0) {
+          daysToAdd += 7;
+        }
+
+        const targetDate = new Date(weekStart);
+        targetDate.setDate(weekStart.getDate() + daysToAdd);
+
+        const targetDateStr = targetDate.toISOString().split('T')[0];
+
+        // Only add if:
+        // 1. This date is >= startDate (don't include past dates)
+        // 2. This date is NOT in skipDates (Turn 4: Holiday Skip)
+        if (targetDate >= startDate && !skipDateSet.has(targetDateStr)) {
+          dates.push(targetDate);
+        }
+      }
+    }
+
+    // Sort dates chronologically
+    return dates.sort((a, b) => a.getTime() - b.getTime());
+  }
+
+  /**
+   * Helper: Check availability for batch of dates
+   * Returns array of conflicts (empty if all available)
+   */
+  private async checkBatchAvailability(
+    courtId: string,
+    dates: Date[],
+    startTime: string,
+    endTime: string,
+    session: ClientSession
+  ): Promise<Array<{ date: Date; existingStartTime: string; existingEndTime: string }>> {
+
+    const dateStrings = dates.map(d => d.toISOString().split('T')[0]);
+
+    // Find all conflicting bookings in one query
+    const existingBookings = await this.bookingModel.find({
+      court: new Types.ObjectId(courtId),
+      date: { $in: dateStrings },
+      status: { $in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] },
+      // Time overlap check
+      $or: [
+        { startTime: { $lt: endTime }, endTime: { $gt: startTime } }
+      ]
+    }).session(session);
+
+    // Map conflicts
+    // ⭐ Fix: Explicit type annotation
+    const conflicts: Array<{ date: Date; existingStartTime: string; existingEndTime: string }> = [];
+    for (const booking of existingBookings) {
+      const bookingDateStr = new Date(booking.date).toISOString().split('T')[0];
+      const matchingDate = dates.find(d => d.toISOString().split('T')[0] === bookingDateStr);
+
+      if (matchingDate) {
+        conflicts.push({
+          date: matchingDate,
+          existingStartTime: booking.startTime,
+          existingEndTime: booking.endTime
+        });
+      }
+    }
+
+    return conflicts;
+  }
+
 
   // ============================================================================
   // COACH BOOKING OPERATIONS - Delegated to CoachBookingService

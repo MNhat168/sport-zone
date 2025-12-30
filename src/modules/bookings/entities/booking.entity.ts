@@ -132,6 +132,13 @@ export class Booking extends BaseEntity {
     slotsReleasedAt?: Date;
     [key: string]: any;
   };
+
+  /**
+   * Recurring Group ID - Links bookings created from same recurring request
+   * All bookings from "Book Mon-Fri for 3 weeks" will share same recurringGroupId
+   */
+  @Prop({ type: Types.ObjectId, required: false })
+  recurringGroupId?: Types.ObjectId;
 }
 
 export type BookingDocument = HydratedDocument<Booking>;

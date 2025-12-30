@@ -138,13 +138,14 @@ export class AuthController {
     // Access token
     res.cookie(accessCookieName, accessToken, {
       ...cookieOptions,
-      expires: rememberMe ? new Date(Date.now() + accessMs) : undefined,
+      expires: rememberMe ? new Date(Date.now() + 1800000) : undefined, // 30 minutes
     });
 
     // Refresh token
     res.cookie(refreshCookieName, refreshToken, {
       ...cookieOptions,
-      expires: rememberMe ? new Date(Date.now() + refreshMs) : undefined,
+      path: '/auth/refresh', // Only send to refresh endpoint
+      expires: rememberMe ? new Date(Date.now() + 604800000) : undefined, // 7 days
     });
 
     // Log cookie config để debug
@@ -312,6 +313,73 @@ export class AuthController {
     );
 
     return res.status(HttpStatus.OK).json({ user: result.user });
+  }
+
+  /**
+   * Kiểm tra cookie support - detect nếu browser chặn cookies
+   * @returns Cookie support status
+   */
+  @Get('check-cookie')
+  @ApiOperation({ summary: 'Kiểm tra xem browser có hỗ trợ cookie không' })
+  @ApiResponse({
+    status: 200,
+    description: 'Test cookie được set thành công',
+  })
+  checkCookie(@Req() req: any, @Res() res: Response) {
+    // Kiểm tra xem cookie test trước đó có được gửi lại không
+    const hadTestCookie = !!req.cookies?.['test_cookie'];
+
+    // Set test cookie mới
+    res.cookie('test_cookie', 'test_value', {
+      httpOnly: true,
+      maxAge: 10000, // 10 seconds
+      sameSite: 'lax',
+    });
+
+    return res.json({
+      cookieSupported: true,
+      hadPreviousCookie: hadTestCookie,
+      message: 'Test cookie set successfully',
+    });
+  }
+
+  /**
+   * Login fallback cho users chặn cookie
+   * Trả tokens trong response body thay vì cookie
+   */
+  @Post('login-fallback')
+  @ApiOperation({ summary: 'Login dùng Bearer token (fallback khi cookie bị chặn)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Login thành công, tokens trả về trong response body',
+    schema: {
+      properties: {
+        user: { type: 'object' },
+        accessToken: { type: 'string' },
+        refreshToken: { type: 'string' },
+        expiresIn: { type: 'number' },
+        securityWarning: { type: 'string' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Email hoặc mật khẩu không đúng',
+  })
+  async loginFallback(@Body() loginDto: LoginWithRememberDto) {
+    const result = await this.authService.login({
+      ...loginDto,
+      rememberMe: !!loginDto.rememberMe,
+    });
+
+    return {
+      user: result.user,
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      expiresIn: 1800, // 30 minutes
+      securityWarning:
+        'Bạn đang dùng chế độ kém bảo mật hơn. Khuyến khích bật cookie để được bảo vệ tốt hơn.',
+    };
   }
 
   /**

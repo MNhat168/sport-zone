@@ -244,9 +244,16 @@ export class CoachesService {
   }
 
   async updateCoach(id: string, payload: Partial<any>): Promise<any> {
+    this.logger.debug(`Updating coach with id: ${id}`, { payload });
+
     // Validate coach user exists
     const user = await this.userModel.findOne({ _id: id, role: UserRole.COACH });
-    if (!user) throw new NotFoundException('Coach not found');
+    if (!user) {
+      this.logger.warn(`Coach user not found for id: ${id}`);
+      throw new NotFoundException('Coach not found');
+    }
+
+    this.logger.debug(`Found coach user:`, { userId: user._id, role: user.role });
 
     // Update coach profile
     const profileUpdates: any = {};
@@ -256,9 +263,22 @@ export class CoachesService {
     if (payload.rank !== undefined) profileUpdates.rank = payload.rank;
     if (payload.experience !== undefined) profileUpdates.experience = payload.experience;
     if (payload.galleryImages !== undefined) profileUpdates.galleryImages = payload.galleryImages;
+    if (payload.hourlyRate !== undefined) profileUpdates.hourlyRate = payload.hourlyRate;
+    if (payload.isActive !== undefined) profileUpdates.isActive = payload.isActive;
+
+    this.logger.debug(`Profile updates to apply:`, profileUpdates);
 
     if (Object.keys(profileUpdates).length > 0) {
-      await this.coachProfileModel.updateOne({ user: user._id }, { $set: profileUpdates }).exec();
+      const updateResult = await this.coachProfileModel.updateOne({ user: user._id }, { $set: profileUpdates }).exec();
+      this.logger.debug(`Update result:`, {
+        matchedCount: updateResult.matchedCount,
+        modifiedCount: updateResult.modifiedCount
+      });
+
+      if (updateResult.matchedCount === 0) {
+        this.logger.warn(`No coach profile found for user: ${user._id}`);
+        throw new NotFoundException('Coach profile not found');
+      }
     }
 
     // Return updated record

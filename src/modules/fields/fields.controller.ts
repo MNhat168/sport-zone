@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Param, BadRequestException, Patch, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Query, Param, BadRequestException, Patch, Body, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { Types } from 'mongoose';
 import { FieldsService } from './fields.service';
@@ -9,10 +9,28 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../decorators/roles.decorator';
 import { UserRole } from '@common/enums/user.enum';
 
+import { AiService } from '../ai/ai.service';
+import { CreateFieldDto, UpdateFieldDto } from './dtos/fields.dto';
+
 @ApiTags('Fields')
 @Controller('fields')
 export class FieldsController {
-  constructor(private readonly fieldsService: FieldsService) { }
+  constructor(
+    private readonly fieldsService: FieldsService,
+    private readonly aiService: AiService
+  ) { }
+
+  @Post('ai/generate')
+  @UseGuards(JwtAccessTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Generate field details using AI' })
+  @ApiResponse({ status: 200, description: 'Field details generated' })
+  async generateFieldInfo(@Body() body: { description: string }, @Request() req) {
+    if (!body.description) {
+      throw new BadRequestException('Description is required');
+    }
+    return this.aiService.generateFieldInfo(body.description, req.user.userId);
+  }
 
   @Patch('admin/:id/verify')
   @UseGuards(JwtAccessTokenGuard, RolesGuard)

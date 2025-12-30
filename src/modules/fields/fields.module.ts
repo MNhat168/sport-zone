@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
+import { AiModule } from '../ai/ai.module';
 import { FieldsController } from './fields.controller';
 import { FieldsService } from './fields.service';
 import { PriceSchedulerService } from './services/price-scheduler.service';
@@ -48,6 +49,7 @@ import { CourtsModule } from '../courts/courts.module';
     forwardRef(() => TransactionsModule),
     EmailModule,
     CourtsModule,
+    AiModule,
   ],
   controllers: [FieldsController],
   providers: [FieldsService, PriceSchedulerService],
