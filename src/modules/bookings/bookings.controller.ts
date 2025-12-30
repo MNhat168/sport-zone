@@ -23,6 +23,9 @@ import { CreateCoachBookingV2Dto } from './dto/create-coach-booking-v2.dto';
 import { CreateFieldBookingLazyDto, FieldAvailabilityQueryDto, MarkHolidayDto } from './dto/create-field-booking-lazy.dto';
 import { CreateFieldBookingV2Dto } from './dto/create-field-booking-v2.dto';
 import { CreateCombinedBookingDto } from './dto/create-combined-booking.dto'; // NEW
+import { CreateConsecutiveDaysBookingDto } from './dto/create-consecutive-days-booking.dto'; // ⭐ NEW - Turn 1
+import { CreateWeeklyRecurringBookingDto } from './dto/create-weekly-recurring-booking.dto'; // ⭐ NEW - Turn 2
+import { ParseBookingRequestDto } from './dto/parse-booking-request.dto'; // ⭐ NEW - Turn 3
 import { VerifyPaymentProofDto } from './dto/verify-payment-proof.dto';
 import { CancelBookingDto } from './dto/cancel-booking.dto';
 import { CreateSessionBookingLazyDto } from './dto/create-session-booking-lazy.dto';
@@ -38,13 +41,10 @@ import { CleanupService } from '../../service/cleanup.service';
 import { BookingStatus, BookingType } from '@common/enums/booking.enum';
 import { PaymentMethod } from '@common/enums/payment-method.enum';
 import { OptionalJwtAuthGuard } from '@common/guards/optional-jwt-auth.guard';
-import { FieldBookingService } from './services/field-booking.service'; // Ensure this is imported effectively via BookingsService or directly injected if needed. 
-// Note: BookingsService wraps FieldBookingService methods usually. Should I inject FieldBookingService directly?
-// The controller injects BookingsService.
-// I should check if BookingsService exports/wraps FieldBookingService methods or if I should inject FieldBookingService.
-// Looking at the constructor: "private readonly bookingsService: BookingsService".
-// I'll check BookingsService if I should add a wrapper there, or just inject FieldBookingService here.
-// To save time and avoid touching BookingsService file, I will inject FieldBookingService directly into Controller. It's already in the module providers.
+import { FieldBookingService } from './services/field-booking.service';
+import { TransactionsService } from '../transactions/transactions.service';
+import { AiService } from '../ai/ai.service'; // Turn 3
+import { BookingCancellationService } from './services/booking-cancellation.service'; // Turn 4
 
 /**
  * Bookings Controller with Pure Lazy Creation pattern
@@ -59,6 +59,9 @@ export class BookingsController {
   constructor(
     private readonly bookingsService: BookingsService,
     private readonly fieldBookingService: FieldBookingService, // Injected directly
+    private readonly transactionsService: TransactionsService, // NEW
+    private readonly aiService: AiService, // Turn 3
+    private readonly bookingCancellationService: BookingCancellationService, // Turn 4
     @InjectModel(Schedule.name) private readonly scheduleModel: Model<Schedule>,
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
     private readonly cleanupService: CleanupService,
@@ -153,6 +156,240 @@ export class BookingsController {
   ): Promise<Booking> {
     const userId = this.getUserId(req);
     return await this.bookingsService.createFieldBookingLazy(userId, bookingData);
+  }
+
+  /**
+   * ⭐ TURN 1: Create bookings for consecutive days
+   * Book same court, same time for multiple consecutive dates
+   * Example: Book Court 1 from Monday to Friday, 09:00-11:00
+   */
+  @Post('bookings/consecutive-days')
+  @UseGuards(OptionalJwtAuthGuard)
+  @RateLimit({ ttl: 60, limit: 3 }) // 3 recurring bookings per minute
+  @ApiOperation({
+    summary: 'Đặt sân liên tục nhiều ngày (Turn 1)',
+    description: 'Đặt cùng một sân, cùng time slot cho nhiều ngày liên tiếp. Hỗ trợ cả đăng nhập và guest booking.'
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Các booking liên tục được tạo thành công'
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Dữ liệu không hợp lệ hoặc một số ngày bị conflict'
+  })
+  @ApiResponse({ status: 404, description: 'Không tìm thấy sân hoặc court' })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
+  async createConsecutiveDaysBooking(
+    @Request() req: any,
+    @Body() bookingData: CreateConsecutiveDaysBookingDto,
+  ) {
+    const userId = req.user?.userId || null;
+
+    // Validate guest info if not authenticated
+    if (!userId && !bookingData.guestEmail) {
+      throw new BadRequestException('Email is required for guest bookings');
+    }
+
+    return await this.bookingsService.createConsecutiveDaysBooking(bookingData, userId);
+  }
+
+  /**
+   * ⭐ TURN 2: Create bookings for weekly recurring pattern
+   * Book specific weekdays for multiple weeks
+   * Example: Book every Monday and Wednesday for 4 weeks
+   */
+  @Post('bookings/weekly-recurring')
+  @UseGuards(OptionalJwtAuthGuard)
+  @RateLimit({ ttl: 60, limit: 3 }) // 3 recurring bookings per minute
+  @ApiOperation({
+    summary: 'Đặt sân theo pattern hàng tuần (Turn 2)',
+    description: 'Đặt sân theo ngày cố định trong tuần (ví dụ: mỗi thứ 2, 4 trong 4 tuần). Hỗ trợ cả đăng nhập và guest booking.'
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Các booking theo pattern được tạo thành công'
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Dữ liệu không hợp lệ hoặc một số ngày bị conflict'
+  })
+  @ApiResponse({ status: 404, description: 'Không tìm thấy sân hoặc court' })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
+  async createWeeklyRecurringBooking(
+    @Request() req: any,
+    @Body() bookingData: CreateWeeklyRecurringBookingDto,
+  ) {
+    const userId = req.user?.userId || null;
+
+    // Validate guest info if not authenticated
+    if (!userId && !bookingData.guestEmail) {
+      throw new BadRequestException('Email is required for guest bookings');
+    }
+
+    return await this.bookingsService.createWeeklyRecurringBooking(bookingData, userId);
+  }
+
+  /**
+   * ⭐ TURN 3: Parse natural language booking request using AI
+   * Converts user's natural language query into structured booking data
+   * Example: "Đặt sân từ thứ 2 đến thứ 6 tuần này, 9h-11h"
+   */
+  @Post('bookings/ai/parse')
+  @UseGuards(OptionalJwtAuthGuard)
+  @RateLimit({ ttl: 60, limit: 10 }) // 10 AI parsing requests per minute
+  @ApiOperation({
+    summary: 'Parse natural language booking request with AI (Turn 3)',
+    description: 'Sử dụng AI để phân tích yêu cầu đặt sân bằng ngôn ngữ tự nhiên (tiếng Việt hoặc tiếng Anh) và chuyển thành dữ liệu có cấu trúc.'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Parsed booking data from natural language query'
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid query or AI parsing failed'
+  })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
+  async parseBookingRequest(
+    @Request() req: any,
+    @Body() dto: ParseBookingRequestDto,
+  ) {
+    try {
+      const parsedData = await this.aiService.parseBookingRequest(dto.query, dto.fieldId);
+      return {
+        success: true,
+        data: parsedData
+      };
+    } catch (error) {
+      throw new BadRequestException(error.message || 'Failed to parse booking request');
+    }
+  }
+
+  // ============================================================================
+  // TURN 4: RECURRING GROUP MANAGEMENT
+  // ============================================================================
+
+  /**
+   * Get all bookings in a recurring group
+   * Used to view all bookings created together via consecutive-days or weekly-recurring
+   */
+  @Get('bookings/recurring-group/:groupId')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @RateLimit({ ttl: 10, limit: 30 })
+  @ApiOperation({
+    summary: 'Lấy tất cả booking trong một nhóm định kỳ (Turn 4)',
+    description: 'Lấy danh sách tất cả bookings được tạo cùng nhau qua consecutive-days hoặc weekly-recurring'
+  })
+  @ApiParam({
+    name: 'groupId',
+    description: 'Recurring Group ID',
+    example: '507f1f77bcf86cd799439011'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách bookings trong group'
+  })
+  @ApiResponse({ status: 404, description: 'Không tìm thấy group' })
+  async getRecurringGroup(
+    @Request() req: any,
+    @Param('groupId') groupId: string
+  ) {
+    // Validate groupId format
+    if (!groupId || !/^[0-9a-fA-F]{24}$/.test(groupId)) {
+      throw new BadRequestException('Invalid group ID format');
+    }
+
+    const bookings = await this.bookingModel
+      .find({ recurringGroupId: new Types.ObjectId(groupId) })
+      .populate('court')
+      .populate('field')
+      .sort({ date: 1 });
+
+    if (bookings.length === 0) {
+      throw new NotFoundException('No bookings found in this recurring group');
+    }
+
+    return {
+      groupId,
+      totalBookings: bookings.length,
+      bookings
+    };
+  }
+
+  /**
+   * Cancel entire recurring group
+   * Cancels all pending/confirmed bookings in the group
+   */
+  @Patch('bookings/recurring-group/:groupId/cancel')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @RateLimit({ ttl: 60, limit: 5 })
+  @ApiOperation({
+    summary: 'Hủy tất cả booking trong nhóm định kỳ (Turn 4)',
+    description: 'Hủy tất cả bookings chưa hoàn thành trong một recurring group'
+  })
+  @ApiParam({
+    name: 'groupId',
+    description: 'Recurring Group ID',
+    example: '507f1f77bcf86cd799439011'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Tất cả bookings đã được hủy'
+  })
+  @ApiResponse({ status: 404, description: 'Không tìm thấy group hoặc không có booking để hủy' })
+  async cancelRecurringGroup(
+    @Request() req: any,
+    @Param('groupId') groupId: string,
+    @Body() dto: { cancellationReason?: string }
+  ) {
+    const userId = this.getUserId(req);
+
+    // Validate groupId format
+    if (!groupId || !/^[0-9a-fA-F]{24}$/.test(groupId)) {
+      throw new BadRequestException('Invalid group ID format');
+    }
+
+    // Find all cancellable bookings in the group
+    const bookings = await this.bookingModel
+      .find({
+        recurringGroupId: new Types.ObjectId(groupId),
+        status: { $nin: [BookingStatus.CANCELLED, BookingStatus.COMPLETED] }
+      });
+
+    if (bookings.length === 0) {
+      throw new NotFoundException('No active bookings found in this recurring group');
+    }
+
+    // Cancel all bookings directly using model update
+    // This avoids ownership check since we already verified the booking belongs to user
+    const cancellationReason = dto.cancellationReason || 'Cancelled entire recurring group';
+
+    try {
+      const updateResult = await this.bookingModel.updateMany(
+        {
+          recurringGroupId: new Types.ObjectId(groupId),
+          status: { $nin: [BookingStatus.CANCELLED, BookingStatus.COMPLETED] }
+        },
+        {
+          $set: {
+            status: BookingStatus.CANCELLED,
+            cancellationReason: cancellationReason
+          }
+        }
+      );
+
+      return {
+        success: true,
+        cancelledCount: updateResult.modifiedCount,
+        totalInGroup: bookings.length,
+        message: `Cancelled ${updateResult.modifiedCount} of ${bookings.length} bookings`
+      };
+    } catch (error: any) {
+      throw new BadRequestException(`Failed to cancel recurring group: ${error.message}`);
+    }
   }
 
   /**
@@ -590,6 +827,56 @@ export class BookingsController {
       }
       // Re-throw other errors
       throw error;
+    }
+  }
+
+  /**
+   * Cancel booking by PayOS order code
+   * Used when user explicitly cancels on PayOS payment page
+   */
+  @Patch('bookings/cancel-by-order-code/:orderCode')
+  @RateLimit({ ttl: 60, limit: 10 })
+  @ApiOperation({
+    summary: 'Cancel booking by PayOS order code',
+    description: 'Finds booking by PayOS order code and cancels it. Used for PayOS cancellation flow.'
+  })
+  async cancelBookingByOrderCode(
+    @Param('orderCode') orderCode: string,
+    @Body() cancelData: CancelBookingDto,
+  ): Promise<{ success: boolean; message: string }> {
+    if (!orderCode) {
+      throw new BadRequestException('Order code is required');
+    }
+
+    try {
+      // 1. Find transaction by order code
+      const transaction = await this.transactionsService.getPaymentByExternalId(orderCode);
+      if (!transaction) {
+        throw new NotFoundException(`Transaction with order code ${orderCode} not found`);
+      }
+
+      // 2. Get booking ID (should be a string or ObjectId)
+      const bookingId = (transaction.booking as any)?._id?.toString() || transaction.booking?.toString();
+      if (!bookingId) {
+        throw new BadRequestException('No booking associated with this transaction');
+      }
+
+      // 3. Delegate to cleanup service
+      await this.cleanupService.cancelHoldBooking(
+        bookingId,
+        cancelData.cancellationReason || 'Người dùng hủy thanh toán trên PayOS',
+        10
+      );
+
+      return {
+        success: true,
+        message: 'Booking cancelled successfully via order code'
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException(error.message || 'Failed to cancel booking via order code');
     }
   }
 

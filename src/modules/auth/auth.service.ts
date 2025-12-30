@@ -27,13 +27,13 @@ export class AuthService {
 
   generateAccessToken(payload: TokenPayload) {
     return this.jwt_service.sign(payload, {
-      expiresIn: Number(this.config_service.get('JWT_ACCESS_TOKEN_EXPIRATION_TIME')) || 3600,
+      expiresIn: 1800, // 30 minutes (was: 3600 = 1 hour)
     });
   }
 
   generateRefreshToken(payload: TokenPayload) {
     return this.jwt_service.sign(payload, {
-      expiresIn: Number(this.config_service.get('JWT_REFRESH_TOKEN_EXPIRATION_TIME')) || 25200,
+      expiresIn: 604800, // 7 days (was: 25200 = 7 hours)
     });
   }
 

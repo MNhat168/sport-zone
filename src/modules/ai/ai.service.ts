@@ -200,6 +200,82 @@ export class AiService {
         }
     }
 
+    /**
+     * Generates field information from a text description using AI
+     * Acts as a "Data Mapper" to extract structured data
+     */
+    async generateFieldInfo(description: string, userId: string): Promise<any> {
+        if (!this.groq && !this.openai) {
+            this.logger.warn('No AI provider available for field generation');
+            return null;
+        }
+
+        const systemPrompt = `
+        You are a generic "Data Mapper" assistant for the Sport-Zone system.
+        Your task is to extract structured information from the user's sports field description (Context: Artificial Turf Fields).
+        
+        Return ONLY a valid JSON object matching this schema (do not include location, images, or amenities):
+        {
+            "name": string (creative name if not specified),
+            "sportType": string (Enum: "FOOTBALL", "TENNIS", "BADMINTON", "BASKETBALL", "VOLLEYBALL", "PICKLEBALL"),
+            "description": string (formatted professionally, at least 2 sentences),
+            "basePrice": number (in VND, infer typical prices if not specified, e.g. 200000-300000 for football),
+            "slotDuration": number (default 60. Note: Artificial turf fields typically use 60 minutes),
+            "minSlots": number (default 1),
+            "maxSlots": number (default 4),
+            "numberOfCourts": number (default 1, extract from text like "5 sân"),
+            "operatingHours": [
+                {
+                    "day": string (monday, tuesday, wednesday, thursday, friday, saturday, sunday),
+                    "start": string (HH:mm, 24h format),
+                    "end": string (HH:mm, 24h format),
+                    "duration": number (should match slotDuration)
+                }
+            ],
+            "priceRanges": [
+                {
+                    "day": string,
+                    "start": string,
+                    "end": string,
+                    "multiplier": number
+                }
+            ],
+            "rules": string[] (Generate 3-5 common rules based on sport type, e.g., "No smoking", "No spiked shoes", "Arrive 15 mins early")
+        }
+        
+        Rules:
+        1. "sportType": Must be one of the enums. Infer from context (e.g. "sân bóng" -> "FOOTBALL").
+        2. "operatingHours": If "all week" or unspecified, generate for all 7 days with default 06:00-22:00.
+        3. "priceRanges": Smart logic - if user mentions "high price in evening" or "peak hours", create ranges with multiplier > 1.0 (e.g. 1.2, 1.3).
+        4. "location" & "images" & "amenities": DO NOT generate these. User handles them manually.
+        5. "slotDuration": Default is 60. Do NOT assume 90 for Football (as these are artificial turf). Only use 90 if explicitly requested.
+        6. Return ONLY JSON.
+        `;
+
+        try {
+            // Prefer OpenAI for better JSON instruction following, or fall back to Groq
+            const provider = this.openai;
+            const model = "gpt-4o-mini";
+
+            const completion = await provider.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: description }
+                ],
+                model: model,
+                temperature: 0.7,
+                response_format: { type: "json_object" }
+            });
+
+            const content = completion.choices[0]?.message?.content || "{}";
+            this.logger.debug(`[GenerateFieldInfo] Raw AI Content: ${content}`);
+            return JSON.parse(content);
+        } catch (error) {
+            this.logger.error('Failed to generate field info:', error);
+            throw error;
+        }
+    }
+
     async generatePlatformAnalytics(data: PlatformAnalyticsData): Promise<PlatformAnalytics> {
         if (!this.groq) {
             return this.generateEnhancedSimulatedPlatformAnalytics(data);
@@ -1138,5 +1214,131 @@ export class AiService {
         }
 
         return "Performance metrics are within expected ranges. Focus on incremental improvements through customer feedback and service optimization.";
+    }
+
+    /**
+     * ⭐ TURN 3: Parse natural language booking request using AI
+     * Converts user's natural language query into structured booking data
+     * Example: "Đặt sân từ thứ 2 đến thứ 6 tuần này, 9h-11h" →
+     * { type: 'consecutive', startDate: '2025-01-06', endDate: '2025-01-10', startTime: '09:00', endTime: '11:00' }
+     */
+    async parseBookingRequest(query: string, fieldId: string): Promise<any> {
+        if (!this.openai) {
+            throw new Error('OpenAI API not initialized. Please configure OPENAI_API_KEY.');
+        }
+
+        try {
+            const currentDate = new Date().toISOString().split('T')[0];
+            const currentDay = new Date().toLocaleDateString('vi-VN', { weekday: 'long' });
+
+            const systemPrompt = `You are a booking assistant that parses natural language booking requests into structured data.
+
+Current date: ${currentDate} (${currentDay})
+
+Parse the user's query and extract booking information. Return a JSON object with these fields:
+- type: "consecutive" | "weekly" | "single"
+- startDate: YYYY-MM-DD (calculate from relative terms like "tuần này", "next week")
+- endDate: YYYY-MM-DD (for consecutive bookings)
+- weekdays: string[] (for weekly bookings, e.g., ["monday", "wednesday", "friday"])
+- numberOfWeeks: number (for weekly bookings, 1-12)
+- startTime: HH:mm (24-hour format)
+- endTime: HH:mm (24-hour format)
+- confidence: number (0-1, how confident you are)
+- clarificationNeeded: string[] (what needs clarification, if any)
+- explanation: string (brief explanation of what you understood)
+
+Rules:
+1. "tuần này" = current week starting from today to Sunday
+2. "thứ 2 đến thứ 6" = Monday to Friday
+3. "cuối tuần" = Saturday and Sunday
+4. Time: "9h" = "09:00", "11h sáng" = "11:00", "2h chiều" = "14:00"
+5. Use lowercase for weekdays: monday, tuesday, etc.
+6. If unclear, set confidence < 0.7 and list what needs clarification
+
+Vietnamese day mapping:
+- thứ 2 = monday
+- thứ 3 = tuesday
+- thứ 4 = wednesday
+- thứ 5 = thursday
+- thứ 6 = friday
+- thứ 7 = saturday
+- chủ nhật/CN = sunday`;
+
+            const completion = await this.openai.chat.completions.create({
+                model: 'gpt-4-turbo-preview',
+                response_format: { type: 'json_object' },
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: query }
+                ],
+                temperature: 0.3, // Lower temperature for more consistent parsing
+            });
+
+            const responseContent = completion.choices[0]?.message?.content;
+            if (!responseContent) {
+                throw new Error('No response from OpenAI');
+            }
+
+            const parsedData = JSON.parse(responseContent);
+            this.logger.log(`AI parsed booking request: ${JSON.stringify(parsedData)}`);
+
+            // Validate the parsed data
+            return this.validateParsedBookingData(parsedData);
+
+        } catch (error) {
+            this.logger.error('Failed to parse booking request with AI:', error);
+            throw new Error(`AI parsing failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Validate and sanitize AI-parsed booking data
+     */
+    private validateParsedBookingData(data: any): any {
+        const validated: any = {
+            type: data.type || 'single',
+            confidence: typeof data.confidence === 'number' ? data.confidence : 0.5,
+            explanation: data.explanation || 'Parsed booking request',
+            clarificationNeeded: Array.isArray(data.clarificationNeeded) ? data.clarificationNeeded : []
+        };
+
+        // Validate type
+        if (!['consecutive', 'weekly', 'single'].includes(validated.type)) {
+            validated.type = 'single';
+            validated.confidence = Math.min(validated.confidence, 0.6);
+        }
+
+        // Validate dates (YYYY-MM-DD format)
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (data.startDate && dateRegex.test(data.startDate)) {
+            validated.startDate = data.startDate;
+        }
+        if (data.endDate && dateRegex.test(data.endDate)) {
+            validated.endDate = data.endDate;
+        }
+
+        // Validate time (HH:mm format)
+        const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+        if (data.startTime && timeRegex.test(data.startTime)) {
+            validated.startTime = data.startTime;
+        }
+        if (data.endTime && timeRegex.test(data.endTime)) {
+            validated.endTime = data.endTime;
+        }
+
+        // Validate weekdays
+        const validWeekdays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+        if (Array.isArray(data.weekdays)) {
+            validated.weekdays = data.weekdays.filter((day: string) =>
+                validWeekdays.includes(day.toLowerCase())
+            );
+        }
+
+        // Validate numberOfWeeks
+        if (typeof data.numberOfWeeks === 'number' && data.numberOfWeeks >= 1 && data.numberOfWeeks <= 12) {
+            validated.numberOfWeeks = data.numberOfWeeks;
+        }
+
+        return validated;
     }
 }

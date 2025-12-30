@@ -513,14 +513,27 @@ export class FieldOwnerService {
           path: 'selectedAmenities',
           select: 'name price',
         })
-        .populate({
-          path: 'transaction',
-          select: 'status',
-        })
+        // ✅ REMOVED: transaction populate (bidirectional reference cleanup)
         .sort({ date: -1, startTime: -1 })
         .skip(skip)
         .limit(limit)
         .exec();
+
+      // ✅ Query transactions separately to avoid bidirectional reference
+      const bookingIds = bookings.map(b => (b._id as Types.ObjectId).toString());
+      const transactions = await this.transactionModel
+        .find({ booking: { $in: bookingIds.map(id => new Types.ObjectId(id)) } })
+        .select('booking status')
+        .lean()
+        .exec();
+
+      // Create a map for quick lookup: bookingId -> transaction status
+      const transactionStatusMap = new Map<string, string>();
+      transactions.forEach(tx => {
+        if (tx.booking) {
+          transactionStatusMap.set(tx.booking.toString(), tx.status);
+        }
+      });
 
       const formattedBookings = bookings.map((booking) => {
         const court = booking.court as any;
@@ -540,7 +553,7 @@ export class FieldOwnerService {
           startTime: booking.startTime,
           endTime: booking.endTime,
           status: booking.status,
-          transactionStatus: (booking.transaction as any)?.status || null,
+          transactionStatus: transactionStatusMap.get((booking._id as Types.ObjectId).toString()) || null,
           approvalStatus: (booking as any).approvalStatus || (booking as any).noteStatus || undefined,
           totalPrice: booking.totalPrice,
           customer: {
@@ -781,10 +794,7 @@ export class FieldOwnerService {
           path: 'selectedAmenities',
           select: 'name price',
         })
-        .populate({
-          path: 'transaction',
-          select: 'status',
-        })
+        // ✅ REMOVED: transaction populate (bidirectional reference cleanup)
         .populate({
           path: 'requestedCoach',
           select: 'fullName phoneNumber',
@@ -793,6 +803,22 @@ export class FieldOwnerService {
         .skip(skip)
         .limit(limit)
         .exec();
+
+      // ✅ Query transactions separately to avoid bidirectional reference
+      const bookingIds = bookings.map(b => (b._id as Types.ObjectId).toString());
+      const transactions = await this.transactionModel
+        .find({ booking: { $in: bookingIds.map(id => new Types.ObjectId(id)) } })
+        .select('booking status')
+        .lean()
+        .exec();
+
+      // Create a map for quick lookup: bookingId -> transaction status
+      const transactionStatusMap = new Map<string, string>();
+      transactions.forEach(tx => {
+        if (tx.booking) {
+          transactionStatusMap.set(tx.booking.toString(), tx.status);
+        }
+      });
 
       const formattedBookings = bookings.map((booking) => {
         const court = booking.court as any;
@@ -813,7 +839,7 @@ export class FieldOwnerService {
           endTime: booking.endTime,
           status: booking.status,
           type: booking.type,
-          transactionStatus: (booking.transaction as any)?.status || null,
+          transactionStatus: transactionStatusMap.get((booking._id as Types.ObjectId).toString()) || null,
           approvalStatus: (booking as any).approvalStatus || (booking as any).noteStatus || undefined,
           totalPrice: booking.totalPrice,
           customer: {
@@ -1107,9 +1133,13 @@ export class FieldOwnerService {
         }));
       }
 
-      // 4. Process Location
-      if (updateFieldDto.location) {
-        updateData.location = this.validateAndNormalizeLocation(updateFieldDto.location);
+      // 4. Process Location - only update if location is provided and valid
+      if (updateFieldDto.location && typeof updateFieldDto.location === 'object') {
+        // Check if location has the address field - if not, skip location update
+        if (updateFieldDto.location.address && typeof updateFieldDto.location.address === 'string') {
+          updateData.location = this.validateAndNormalizeLocation(updateFieldDto.location);
+        }
+        // If location is provided but incomplete, we skip it and keep the existing location
       }
 
       // 5. Handle Court Deletion and Sync

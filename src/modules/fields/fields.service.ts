@@ -742,7 +742,7 @@ export class FieldsService {
             // Get total count
             const total = await this.bookingModel.countDocuments(bookingFilter);
 
-            // Get bookings with population
+            // Get bookings with population (✅ REMOVED: transaction populate)
             const bookings = await this.bookingModel
                 .find(bookingFilter)
                 .populate({
@@ -757,14 +757,26 @@ export class FieldsService {
                     path: 'selectedAmenities',
                     select: 'name price'
                 })
-                .populate({
-                    path: 'transaction',
-                    select: 'status'
-                })
                 .sort({ date: -1, startTime: -1 }) // Mới nhất trước, sau đó theo thời gian
                 .skip(skip)
                 .limit(limit)
                 .exec();
+
+            // ✅ Query transactions separately to avoid bidirectional reference
+            const bookingIds = bookings.map(b => (b._id as Types.ObjectId).toString());
+            const transactions = await this.transactionModel
+                .find({ booking: { $in: bookingIds.map(id => new Types.ObjectId(id)) } })
+                .select('booking status')
+                .lean()
+                .exec();
+
+            // Create a map for quick lookup: bookingId -> transaction status
+            const transactionStatusMap = new Map<string, string>();
+            transactions.forEach(tx => {
+                if (tx.booking) {
+                    transactionStatusMap.set(tx.booking.toString(), tx.status);
+                }
+            });
 
             // Format dữ liệu trả về
             const formattedBookings = bookings.map(booking => ({
@@ -775,7 +787,7 @@ export class FieldsService {
                 startTime: booking.startTime,
                 endTime: booking.endTime,
                 status: booking.status,
-                transactionStatus: (booking.transaction as any)?.status || null,
+                transactionStatus: transactionStatusMap.get((booking._id as Types.ObjectId).toString()) || null,
                 totalPrice: booking.totalPrice,
                 customer: {
                     fullName: (booking.user as any)?.fullName || 'Unknown',

@@ -175,6 +175,22 @@ export class FieldOwnerController {
     return this.fieldOwnerService.create(createFieldDto, ownerId, files);
   }
 
+  @Post('fields/with-images')
+  @UseInterceptors(FilesInterceptor('images', 10))
+  @UseGuards(AuthGuard('jwt'), SubscriptionStatusGuard)
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Create new field with images (multipart/form-data)' })
+  async createFieldWithImages(
+    @Request() req,
+    @Body() createFieldDto: CreateFieldDto,
+    @UploadedFiles() files?: IFile[],
+  ): Promise<FieldsDto> {
+    const userId = req.user.userId;
+    const ownerId = await this.getOwnerProfileId(userId);
+    return this.fieldOwnerService.create(createFieldDto, ownerId, files);
+  }
+
   @Patch('fields/:id')
   @UseInterceptors(FileFieldsInterceptor([
     { name: 'avatar', maxCount: 1 },
@@ -185,6 +201,26 @@ export class FieldOwnerController {
   @ApiConsumes('application/json', 'multipart/form-data')
   @ApiOperation({ summary: 'Update field info' })
   async updateField(
+    @Request() req,
+    @Param('id') id: string,
+    @Body() updateFieldDto: UpdateFieldDto,
+    @UploadedFiles() files?: { avatar?: IFile[], gallery?: IFile[] },
+  ): Promise<FieldsDto> {
+    const userId = req.user.userId;
+    const ownerId = await this.getOwnerProfileId(userId);
+    return this.fieldOwnerService.update(id, updateFieldDto, ownerId, files);
+  }
+
+  @Patch('fields/:id/with-images')
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'avatar', maxCount: 1 },
+    { name: 'gallery', maxCount: 10 }
+  ]))
+  @UseGuards(AuthGuard('jwt'), SubscriptionStatusGuard)
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Update field with images (multipart/form-data)' })
+  async updateFieldWithImages(
     @Request() req,
     @Param('id') id: string,
     @Body() updateFieldDto: UpdateFieldDto,

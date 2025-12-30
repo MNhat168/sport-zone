@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsArray } from 'class-validator';
+import { IsOptional, IsString, IsArray, IsNumber, IsBoolean, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { SportType } from 'src/common/enums/sport-type.enum';
 
@@ -36,4 +36,15 @@ export class UpdateCoachDto {
   @IsOptional()
   @IsString()
   profileImage?: string;
+
+  @ApiPropertyOptional({ description: 'Hourly rate in VND' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  hourlyRate?: number;
+
+  @ApiPropertyOptional({ description: 'Whether coach is active/available for bookings' })
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }
