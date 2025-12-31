@@ -18,7 +18,7 @@ import { GetAllUsersResponseDto, UserListDto } from './dto/get-all-users-respons
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { Booking } from '../bookings/entities/booking.entity';
-import { FavouriteCoachDto } from './dto/favourite-coach.dto';
+import { BookmarkCoachDto } from './dto/bookmark-coach.dto';
 import { UserRole } from '@common/enums/user.enum';
 import { Field } from '../fields/entities/field.entity';
 import * as bcrypt from 'bcrypt';
@@ -113,19 +113,19 @@ export class UsersService {
     return this.userModel.findOne({ email });
   }
 
-  async setFavouriteCoaches(email: string, favouriteCoaches: string[]) {
+  async setBookmarkCoaches(email: string, bookmarkCoaches: string[]) {
     const user = await this.userModel.findOne({ email });
     if (!user) {
       throw new BadRequestException('User not found');
     }
 
-    if (!Array.isArray(favouriteCoaches)) {
-      throw new BadRequestException('favouriteCoaches must be an array');
+    if (!Array.isArray(bookmarkCoaches)) {
+      throw new BadRequestException('bookmarkCoaches must be an array');
     }
 
     // Validate and convert coach IDs to ObjectId
     const validIds: Types.ObjectId[] = [];
-    for (const id of favouriteCoaches) {
+    for (const id of bookmarkCoaches) {
       if (typeof id !== 'string') continue;
       if (!Types.ObjectId.isValid(id)) continue;
       validIds.push(new Types.ObjectId(id));
@@ -148,24 +148,24 @@ export class UsersService {
 
     const coachIdStrings = coaches.map((c) => c._id.toString());
 
-    // Ensure user's favouriteCoaches is an array
-    if (!Array.isArray(user.favouriteCoaches)) user.favouriteCoaches = [];
+    // Ensure user's bookmarkCoaches is an array
+    if (!Array.isArray(user.bookmarkCoaches)) user.bookmarkCoaches = [];
 
-    const currentCoachIds = user.favouriteCoaches.map((c: any) => c.toString());
+    const currentCoachIds = user.bookmarkCoaches.map((c: any) => c.toString());
 
     // Filter new coach IDs (remove duplicates)
     const newCoachIds = coachIdStrings.filter((id) => !currentCoachIds.includes(id));
 
     if (newCoachIds.length === 0) {
-      throw new BadRequestException('All provided coaches are already in favourites');
+      throw new BadRequestException('All provided coaches are already in bookmarks');
     }
 
-    user.favouriteCoaches.push(...newCoachIds.map((id) => new Types.ObjectId(id)));
+    user.bookmarkCoaches.push(...newCoachIds.map((id) => new Types.ObjectId(id)));
     await user.save();
     return user;
   }
 
-  async removeFavouriteCoaches(email: string, coachIds: string[]) {
+  async removeBookmarkCoaches(email: string, coachIds: string[]) {
     const user = await this.userModel.findOne({ email });
     if (!user) {
       throw new BadRequestException('User not found');
@@ -180,26 +180,26 @@ export class UsersService {
       throw new BadRequestException('No valid coach IDs provided');
     }
 
-    // Remove any matching IDs from user's favouriteCoaches
-    if (!Array.isArray(user.favouriteCoaches) || user.favouriteCoaches.length === 0) {
-      throw new BadRequestException('No favourite coaches to remove');
+    // Remove any matching IDs from user's bookmarkCoaches
+    if (!Array.isArray(user.bookmarkCoaches) || user.bookmarkCoaches.length === 0) {
+      throw new BadRequestException('No bookmark coaches to remove');
     }
 
     const validIdStrings = validIds.map(id => new Types.ObjectId(id).toString());
 
-    const beforeCount = (user.favouriteCoaches || []).length;
-    user.favouriteCoaches = (user.favouriteCoaches || []).filter((c: any) => !validIdStrings.includes((c as any).toString()));
-    const afterCount = (user.favouriteCoaches || []).length;
+    const beforeCount = (user.bookmarkCoaches || []).length;
+    user.bookmarkCoaches = (user.bookmarkCoaches || []).filter((c: any) => !validIdStrings.includes((c as any).toString()));
+    const afterCount = (user.bookmarkCoaches || []).length;
 
     if (beforeCount === afterCount) {
-      throw new BadRequestException('None of the provided coach IDs were in favourites');
+      throw new BadRequestException('None of the provided coach IDs were in bookmarks');
     }
 
     await user.save();
     return user;
   }
 
-  async removeFavouriteFields(email: string, fieldIds: string[]) {
+  async removeBookmarkFields(email: string, fieldIds: string[]) {
     const user = await this.userModel.findOne({ email });
     if (!user) {
       throw new BadRequestException('User not found');
@@ -214,38 +214,38 @@ export class UsersService {
       throw new BadRequestException('No valid field IDs provided');
     }
 
-    // If user has no favourites, nothing to remove
-    if (!Array.isArray(user.favouriteFields) || user.favouriteFields.length === 0) {
-      throw new BadRequestException('No favourite fields to remove');
+    // If user has no bookmarks, nothing to remove
+    if (!Array.isArray(user.bookmarkFields) || user.bookmarkFields.length === 0) {
+      throw new BadRequestException('No bookmark fields to remove');
     }
 
     const validIdStrings = validIds.map(id => new Types.ObjectId(id).toString());
-    const beforeCount = (user.favouriteFields || []).length;
+    const beforeCount = (user.bookmarkFields || []).length;
 
-    user.favouriteFields = (user.favouriteFields || []).filter((f: any) => !validIdStrings.includes((f as any).toString()));
+    user.bookmarkFields = (user.bookmarkFields || []).filter((f: any) => !validIdStrings.includes((f as any).toString()));
 
-    const afterCount = (user.favouriteFields || []).length;
+    const afterCount = (user.bookmarkFields || []).length;
     if (beforeCount === afterCount) {
-      throw new BadRequestException('None of the provided field IDs were in favourites');
+      throw new BadRequestException('None of the provided field IDs were in bookmarks');
     }
 
     await user.save();
     return user;
   }
 
-  async setFavouriteFields(email: string, favouriteFields: string[]) {
+  async setBookmarkFields(email: string, bookmarkFields: string[]) {
     const user = await this.userModel.findOne({ email });
     if (!user) {
       throw new BadRequestException('User not found');
     }
 
-    if (!Array.isArray(favouriteFields)) {
-      throw new BadRequestException('favouriteFields must be an array');
+    if (!Array.isArray(bookmarkFields)) {
+      throw new BadRequestException('bookmarkFields must be an array');
     }
 
     // Validate and convert field IDs to ObjectId
     const validIds: Types.ObjectId[] = [];
-    for (const id of favouriteFields) {
+    for (const id of bookmarkFields) {
       if (typeof id !== 'string') continue;
       if (!Types.ObjectId.isValid(id)) continue;
       validIds.push(new Types.ObjectId(id));
@@ -268,43 +268,43 @@ export class UsersService {
 
     const fieldIdStrings = fields.map((f) => f._id.toString());
 
-    // Ensure user's favouriteFields is an array
-    if (!Array.isArray(user.favouriteFields)) user.favouriteFields = [];
+    // Ensure user's bookmarkFields is an array
+    if (!Array.isArray(user.bookmarkFields)) user.bookmarkFields = [];
 
-    const currentFieldIds = user.favouriteFields.map((c: any) => c.toString());
+    const currentFieldIds = user.bookmarkFields.map((c: any) => c.toString());
 
     // Filter new field IDs (remove duplicates)
     const newFieldIds = fieldIdStrings.filter((id) => !currentFieldIds.includes(id));
 
     if (newFieldIds.length === 0) {
-      throw new BadRequestException('All provided fields are already in favourites');
+      throw new BadRequestException('All provided fields are already in bookmarks');
     }
 
-    user.favouriteFields.push(...newFieldIds.map((id) => new Types.ObjectId(id)));
+    user.bookmarkFields.push(...newFieldIds.map((id) => new Types.ObjectId(id)));
     await user.save();
     return user;
   }
 
   /**
-   * Return favourite fields for a user with minimal data
+   * Return bookmark fields for a user with minimal data
    * @param email - user email
    * @returns array of { _id, name, avatar, totalBookings }
    */
-  async getFavouriteFields(email: string) {
+  async getBookmarkFields(email: string) {
     const user = await this.userModel.findOne({ email }).lean();
     if (!user) {
       throw new BadRequestException('User not found');
     }
 
-    const favouriteFields = Array.isArray(user.favouriteFields)
-      ? user.favouriteFields.map((f: any) => (typeof f === 'string' ? f : (f as any).toString()))
+    const bookmarkFields = Array.isArray(user.bookmarkFields)
+      ? user.bookmarkFields.map((f: any) => (typeof f === 'string' ? f : (f as any).toString()))
       : [];
 
-    if (favouriteFields.length === 0) return [];
+    if (bookmarkFields.length === 0) return [];
 
     // Fetch basic field info
     const fields = await this.fieldModel
-      .find({ _id: { $in: favouriteFields.map((id) => new Types.ObjectId(id)) }, isActive: true })
+      .find({ _id: { $in: bookmarkFields.map((id) => new Types.ObjectId(id)) }, isActive: true })
       .select('name images')
       .lean()
       .exec();
@@ -329,25 +329,25 @@ export class UsersService {
   }
 
   /**
-   * Return favourite coaches for a user with minimal data
+   * Return bookmark coaches for a user with minimal data
    * @param email - user email
    * @returns array of { _id, name, avatar, totalBookings }
    */
-  async getFavouriteCoaches(email: string): Promise<FavouriteCoachDto[]> {
+  async getBookmarkCoaches(email: string): Promise<BookmarkCoachDto[]> {
     const user = await this.userModel.findOne({ email }).lean();
     if (!user) {
       throw new BadRequestException('User not found');
     }
 
-    const favouriteCoaches = Array.isArray(user.favouriteCoaches)
-      ? user.favouriteCoaches.map((c: any) => (typeof c === 'string' ? c : (c as any).toString()))
+    const bookmarkCoaches = Array.isArray(user.bookmarkCoaches)
+      ? user.bookmarkCoaches.map((c: any) => (typeof c === 'string' ? c : (c as any).toString()))
       : [];
 
-    if (favouriteCoaches.length === 0) return [];
+    if (bookmarkCoaches.length === 0) return [];
 
     // Fetch basic coach info (users with role COACH)
     const coaches = await this.userModel
-      .find({ _id: { $in: favouriteCoaches.map((id) => new Types.ObjectId(id)) }, role: UserRole.COACH })
+      .find({ _id: { $in: bookmarkCoaches.map((id) => new Types.ObjectId(id)) }, role: UserRole.COACH })
       .select('fullName avatarUrl')
       .lean()
       .exec();
@@ -368,7 +368,7 @@ export class UsersService {
       name: c.fullName,
       avatar: c.avatarUrl || null,
       totalBookings: countsMap[(c._id as any).toString()] || 0,
-    })) as FavouriteCoachDto[];
+    })) as BookmarkCoachDto[];
   }
 
   async getAllUsers(query: GetAllUsersDto): Promise<GetAllUsersResponseDto> {

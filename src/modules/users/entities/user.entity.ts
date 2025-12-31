@@ -35,10 +35,10 @@ export class User extends BaseEntity {
   googleId?: string;
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
-  favouriteCoaches?: Types.ObjectId[];
+  bookmarkCoaches?: Types.ObjectId[];
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Field' }], default: [] })
-  favouriteFields?: Types.ObjectId[];
+  bookmarkFields?: Types.ObjectId[];
 
   @Prop({ type: Boolean, default: true })
   isActive: boolean;

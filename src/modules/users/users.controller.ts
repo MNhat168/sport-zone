@@ -32,9 +32,9 @@ import { USER_REPOSITORY } from './interface/users.interface';
 import { Multer } from 'multer';
 import { AuthGuard } from '@nestjs/passport';
 import { UserRole } from '@common/enums/user.enum';
-import { SetFavouriteCoachesDto } from './dto/set-favourite-coaches.dto';
-import { SetFavouriteFieldsDto } from './dto/set-favourite-fields.dto';
-import { FavouriteCoachDto } from './dto/favourite-coach.dto';
+import { SetBookmarkCoachesDto } from './dto/set-bookmark-coaches.dto';
+import { SetBookmarkFieldsDto } from './dto/set-bookmark-fields.dto';
+import { BookmarkCoachDto } from './dto/bookmark-coach.dto';
 import { Roles } from 'src/decorators/roles.decorator';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 @ApiTags('Users')
@@ -78,10 +78,10 @@ export class UsersController {
   }
 
   @UseGuards(JwtAccessTokenGuard)
-  @Post('favourite-coaches')
-  async setFavouriteCoaches(
+  @Post('bookmark-coaches')
+  async setBookmarkCoaches(
     @Request() req,
-    @Body() body: SetFavouriteCoachesDto,
+    @Body() body: SetBookmarkCoachesDto,
   ) {
     const userEmail = req.user.email;
     const user = await this.usersService.findByEmail(userEmail);
@@ -89,82 +89,19 @@ export class UsersController {
       throw new BadRequestException('User not found');
     }
 
-    // Only regular users can set favourite coaches
+    // Only regular users can set bookmark coaches
     if (user.role !== UserRole.USER) {
-      throw new BadRequestException('Only users with role USER can set favourite coaches');
+      throw new BadRequestException('Only users with role USER can set bookmark coaches');
     }
 
-    return this.usersService.setFavouriteCoaches(userEmail, body.favouriteCoaches);
+    return this.usersService.setBookmarkCoaches(userEmail, body.bookmarkCoaches);
   }
 
   @UseGuards(JwtAccessTokenGuard)
-  @Delete('favourite-coaches')
-  async removeFavouriteCoaches(
+  @Delete('bookmark-coaches')
+  async removeBookmarkCoaches(
     @Request() req,
-    @Body() body: SetFavouriteCoachesDto,
-  ) {
-    const userEmail = req.user.email;
-    const user = await this.usersService.findByEmail(userEmail);
-    if (!user) {
-      throw new BadRequestException('User not found');
-    }
-
-    if (user.role !== UserRole.USER) {
-      throw new BadRequestException('Only users with role USER can remove favourite coaches');
-    }
-
-    return this.usersService.removeFavouriteCoaches(userEmail, body.favouriteCoaches);
-  }
-
-  @UseGuards(JwtAccessTokenGuard)
-  @Post('favourite-fields')
-  async setFavouriteFields(
-    @Request() req,
-    @Body() body: SetFavouriteFieldsDto,
-  ) {
-    const userEmail = req.user.email;
-    const user = await this.usersService.findByEmail(userEmail);
-    if (!user) {
-      throw new BadRequestException('User not found');
-    }
-
-    // Only regular users can set favourite fields
-    if (user.role !== UserRole.USER) {
-      throw new BadRequestException('Only users with role USER can set favourite fields');
-    }
-
-    return this.usersService.setFavouriteFields(userEmail, body.favouriteFields);
-  }
-
-  @UseGuards(JwtAccessTokenGuard)
-  @Get('favourite-fields')
-  async getFavouriteFields(@Request() req) {
-    const userEmail = req.user.email;
-    const user = await this.usersService.findByEmail(userEmail);
-    if (!user) {
-      throw new BadRequestException('User not found');
-    }
-    return this.usersService.getFavouriteFields(userEmail);
-  }
-
-  @UseGuards(JwtAccessTokenGuard)
-  @Get('favourite-coaches')
-  @ApiOperation({ summary: 'Get current user favourite coaches' })
-  @ApiResponse({ status: 200, description: 'List of favourite coaches', type: [FavouriteCoachDto] })
-  async getFavouriteCoaches(@Request() req): Promise<FavouriteCoachDto[]> {
-    const userEmail = req.user.email;
-    const user = await this.usersService.findByEmail(userEmail);
-    if (!user) {
-      throw new BadRequestException('User not found');
-    }
-    return this.usersService.getFavouriteCoaches(userEmail);
-  }
-
-  @UseGuards(JwtAccessTokenGuard)
-  @Delete('favourite-fields')
-  async removeFavouriteFields(
-    @Request() req,
-    @Body() body: SetFavouriteFieldsDto,
+    @Body() body: SetBookmarkCoachesDto,
   ) {
     const userEmail = req.user.email;
     const user = await this.usersService.findByEmail(userEmail);
@@ -173,10 +110,73 @@ export class UsersController {
     }
 
     if (user.role !== UserRole.USER) {
-      throw new BadRequestException('Only users with role USER can remove favourite fields');
+      throw new BadRequestException('Only users with role USER can remove bookmark coaches');
     }
 
-    return this.usersService.removeFavouriteFields(userEmail, body.favouriteFields);
+    return this.usersService.removeBookmarkCoaches(userEmail, body.bookmarkCoaches);
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
+  @Post('bookmark-fields')
+  async setBookmarkFields(
+    @Request() req,
+    @Body() body: SetBookmarkFieldsDto,
+  ) {
+    const userEmail = req.user.email;
+    const user = await this.usersService.findByEmail(userEmail);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    // Only regular users can set bookmark fields
+    if (user.role !== UserRole.USER) {
+      throw new BadRequestException('Only users with role USER can set bookmark fields');
+    }
+
+    return this.usersService.setBookmarkFields(userEmail, body.bookmarkFields);
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
+  @Get('bookmark-fields')
+  async getBookmarkFields(@Request() req) {
+    const userEmail = req.user.email;
+    const user = await this.usersService.findByEmail(userEmail);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+    return this.usersService.getBookmarkFields(userEmail);
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
+  @Get('bookmark-coaches')
+  @ApiOperation({ summary: 'Get current user bookmark coaches' })
+  @ApiResponse({ status: 200, description: 'List of bookmark coaches', type: [BookmarkCoachDto] })
+  async getBookmarkCoaches(@Request() req): Promise<BookmarkCoachDto[]> {
+    const userEmail = req.user.email;
+    const user = await this.usersService.findByEmail(userEmail);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+    return this.usersService.getBookmarkCoaches(userEmail);
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
+  @Delete('bookmark-fields')
+  async removeBookmarkFields(
+    @Request() req,
+    @Body() body: SetBookmarkFieldsDto,
+  ) {
+    const userEmail = req.user.email;
+    const user = await this.usersService.findByEmail(userEmail);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (user.role !== UserRole.USER) {
+      throw new BadRequestException('Only users with role USER can remove bookmark fields');
+    }
+
+    return this.usersService.removeBookmarkFields(userEmail, body.bookmarkFields);
   }
 
   @UseGuards(JwtAccessTokenGuard, RolesGuard)

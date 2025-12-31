@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-export class FavouriteCoachDto {
+export class BookmarkCoachDto {
   @ApiProperty({ example: '507f1f77bcf86cd799439011', description: 'Coach user id' })
   _id: string;
 
