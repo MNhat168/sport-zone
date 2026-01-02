@@ -364,8 +364,6 @@ export class CleanupService {
   })
   async cleanupExpiredBookingsAndPayments(): Promise<void> {
     try {
-      this.logger.log('[Cron Job] Starting expired bookings and payments cleanup...');
-
       const nowVN = getCurrentVietnamTimeForDB();
       let totalCancelled = 0;
       let totalErrors = 0;
@@ -467,13 +465,6 @@ export class CleanupService {
         }
       }
 
-      if (totalCancelled > 0 || totalErrors > 0) {
-        this.logger.log(
-          `✅ [Cron Job] Cleanup completed: ${totalCancelled} cancelled, ${totalErrors} failed`
-        );
-      } else {
-        this.logger.debug('✅ [Cron Job] No expired bookings or payments found');
-      }
     } catch (error) {
       this.logger.error('❌ Error during cleanup:', error);
     }

@@ -922,16 +922,43 @@ export class FieldOwnerService {
       }
 
       // 4. Validate Operating Hours
-      const operatingHours = createFieldDto.operatingHours;
+      let operatingHours = createFieldDto.operatingHours;
+
       if (!Array.isArray(operatingHours) || operatingHours.length === 0) {
         throw new BadRequestException('Invalid operating hours format - must be array of day objects');
       }
 
+      // Filter out null/undefined entries
+      const originalLength = operatingHours.length;
+      operatingHours = operatingHours.filter((oh: any) => oh != null && typeof oh === 'object');
+      if (operatingHours.length !== originalLength) {
+        this.logger.warn(`Filtered out ${originalLength - operatingHours.length} invalid operating hours entries`);
+      }
+      if (operatingHours.length === 0) {
+        throw new BadRequestException('Invalid operating hours format - all entries are null or invalid');
+      }
+
       const validDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-      for (const dayHours of operatingHours) {
-        if (!validDays.includes(dayHours.day)) {
-          throw new BadRequestException(`Invalid day: ${dayHours.day}`);
+      for (let i = 0; i < operatingHours.length; i++) {
+        const dayHours = operatingHours[i];
+
+        // Check if dayHours is a valid object
+        if (!dayHours || typeof dayHours !== 'object') {
+          this.logger.error(`Invalid operating hours entry at index ${i}:`, dayHours);
+          throw new BadRequestException(`Invalid operating hours entry at index ${i} - must be an object`);
         }
+
+        // Check if day exists and is valid
+        if (!dayHours.day || typeof dayHours.day !== 'string') {
+          this.logger.error(`Missing or invalid day at index ${i}:`, dayHours);
+          throw new BadRequestException(`Invalid day at index ${i}: ${dayHours.day || 'undefined'}`);
+        }
+
+        if (!validDays.includes(dayHours.day)) {
+          this.logger.error(`Invalid day value at index ${i}:`, dayHours);
+          throw new BadRequestException(`Invalid day: ${dayHours.day}. Valid days are: ${validDays.join(', ')}`);
+        }
+
         if (!dayHours.start || !dayHours.end || !dayHours.duration) {
           throw new BadRequestException(
             `Invalid operating hours for ${dayHours.day} - missing start, end, or duration`,
@@ -941,11 +968,35 @@ export class FieldOwnerService {
 
       // 5. Process Price Ranges
       let priceRanges = createFieldDto.priceRanges || [];
+
       if (priceRanges && Array.isArray(priceRanges) && priceRanges.length > 0) {
-        for (const range of priceRanges) {
-          if (!validDays.includes(range.day)) {
-            throw new BadRequestException(`Invalid day in price range: ${range.day}`);
+        // Filter out null/undefined entries
+        const originalLength = priceRanges.length;
+        priceRanges = priceRanges.filter((pr: any) => pr != null && typeof pr === 'object');
+        if (priceRanges.length !== originalLength) {
+          this.logger.warn(`Filtered out ${originalLength - priceRanges.length} invalid price range entries`);
+        }
+
+        for (let i = 0; i < priceRanges.length; i++) {
+          const range = priceRanges[i];
+
+          // Check if range is a valid object
+          if (!range || typeof range !== 'object') {
+            this.logger.error(`Invalid price range entry at index ${i}:`, range);
+            throw new BadRequestException(`Invalid price range entry at index ${i} - must be an object`);
           }
+
+          // Check if day exists and is valid
+          if (!range.day || typeof range.day !== 'string') {
+            this.logger.error(`Missing or invalid day in price range at index ${i}:`, range);
+            throw new BadRequestException(`Invalid day in price range at index ${i}: ${range.day || 'undefined'}`);
+          }
+
+          if (!validDays.includes(range.day)) {
+            this.logger.error(`Invalid day value in price range at index ${i}:`, range);
+            throw new BadRequestException(`Invalid day in price range: ${range.day}. Valid days are: ${validDays.join(', ')}`);
+          }
+
           if (!range.start || !range.end || range.multiplier === undefined) {
             throw new BadRequestException(
               `Invalid price range for ${range.day} - missing start, end, or multiplier`,
@@ -1012,7 +1063,6 @@ export class FieldOwnerService {
             );
           }
           await Promise.all(courtPromises);
-          this.logger.log(`Successfully created ${numberOfCourts} court(s) for field ${savedField._id}`);
         } catch (courtError) {
           this.logger.error(`Failed to create courts for field ${savedField._id}:`, courtError);
         }

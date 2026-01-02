@@ -194,7 +194,24 @@ export class CreateFieldDto {
     description: string;
 
     @ApiProperty({ type: LocationDto, description: 'Địa điểm của sân (địa chỉ + toạ độ)' })
-    @Transform(({ value }) => typeof value === 'string' ? JSON.parse(value) : value)
+    @Transform(({ value }) => {
+        // If already an object with address, return as is
+        if (typeof value === 'object' && value !== null && 'address' in value) {
+            return value;
+        }
+
+        // If string, try to parse
+        if (typeof value === 'string') {
+            try {
+                return JSON.parse(value);
+            } catch (error) {
+                // Return the string as-is, let validation catch it
+                return value;
+            }
+        }
+
+        return value;
+    })
     @ValidateNested()
     @Type(() => LocationDto)
     location: LocationDto;
