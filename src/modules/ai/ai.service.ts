@@ -23,7 +23,7 @@ export interface DetailedFieldOwnerStats {
 export interface DetailedCoachStats {
     coachId: string;
     coachName: string;
-    sports: string[];
+    sports: string;
     averageRating: number;
     totalBookings: number;
     totalFavorites: number;
@@ -692,7 +692,7 @@ export class AiService {
         Coach: ${stats.coachName}
         
         ## BASIC METRICS
-        Sports: ${stats.sports?.join(', ') || 'Not specified'}
+        Sports: ${stats.sports || 'Not specified'}
         Hourly Rate: $${stats.hourlyRate}
         Average Rating: ${stats.averageRating.toFixed(1)}/5
         Total Bookings: ${stats.totalBookings}
@@ -912,7 +912,7 @@ export class AiService {
 
         return {
             summary: `${stats.coachName} is a ${stats.experienceLevel} ${stats.certificationLevel || 'certified'} coach ` +
-                `specializing in ${stats.sports?.join(', ') || 'multiple sports'}. ` +
+                `specializing in ${stats.sports || 'multiple sports'}. ` +
                 `Maintains a ${stats.averageRating.toFixed(1)}/5 rating with ${stats.clientRetentionRate.toFixed(1)}% client retention. ` +
                 `Charges $${stats.hourlyRate}/hr (${hourlyRateCategory} tier).`,
             strengths: [

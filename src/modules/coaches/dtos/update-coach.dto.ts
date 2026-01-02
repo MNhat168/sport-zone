@@ -1,16 +1,15 @@
 import { IsOptional, IsString, IsArray, IsNumber, IsBoolean, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { SportType } from 'src/common/enums/sport-type.enum';
 
 export class UpdateCoachDto {
   @ApiPropertyOptional({ description: 'Biography / description' })
   @IsOptional()
   @IsString()
   bio?: string;
-  @ApiPropertyOptional({ description: 'List of sports', enum: SportType })
+  @ApiPropertyOptional({ description: 'Sport specialization', type: String })
   @IsOptional()
-  @IsArray()
-  sports?: SportType[];
+  @IsString()
+  sports?: string;
 
   @ApiPropertyOptional({ description: 'Certification / level' })
   @IsOptional()

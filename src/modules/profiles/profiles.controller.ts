@@ -2,7 +2,6 @@ import { Controller, Patch, Param, Body, Get } from '@nestjs/common';
 import { ProfilesService } from './profiles.service';
 import { Types } from 'mongoose';
 import { BadRequestException } from '@nestjs/common';
-import { SportType } from 'src/common/enums/sport-type.enum';
 import { CoachProfile } from 'src/modules/coaches/entities/coach-profile.entity';
 
 @Controller('profiles')
@@ -21,7 +20,7 @@ export class ProfilesController {
         body: {
             certification?: string;
             bio?: string;
-            sports?: SportType[];
+            sports?: string;
             location?: string;
             experience?: string;
         },
@@ -77,7 +76,7 @@ export class ProfilesController {
     @Patch(':userId/sports')
     async updateSports(
         @Param('userId') userId: string,
-        @Body('sports') sports: SportType[]
+        @Body('sports') sports: string
     ) {
         return this.profileService.updateSports(userId, sports);
     }

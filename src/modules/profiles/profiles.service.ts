@@ -2,7 +2,6 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CoachProfile } from '../coaches/entities/coach-profile.entity';
-import { SportType } from 'src/common/enums/sport-type.enum';
 
 @Injectable()
 export class ProfilesService {
@@ -33,7 +32,7 @@ export class ProfilesService {
         updates: {
             certification?: string;
             bio?: string;
-            sports?: SportType[];
+            sports?: string;
             location?: string;
             experience?: string;
         },
@@ -126,7 +125,7 @@ export class ProfilesService {
         return profile;
     }
 
-    async updateSports(userId: string, sports: SportType[]): Promise<CoachProfile> {
+    async updateSports(userId: string, sports: string): Promise<CoachProfile> {
         if (!Types.ObjectId.isValid(userId)) {
             throw new BadRequestException('Invalid user ID format');
         }

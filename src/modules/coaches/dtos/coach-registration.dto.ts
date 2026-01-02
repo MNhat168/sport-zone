@@ -11,7 +11,6 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { RegistrationStatus } from '@common/enums/field-owner-registration.enum';
-import { SportType } from 'src/common/enums/sport-type.enum';
 
 class PersonalInfoDto {
   @ApiProperty({ example: 'Nguyễn Văn A', description: 'Họ tên đầy đủ' })
@@ -101,14 +100,12 @@ export class CreateCoachRegistrationDto {
 
   // Coach Profile Information
   @ApiProperty({
-    type: [String],
-    enum: SportType,
-    example: ['football', 'tennis'],
-    description: 'Các môn thể thao có thể huấn luyện',
+    type: String,
+    example: 'football',
+    description: 'Môn thể thao có thể huấn luyện',
   })
-  @IsArray()
-  @IsEnum(SportType, { each: true })
-  sports: SportType[];
+  @IsString()
+  sports: string;
 
   @ApiProperty({ example: 'AFC C License, UEFA B License', description: 'Chứng chỉ/bằng cấp huấn luyện viên' })
   @IsString()
@@ -169,15 +166,13 @@ export class UpdateCoachRegistrationDto {
   personalInfo?: PersonalInfoDto;
 
   @ApiPropertyOptional({
-    type: [String],
-    enum: SportType,
-    example: ['football', 'tennis'],
-    description: 'Các môn thể thao có thể huấn luyện',
+    type: String,
+    example: 'football',
+    description: 'Môn thể thao có thể huấn luyện',
   })
   @IsOptional()
-  @IsArray()
-  @IsEnum(SportType, { each: true })
-  sports?: SportType[];
+  @IsString()
+  sports?: string;
 
   @ApiPropertyOptional({ example: 'AFC C License, UEFA B License', description: 'Chứng chỉ/bằng cấp' })
   @IsOptional()
@@ -232,15 +227,13 @@ export class UpdateCoachRegistrationDto {
 
 export class ApproveCoachRegistrationDto {
   @ApiPropertyOptional({
-    type: [String],
-    enum: SportType,
-    example: ['football', 'tennis'],
-    description: 'Các môn thể thao (admin có thể điều chỉnh)',
+    type: String,
+    example: 'football',
+    description: 'Môn thể thao (admin có thể điều chỉnh)',
   })
   @IsOptional()
-  @IsArray()
-  @IsEnum(SportType, { each: true })
-  sports?: SportType[];
+  @IsString()
+  sports?: string;
 
   @ApiPropertyOptional({ example: 'AFC C License', description: 'Chứng chỉ' })
   @IsOptional()
@@ -314,8 +307,8 @@ export class CoachRegistrationResponseDto {
   @ApiProperty({ enum: RegistrationStatus })
   status: RegistrationStatus;
 
-  @ApiProperty({ type: [String], enum: SportType })
-  sports: SportType[];
+  @ApiProperty({ type: String })
+  sports: string;
 
   @ApiProperty()
   certification: string;

@@ -3,7 +3,6 @@ import { Types } from 'mongoose';
 import { BaseEntity } from 'src/common/entities/base.entity';
 import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
 import { RegistrationStatus } from '@common/enums/field-owner-registration.enum';
-import { SportType } from 'src/common/enums/sport-type.enum';
 
 @Schema()
 export class CoachRegistrationRequest extends BaseEntity {
@@ -59,8 +58,8 @@ export class CoachRegistrationRequest extends BaseEntity {
     };
 
     // Coach Profile Information
-    @Prop({ type: [String], enum: SportType, required: true })
-    sports: SportType[];
+    @Prop({ type: String, required: true })
+    sports: string;
 
     @Prop({ type: String, required: true })
     certification: string;

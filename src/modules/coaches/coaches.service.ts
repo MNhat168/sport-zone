@@ -8,7 +8,6 @@ import { UserRole } from '@common/enums/user.enum';
 import { CoachProfile } from 'src/modules/coaches/entities/coach-profile.entity';
 import { BankAccount } from '../field-owner/entities/bank-account.entity';
 import { CoachesDto } from './dtos/coaches.dto';
-import { SportType } from 'src/common/enums/sport-type.enum';
 import { Schedule } from 'src/modules/schedules/entities/schedule.entity';
 
 import { CoachRegistrationRequest } from './entities/coach-registration-request.entity';
@@ -55,7 +54,7 @@ export class CoachesService {
 
   async findAll(query?: {
     name?: string;
-    sportType?: SportType;
+    sportType?: string;
     minRate?: number;
     maxRate?: number;
     district?: string; // Filter by district (quận)
@@ -154,9 +153,9 @@ export class CoachesService {
 
   /**
    * Public listing of coaches optionally filtered by sports array
-   * @param sports optional array of SportType to filter coaches
+   * @param sports optional array of sport strings to filter coaches
    */
-  async getAllCoachesPublic(sports?: SportType[]): Promise<any[]> {
+  async getAllCoachesPublic(sports?: string[]): Promise<any[]> {
     const users = await this.userModel.find({ role: UserRole.COACH }).sort({ createdAt: -1 }).lean();
 
     const profileFilter: any = { 

@@ -34,7 +34,7 @@ export class CoachStatsDto {
     aiInsight: string;
     
     // Enhanced fields
-    sports: string[];
+    sports: string;
     hourlyRate: number;
     monthlyBookings: MonthlyBookingDto[];
     bookingTrend: 'increasing' | 'decreasing' | 'stable';

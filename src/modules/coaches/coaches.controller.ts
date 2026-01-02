@@ -11,7 +11,6 @@ import { AuthGuard } from '@nestjs/passport';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { CoachesService } from './coaches.service';
 import { CoachesDto } from './dtos/coaches.dto';
-import { SportType } from 'src/common/enums/sport-type.enum';
 import {
   CreateCoachRegistrationDto,
   ApproveCoachRegistrationDto,
@@ -41,7 +40,7 @@ export class CoachesController {
   @Get()
   async findAll(
     @Query('name') name?: string,
-    @Query('sportType') sportType?: SportType,
+    @Query('sportType') sportType?: string,
     @Query('minRate') minRate?: number,
     @Query('maxRate') maxRate?: number,
     @Query('district') district?: string,
@@ -168,13 +167,13 @@ export class CoachesController {
 
   /**
    * Public endpoint: GET /coaches/public?sports=football,basketball
-   * Accepts comma-separated SportType values and returns matching coaches.
+   * Accepts comma-separated sport values and returns matching coaches.
    */
   @Get('public')
   async getAllCoachesPublic(@Query('sports') sports?: string): Promise<any[]> {
-    let sportsArray: SportType[] | undefined = undefined;
+    let sportsArray: string[] | undefined = undefined;
     if (sports) {
-      sportsArray = sports.split(',').map(s => s.trim()).filter(Boolean) as SportType[];
+      sportsArray = sports.split(',').map(s => s.trim()).filter(Boolean);
     }
     return this.coachesService.getAllCoachesPublic(sportsArray);
   }
