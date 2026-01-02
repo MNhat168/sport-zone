@@ -188,6 +188,39 @@ export class FieldOwnerController {
   ): Promise<FieldsDto> {
     const userId = req.user.userId;
     const ownerId = await this.getOwnerProfileId(userId);
+
+    // WORKAROUND: NestJS @Type decorator loses nested object data for multipart/form-data
+    // Manually parse location from raw body if it came as string
+    const rawBody = req.body;
+    if (rawBody?.location && typeof rawBody.location === 'string') {
+      try {
+        createFieldDto.location = JSON.parse(rawBody.location);
+      } catch (error) {
+        this.logger.error('Failed to parse location JSON:', error);
+        throw new BadRequestException('Invalid location format - must be valid JSON');
+      }
+    }
+
+    // WORKAROUND: Parse operatingHours from raw body if it came as string
+    if (rawBody?.operatingHours && typeof rawBody.operatingHours === 'string') {
+      try {
+        createFieldDto.operatingHours = JSON.parse(rawBody.operatingHours);
+      } catch (error) {
+        this.logger.error('Failed to parse operatingHours JSON:', error);
+        throw new BadRequestException('Invalid operatingHours format - must be valid JSON');
+      }
+    }
+
+    // WORKAROUND: Parse priceRanges from raw body if it came as string
+    if (rawBody?.priceRanges && typeof rawBody.priceRanges === 'string') {
+      try {
+        createFieldDto.priceRanges = JSON.parse(rawBody.priceRanges);
+      } catch (error) {
+        this.logger.error('Failed to parse priceRanges JSON:', error);
+        throw new BadRequestException('Invalid priceRanges format - must be valid JSON');
+      }
+    }
+
     return this.fieldOwnerService.create(createFieldDto, ownerId, files);
   }
 
