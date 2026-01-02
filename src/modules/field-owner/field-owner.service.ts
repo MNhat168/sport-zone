@@ -12,6 +12,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Field } from '../fields/entities/field.entity';
 import { FieldOwnerProfile } from './entities/field-owner-profile.entity';
 import {
@@ -81,6 +82,7 @@ export class FieldOwnerService {
     private readonly configService: ConfigService,
     @Inject(forwardRef(() => FieldsService))
     private readonly fieldsService: FieldsService,
+    private readonly eventEmitter: EventEmitter2,
   ) { }
 
   async findByOwner(
@@ -1223,6 +1225,27 @@ export class FieldOwnerService {
 
       if (updateFieldDto.numberOfCourts !== undefined) {
         await this.syncCourts(fieldId, updateFieldDto.numberOfCourts);
+      }
+
+      // Emit events for bookmark notifications BEFORE final update
+      if (updateData.isActive !== undefined && field.isActive !== updateData.isActive) {
+        this.eventEmitter.emit('field.statusChanged', {
+          fieldId: (field._id as any).toString(),
+          fieldName: field.name,
+          oldStatus: field.isActive,
+          newStatus: updateData.isActive,
+        });
+        this.logger.log(`Emitted field.statusChanged event for field ${field.name}`);
+      }
+
+      if (updateData.basePrice !== undefined && field.basePrice !== updateData.basePrice) {
+        this.eventEmitter.emit('field.priceChanged', {
+          fieldId: (field._id as any).toString(),
+          fieldName: field.name,
+          oldPrice: field.basePrice,
+          newPrice: updateData.basePrice,
+        });
+        this.logger.log(`Emitted field.priceChanged event for field ${field.name}`);
       }
 
       const updatedField = await this.fieldModel

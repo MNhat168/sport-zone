@@ -29,6 +29,10 @@ export class NotificationRepository implements NotificationRepositoryInterface {
         return notification.save();
     }
 
+    async createMany(dataArray: CreateNotificationDto[]): Promise<Notification[]> {
+        return this.notificationModel.insertMany(dataArray, { ordered: false });
+    }
+
     async update(id: string, data: Partial<Notification>): Promise<Notification | null> {
         return this.notificationModel.findByIdAndUpdate(id, data, { new: true }).exec();
     }

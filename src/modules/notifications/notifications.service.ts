@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { CreateNotificationDto } from './dtos/create-notification.dto';
 import { Notification } from './entities/notification.entity';
@@ -8,6 +8,8 @@ import { NotificationsGateway } from './notifications.gateway';
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(
     @Inject(NOTIFICATION_REPOSITORY)
     private readonly notificationRepository: NotificationRepositoryInterface,
@@ -40,6 +42,46 @@ export class NotificationsService {
     }
 
     return notification;
+  }
+
+  /**
+   * Create multiple notifications in batch with bulk insert
+   * @param dtos - Array of notification DTOs
+   */
+  async createBatch(dtos: CreateNotificationDto[]): Promise<void> {
+    if (dtos.length === 0) return;
+
+    try {
+      const notifications = await this.notificationRepository.createMany(dtos);
+      
+      // Emit real-time notifications for each recipient
+      for (const notification of notifications) {
+        try {
+          const recipientId =
+            typeof notification.recipient === 'string'
+              ? notification.recipient
+              : (notification.recipient as any)?.toString?.() ?? '';
+
+          if (recipientId) {
+            this.notificationsGateway.emitToUser(recipientId, {
+              id: (notification as any)._id?.toString?.() ?? undefined,
+              title: notification.title,
+              message: notification.message,
+              type: notification.type,
+              isRead: notification.isRead,
+              createdAt: notification['createdAt'],
+              metadata: notification['metadata'] ?? undefined,
+            });
+          }
+        } catch (error) {
+          // Silent fail for individual WebSocket emissions
+          this.logger.warn(`Failed to emit notification to user: ${error?.message}`);
+        }
+      }
+    } catch (error) {
+      this.logger.error('Error creating batch notifications', error);
+      // Don't throw - notifications are non-critical
+    }
   }
 
   async getUserNotifications(userId: string): Promise<Notification[]> {

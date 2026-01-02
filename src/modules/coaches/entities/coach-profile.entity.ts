@@ -74,6 +74,9 @@ export class CoachProfile extends BaseEntity {
 
   @Prop({ type: Date })
   bankVerifiedAt?: Date;
+
+  @Prop({ type: Boolean, default: true })
+  isCoachActive: boolean;
 }
 
 export const CoachProfileSchema = SchemaFactory.createForClass(CoachProfile);

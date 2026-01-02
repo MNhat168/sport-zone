@@ -12,6 +12,9 @@ import { Field, FieldSchema } from '../fields/entities/field.entity';
 import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entities/field-owner-profile.entity';
 import { User, UserSchema } from '../users/entities/user.entity';
 import { EmailModule } from '../email/email.module';
+import { BookmarkNotificationService } from './services/bookmark-notification.service';
+import { UserRepository } from '../users/repositories/user.repository';
+import { USER_REPOSITORY } from '../users/interface/users.interface';
 
 @Module({
   imports: [
@@ -30,9 +33,15 @@ import { EmailModule } from '../email/email.module';
     NotificationListener,
     NotificationRepository,
     NotificationsGateway,
+    BookmarkNotificationService,
+    UserRepository,
     {
       provide: NOTIFICATION_REPOSITORY,
       useClass: NotificationRepository,
+    },
+    {
+      provide: USER_REPOSITORY,
+      useClass: UserRepository,
     }
   ],
   exports: [NotificationsService, NotificationsGateway]

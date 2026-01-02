@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, InternalServerErro
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { User } from 'src/modules/users/entities/user.entity';
 import { UserRole } from '@common/enums/user.enum';
 import { CoachProfile } from 'src/modules/coaches/entities/coach-profile.entity';
@@ -49,6 +50,7 @@ export class CoachesService {
     private readonly emailService: EmailService,
     private readonly payosService: PayOSService,
     private readonly configService: ConfigService,
+    private readonly eventEmitter: EventEmitter2,
   ) { }
 
   async findAll(query?: {
@@ -64,7 +66,10 @@ export class CoachesService {
 
     const users = await this.userModel.find(userFilter).sort({ createdAt: -1 }).lean();
 
-    const profileFilter: any = { user: { $in: users.map((u) => u._id) } };
+    const profileFilter: any = { 
+      user: { $in: users.map((u) => u._id) },
+      isCoachActive: true // Only fetch active coaches
+    };
     if (query?.sportType) profileFilter.sports = query.sportType;
     if (query?.minRate)
       profileFilter.hourlyRate = {
@@ -154,7 +159,10 @@ export class CoachesService {
   async getAllCoachesPublic(sports?: SportType[]): Promise<any[]> {
     const users = await this.userModel.find({ role: UserRole.COACH }).sort({ createdAt: -1 }).lean();
 
-    const profileFilter: any = { user: { $in: users.map((u) => u._id) } };
+    const profileFilter: any = { 
+      user: { $in: users.map((u) => u._id) },
+      isCoachActive: true // Only fetch active coaches
+    };
     if (sports && sports.length > 0) {
       profileFilter.sports = { $in: sports };
     }
@@ -234,6 +242,7 @@ export class CoachesService {
         sports: profile?.sports ?? [],
       },
       galleryImages: profile?.galleryImages ?? [],
+      isCoachActive: profile?.isCoachActive ?? true,
       bankAccount: bankAccount ? {
         accountName: bankAccount.accountName,
         accountNumber: bankAccount.accountNumber,
@@ -255,6 +264,17 @@ export class CoachesService {
 
     this.logger.debug(`Found coach user:`, { userId: user._id, role: user.role });
 
+    // Fetch old coach profile BEFORE update for change detection
+    const oldProfile = await this.coachProfileModel
+      .findOne({ user: user._id })
+      .lean()
+      .exec();
+
+    if (!oldProfile) {
+      this.logger.warn(`No coach profile found for user: ${user._id}`);
+      throw new NotFoundException('Coach profile not found');
+    }
+
     // Update coach profile
     const profileUpdates: any = {};
     if (payload.bio !== undefined) profileUpdates.bio = payload.bio;
@@ -265,8 +285,32 @@ export class CoachesService {
     if (payload.galleryImages !== undefined) profileUpdates.galleryImages = payload.galleryImages;
     if (payload.hourlyRate !== undefined) profileUpdates.hourlyRate = payload.hourlyRate;
     if (payload.isActive !== undefined) profileUpdates.isActive = payload.isActive;
+    if (payload.isCoachActive !== undefined) profileUpdates.isCoachActive = payload.isCoachActive;
 
     this.logger.debug(`Profile updates to apply:`, profileUpdates);
+
+    // Emit events for bookmark notifications BEFORE applying updates
+    if (profileUpdates.isCoachActive !== undefined && 
+        oldProfile.isCoachActive !== profileUpdates.isCoachActive) {
+      this.eventEmitter.emit('coach.statusChanged', {
+        coachId: (user._id as any).toString(),
+        coachName: user.fullName,
+        oldStatus: oldProfile.isCoachActive,
+        newStatus: profileUpdates.isCoachActive,
+      });
+      this.logger.log(`Emitted coach.statusChanged event for coach ${user.fullName}`);
+    }
+
+    if (profileUpdates.hourlyRate !== undefined && 
+        oldProfile.hourlyRate !== profileUpdates.hourlyRate) {
+      this.eventEmitter.emit('coach.priceChanged', {
+        coachId: (user._id as any).toString(),
+        coachName: user.fullName,
+        oldPrice: oldProfile.hourlyRate,
+        newPrice: profileUpdates.hourlyRate,
+      });
+      this.logger.log(`Emitted coach.priceChanged event for coach ${user.fullName}`);
+    }
 
     if (Object.keys(profileUpdates).length > 0) {
       const updateResult = await this.coachProfileModel.updateOne({ user: user._id }, { $set: profileUpdates }).exec();

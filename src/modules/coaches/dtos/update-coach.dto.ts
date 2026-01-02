@@ -47,4 +47,9 @@ export class UpdateCoachDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({ description: 'Whether coach account is active' })
+  @IsOptional()
+  @IsBoolean()
+  isCoachActive?: boolean;
 }

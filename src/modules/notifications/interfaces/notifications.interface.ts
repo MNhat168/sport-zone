@@ -9,6 +9,7 @@ export interface NotificationRepositoryInterface {
     findById(id: string): Promise<Notification | null>;
     findByCondition(condition: FilterQuery<Notification>): Promise<Notification[]>;
     create(data: CreateNotificationDto): Promise<Notification>;
+    createMany(dataArray: CreateNotificationDto[]): Promise<Notification[]>;
     update(id: string, data: Partial<Notification>): Promise<Notification | null>;
     updateMany(condition: FilterQuery<Notification>, data: Partial<Notification>): Promise<any>;
     delete(id: string): Promise<Notification | null>;

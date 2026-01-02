@@ -13,4 +13,5 @@ export class CoachesDto {
     rating: number;
     totalReviews: number;
     rank?: string;
+    isCoachActive?: boolean;
 }
