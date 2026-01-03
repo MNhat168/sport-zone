@@ -166,16 +166,12 @@ export class CoachesController {
 
 
   /**
-   * Public endpoint: GET /coaches/public?sports=football,basketball
-   * Accepts comma-separated sport values and returns matching coaches.
+   * Public endpoint: GET /coaches/public?sports=football
+   * Accepts a single sport value and returns matching coaches.
    */
   @Get('public')
   async getAllCoachesPublic(@Query('sports') sports?: string): Promise<any[]> {
-    let sportsArray: string[] | undefined = undefined;
-    if (sports) {
-      sportsArray = sports.split(',').map(s => s.trim()).filter(Boolean);
-    }
-    return this.coachesService.getAllCoachesPublic(sportsArray);
+    return this.coachesService.getAllCoachesPublic(sports);
   }
 
   // GET /coaches/:id

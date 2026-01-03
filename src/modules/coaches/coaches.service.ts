@@ -5,6 +5,7 @@ import { Model, Types } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { User } from 'src/modules/users/entities/user.entity';
 import { UserRole } from '@common/enums/user.enum';
+import { SportType } from '@common/enums/sport-type.enum';
 import { CoachProfile } from 'src/modules/coaches/entities/coach-profile.entity';
 import { BankAccount } from '../field-owner/entities/bank-account.entity';
 import { CoachesDto } from './dtos/coaches.dto';
@@ -69,7 +70,9 @@ export class CoachesService {
       user: { $in: users.map((u) => u._id) },
       isCoachActive: true // Only fetch active coaches
     };
-    if (query?.sportType) profileFilter.sports = query.sportType;
+    if (query?.sportType) {
+      profileFilter.sports = { $regex: new RegExp(query.sportType, 'i') };
+    }
     if (query?.minRate)
       profileFilter.hourlyRate = {
         ...profileFilter.hourlyRate,
@@ -155,15 +158,15 @@ export class CoachesService {
    * Public listing of coaches optionally filtered by sports array
    * @param sports optional array of sport strings to filter coaches
    */
-  async getAllCoachesPublic(sports?: string[]): Promise<any[]> {
+  async getAllCoachesPublic(sports?: string): Promise<any[]> {
     const users = await this.userModel.find({ role: UserRole.COACH }).sort({ createdAt: -1 }).lean();
 
     const profileFilter: any = { 
       user: { $in: users.map((u) => u._id) },
       isCoachActive: true // Only fetch active coaches
     };
-    if (sports && sports.length > 0) {
-      profileFilter.sports = { $in: sports };
+    if (sports) {
+      profileFilter.sports = { $regex: new RegExp(sports, 'i') };
     }
 
     const profiles = await this.coachProfileModel.find(profileFilter).lean();
@@ -173,6 +176,7 @@ export class CoachesService {
       return {
         id: user?._id?.toString() ?? profile.user.toString(),
         name: user?.fullName ?? '',
+        avatar: user?.avatarUrl ?? '',
         location: typeof profile?.location === 'string'
           ? profile.location
           : profile?.location?.address ?? '',
@@ -181,7 +185,7 @@ export class CoachesService {
         totalReviews: profile?.totalReviews ?? 0,
         price: profile?.hourlyRate ?? 0,
         rank: profile?.rank ?? undefined,
-        sports: profile?.sports ?? [],
+        sports: profile?.sports ?? '',
       };
     });
   }
@@ -277,7 +281,37 @@ export class CoachesService {
     // Update coach profile
     const profileUpdates: any = {};
     if (payload.bio !== undefined) profileUpdates.bio = payload.bio;
-    if (payload.sports !== undefined) profileUpdates.sports = payload.sports;
+    
+    // Validate and process sports
+    if (payload.sports !== undefined) {
+      let sportsArray: string[] = [];
+      
+      // Parse sports input (can be string or array)
+      if (typeof payload.sports === 'string') {
+        sportsArray = payload.sports.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      } else if (Array.isArray(payload.sports)) {
+        sportsArray = payload.sports.map(s => String(s).trim().toLowerCase()).filter(Boolean);
+      }
+      
+      // Validate maximum 3 sports
+      if (sportsArray.length > 3) {
+        throw new BadRequestException('Maximum 3 sports allowed');
+      }
+      
+      // Validate each sport against SportType enum
+      const validSports = Object.values(SportType);
+      const invalidSports = sportsArray.filter(sport => !validSports.includes(sport as SportType));
+      
+      if (invalidSports.length > 0) {
+        throw new BadRequestException(
+          `Invalid sport types: ${invalidSports.join(', ')}. Valid sports: ${validSports.join(', ')}`
+        );
+      }
+      
+      // Save as comma-separated string
+      profileUpdates.sports = sportsArray.join(',');
+    }
+    
     if (payload.certification !== undefined) profileUpdates.certification = payload.certification;
     if (payload.rank !== undefined) profileUpdates.rank = payload.rank;
     if (payload.experience !== undefined) profileUpdates.experience = payload.experience;

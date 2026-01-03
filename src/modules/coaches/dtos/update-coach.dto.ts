@@ -6,10 +6,13 @@ export class UpdateCoachDto {
   @IsOptional()
   @IsString()
   bio?: string;
-  @ApiPropertyOptional({ description: 'Sport specialization', type: String })
+  @ApiPropertyOptional({ 
+    description: 'Sport specialization (string or array, max 3 sports)', 
+    type: String,
+    example: 'football,tennis,badminton'
+  })
   @IsOptional()
-  @IsString()
-  sports?: string;
+  sports?: string | string[];
 
   @ApiPropertyOptional({ description: 'Certification / level' })
   @IsOptional()
