@@ -38,9 +38,12 @@ export class CleanupService {
     hasDataInconsistency: boolean = false
   ): Promise<void> {
     const paymentId = (payment._id as any).toString();
-    const bookingId = (payment.booking as any)?._id?.toString() || payment.booking;
+
     const userId = (payment.user as any)?._id?.toString() || payment.user;
-    const booking = (payment as any).booking;
+
+    // Resolve booking via reverse lookup
+    const booking = await this.bookingModel.findOne({ transaction: payment._id });
+    const bookingId = booking?._id?.toString();
     const bookingStatus = booking?.status || 'unknown';
 
     const notes = hasDataInconsistency
@@ -329,7 +332,8 @@ export class CleanupService {
 
     this.logger.log(`✅ Manually cancelled payment ${paymentId}: ${reason}`);
 
-    const bookingId = (payment.booking as any)?._id?.toString() || payment.booking;
+    const booking = await this.bookingModel.findOne({ transaction: payment._id });
+    const bookingId = booking?._id?.toString();
     if (bookingId) {
       try {
         await this.cancelBookingAndReleaseSlots(
@@ -375,34 +379,43 @@ export class CleanupService {
         status: TransactionStatus.PENDING,
         type: TransactionType.PAYMENT,
         method: { $ne: PaymentMethod.BANK_TRANSFER }, // Exclude BANK_TRANSFER
-      })
-        .populate('booking')
-        .populate('user', 'email fullName');
+      }).populate('user', 'email fullName');
 
-      const validExpiredPayments = expiredPayments.filter((payment: any) => {
-        const booking = payment.booking;
-        if (!booking) return false;
+      // Manual filtering since we can't populate 'booking' anymore
+      const validExpiredPayments: any[] = [];
 
-        const bookingCreatedAtVN = new Date((booking as any).createdAt);
+      for (const payment of expiredPayments) {
+        const booking = await this.bookingModel.findOne({ transaction: payment._id });
+        if (!booking) continue;
+
+        const bookingCreatedAtVN = new Date(booking.createdAt as any);
         const timeSinceBookingMs = nowVN.getTime() - bookingCreatedAtVN.getTime();
         const timeSinceBookingMinutes = timeSinceBookingMs / 1000 / 60;
 
-        const hasDataInconsistency = (booking as any).status === 'confirmed';
+        const hasDataInconsistency = booking.status === BookingStatus.CONFIRMED;
         const isExpired = timeSinceBookingMinutes >= this.PAYMENT_EXPIRATION_MINUTES || hasDataInconsistency;
 
         if (hasDataInconsistency) {
           this.logger.warn(
-            `[Cleanup] ⚠️ DATA INCONSISTENCY: Payment ${payment._id} is PENDING but booking ${(booking as any)._id} is CONFIRMED`
+            `[Cleanup] ⚠️ DATA INCONSISTENCY: Payment ${payment._id} is PENDING but booking ${booking._id} is CONFIRMED`
           );
         }
 
-        return isExpired;
-      });
+        if (isExpired) {
+          // Attach booking to payment object tentatively for use in cancel function (though cancel function re-fetches or we should pass it)
+          // Actually cancelExpiredPaymentAndBooking fetches booking again? 
+          // No, cancelExpiredPaymentAndBooking now searches for booking.
+          // But wait, the original code passed `payment` where `payment.booking` was populated.
+          // My fix for cancelExpiredPaymentAndBooking calculates booking from DB.
+          // So I can just push payment.
+          validExpiredPayments.push(payment);
+        }
+      }
 
       for (const payment of validExpiredPayments) {
         try {
-          const booking = (payment as any).booking;
-          const hasDataInconsistency = booking?.status === 'confirmed';
+          const booking = await this.bookingModel.findOne({ transaction: payment._id });
+          const hasDataInconsistency = booking?.status === BookingStatus.CONFIRMED;
           await this.cancelExpiredPaymentAndBooking(payment, hasDataInconsistency);
           totalCancelled++;
         } catch (error) {

@@ -175,4 +175,46 @@ export class CreateWeeklyRecurringBookingDto {
     @IsArray()
     @IsDateString({}, { each: true })
     skipDates?: string[];
+
+    /**
+     * Override thông tin cho từng ngày cụ thể
+     * Map<DateString, { startTime?: string, endTime?: string, courtId?: string }>
+     */
+    @ApiPropertyOptional({
+        description: 'Override thông tin booking cho các ngày cụ thể (đổi giờ, đổi sân)',
+        example: { '2025-01-15': { startTime: '15:00', endTime: '17:00' } }
+    })
+    @IsOptional()
+    dateOverrides?: Record<string, any>;
+
+    /**
+     * Subtotal đã tính từ FE (tùy chọn - để tránh tính lại)
+     * Nếu có, BE sẽ sử dụng giá trị này thay vì tính lại
+     */
+    @ApiPropertyOptional({
+        example: 500000,
+        description: 'Tổng tiền tạm tính đã được tính từ frontend (không bao gồm phí dịch vụ và giảm giá)'
+    })
+    @IsOptional()
+    subtotal?: number;
+
+    /**
+     * Phí dịch vụ đã tính từ FE (tùy chọn)
+     */
+    @ApiPropertyOptional({
+        example: 25000,
+        description: 'Phí dịch vụ (5%) đã được tính từ frontend'
+    })
+    @IsOptional()
+    systemFee?: number;
+
+    /**
+     * Tổng tiền cuối cùng đã tính từ FE (tùy chọn - sau khi trừ giảm giá)
+     */
+    @ApiPropertyOptional({
+        example: 525000,
+        description: 'Tổng tiền cuối cùng đã được tính từ frontend (bao gồm phí dịch vụ và giảm giá)'
+    })
+    @IsOptional()
+    totalAmount?: number;
 }

@@ -590,26 +590,25 @@ export class OwnerBookingService {
                     paymentProofStatus: { $in: ['pending', 'rejected'] },
                     paymentProofImageUrl: { $exists: true, $ne: null },
                 })
-                .select('_id booking')
+                .select('_id')
                 .lean()
                 .exec();
 
-            const bookingIds = pendingTransactions
-                .map(t => t.booking)
-                .filter(id => id !== null && id !== undefined)
-                .map(id => new Types.ObjectId(id.toString()));
+            const transactionIds = pendingTransactions.map(t => t._id);
 
-            if (bookingIds.length === 0) {
+            if (transactionIds.length === 0) {
                 return [];
             }
+
+
 
             // Find bookings that:
             // 1. Belong to fields owned by this owner
             // 2. Have paymentStatus = 'unpaid'
-            // 3. Have transaction with pending payment proof
+            // 3. Are linked to one of the pending transactions
             const bookings = await this.bookingModel
                 .find({
-                    _id: { $in: bookingIds },
+                    transaction: { $in: transactionIds },
                     field: { $in: fieldIds },
                     paymentStatus: 'unpaid',
                     type: BookingType.FIELD,
@@ -649,16 +648,13 @@ export class OwnerBookingService {
                     paymentProofStatus: { $in: ['pending', 'rejected'] },
                     paymentProofImageUrl: { $exists: true, $ne: null },
                 })
-                .select('_id booking')
+                .select('_id')
                 .lean()
                 .exec();
 
-            const bookingIds = pendingTransactions
-                .map(t => t.booking)
-                .filter(id => id !== null && id !== undefined)
-                .map(id => new Types.ObjectId(id.toString()));
+            const transactionIds = pendingTransactions.map(t => t._id);
 
-            if (bookingIds.length === 0) {
+            if (transactionIds.length === 0) {
                 return [];
             }
 
@@ -666,12 +662,12 @@ export class OwnerBookingService {
             // 1. Are coach bookings (type = COACH)
             // 2. Requested coach matches this coach profile
             // 3. Have paymentStatus = 'unpaid'
-            // 4. Have transaction with pending payment proof
+            // 4. Are linked to one of the pending transactions
             const coachProfileId = new Types.ObjectId((coachProfile._id as any).toString());
 
             const bookings = await this.bookingModel
                 .find({
-                    _id: { $in: bookingIds },
+                    transaction: { $in: transactionIds },
                     type: BookingType.COACH,
                     requestedCoach: coachProfileId,
                     paymentStatus: 'unpaid',

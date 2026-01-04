@@ -8,6 +8,7 @@ import { Request } from 'express';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthGuard } from '@nestjs/passport';
 import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum';
+import { BookingStatus } from '@common/enums/booking.enum';
 import { PayOSService } from './payos.service';
 import { CreateCoachVerificationDto } from './dto/coach-verification.dto';
 import { InjectModel } from '@nestjs/mongoose';
@@ -26,6 +27,7 @@ import { FieldOwnerService } from '../field-owner/field-owner.service';
 import { Response } from 'express';
 import { CleanupService } from '../../service/cleanup.service';
 import { Transaction } from './entities/transaction.entity';
+import { Booking } from '../bookings/entities/booking.entity';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 
 @ApiTags('Transactions')
@@ -42,6 +44,7 @@ export class TransactionsController {
         private readonly fieldOwnerService: FieldOwnerService,
         @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
         @InjectModel(Transaction.name) private readonly transactionModel: Model<Transaction>,
+        @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
         private readonly notificationsGateway: NotificationsGateway,
     ) { }
 
@@ -126,10 +129,12 @@ export class TransactionsController {
             throw new NotFoundException('Payment not found');
         }
 
+        const booking = await this.bookingModel.findOne({ transaction: payment._id }).select('_id');
+
         return {
             paymentId: (payment._id as any).toString(),
             status: payment.status,
-            bookingId: (payment.booking as any)?.toString?.() || payment.booking,
+            bookingId: booking?._id?.toString() || null,
             amount: payment.amount,
             transactionId: payment.externalTransactionId || null,
             createdAt: payment.createdAt,
@@ -697,16 +702,8 @@ export class TransactionsController {
         const transaction = await this.transactionsService.getPaymentById(dto.orderId);
 
         if (!transaction) {
-            console.log(`[Create PayOS Payment] Transaction not found by ID, trying booking ID...`);
-            // If not found by transaction ID, try finding by booking ID
-            const transactionByBooking = await this.transactionsService.getPaymentByBookingId(dto.orderId);
-            if (!transactionByBooking) {
-                console.error(`[Create PayOS Payment] Transaction not found with either transaction ID or booking ID: ${dto.orderId}`);
-                throw new NotFoundException(`Transaction not found with ID: ${dto.orderId}. Please check if the transaction/booking exists.`);
-            }
-            console.log(`[Create PayOS Payment] Found transaction by booking ID: ${(transactionByBooking._id as any).toString()}`);
-            // Use the transaction found by booking ID
-            return this.createPaymentLinkWithTransaction(dto, transactionByBooking);
+            console.error(`[Create PayOS Payment] Transaction not found with ID: ${dto.orderId}`);
+            throw new NotFoundException(`Transaction not found with ID: ${dto.orderId}`);
         }
 
         console.log(`[Create PayOS Payment] Found transaction by ID: ${(transaction._id as any).toString()}`);
@@ -761,10 +758,9 @@ export class TransactionsController {
         description: 'Server-to-server webhook from PayOS. Must be configured in PayOS portal.'
     })
     @ApiResponse({ status: 200, description: 'Webhook processed' })
-    async handlePayOSWebhook(@Body() body: any) {
+    async handlePayOSWebhook(@Body() body: any, @Req() req: Request) {
         try {
             console.log('[PayOS Webhook] Received webhook');
-            console.log('[PayOS Webhook] Raw body:', JSON.stringify(body, null, 2));
 
             // PayOS sends: { "data": {...}, "signature": "..." }
             const receivedSignature = body.signature;
@@ -786,8 +782,6 @@ export class TransactionsController {
                 };
             }
 
-            console.log('[PayOS Webhook] Data:', JSON.stringify(webhookData, null, 2));
-            console.log('[PayOS Webhook] Signature (first 8):', receivedSignature.substring(0, 8) + '...');
 
             // Verify signature
             // Use webhookData directly as PayOS signs all fields in data object
@@ -801,8 +795,7 @@ export class TransactionsController {
                 };
             }
 
-            console.log(`[PayOS Webhook] Signature verified for order ${webhookData.orderCode}`);
-            console.log(`[PayOS Webhook] Description received: "${webhookData.description}"`);
+            console.log(`[PayOS Webhook] Signature verified for order ${webhookData.orderCode}, status: ${webhookData.status}`);
 
             // Check if this is a bank account verification payment
             // Payment creation uses prefix 'BANKACCVERIFY' (no underscore - PayOS strips special chars)
@@ -923,13 +916,11 @@ export class TransactionsController {
             // Emit payment.failed event if transaction was cancelled or expired
             // This triggers cleanup (cancel booking and release slots) via CleanupService
             if (newStatus === TransactionStatus.FAILED) {
-                const bookingIdStr = updated.booking
-                    ? (typeof updated.booking === 'string'
-                        ? updated.booking
-                        : (updated.booking as any)?._id
-                            ? String((updated.booking as any)._id)
-                            : String(updated.booking))
-                    : undefined;
+                // ✅ OPTIMIZED: Use centralized helper method to extract bookingId
+                const bookingIdStr = await this.transactionsService.extractBookingIdFromTransaction(updated);
+                if (bookingIdStr) {
+                    console.log(`[PayOS Webhook] Found bookingId ${bookingIdStr} from transaction (failed payment)`);
+                }
 
                 const userIdStr = updated.user
                     ? (typeof updated.user === 'string'
@@ -1009,13 +1000,13 @@ export class TransactionsController {
                     };
                 }
 
-                const bookingIdStr = updated.booking
-                    ? (typeof updated.booking === 'string'
-                        ? updated.booking
-                        : (updated.booking as any)?._id
-                            ? String((updated.booking as any)._id)
-                            : String(updated.booking))
-                    : undefined;
+                // ✅ OPTIMIZED: Use centralized helper method to extract bookingId
+                const bookingIdStr = await this.transactionsService.extractBookingIdFromTransaction(verifiedTransaction);
+                if (bookingIdStr) {
+                    console.log(`[PayOS Webhook] Found bookingId ${bookingIdStr} from transaction`);
+                } else {
+                    console.warn(`[PayOS Webhook] No bookingId found for transaction ${verifiedTransaction._id}`);
+                }
 
                 const userIdStr = updated.user
                     ? (typeof updated.user === 'string'
@@ -1027,6 +1018,7 @@ export class TransactionsController {
 
                 // Only emit event after transaction is verified as SUCCEEDED
                 // Include tournamentId in event payload if present
+                console.log(`[PayOS Webhook] 🔔 Emitting payment.success event for transaction ${updated._id} (Booking: ${bookingIdStr})`);
                 this.eventEmitter.emit('payment.success', {
                     paymentId: String(updated._id),
                     bookingId: bookingIdStr,
@@ -1046,6 +1038,41 @@ export class TransactionsController {
                 // Successfully emitted payment.success event
                 // This will be handled by NotificationListener to create a persistent notification
                 // and by PaymentHandlerService to confirm the booking.
+
+                // ✅ CRITICAL FIX 5: Direct booking update fallback (last resort)
+                // Wait a bit for event handler to process, then verify booking was updated
+                if (bookingIdStr && Types.ObjectId.isValid(bookingIdStr)) {
+                    setTimeout(async () => {
+                        try {
+                            const booking = await this.bookingModel.findById(bookingIdStr).exec();
+                            if (booking && (booking.status !== BookingStatus.CONFIRMED || booking.paymentStatus !== 'paid')) {
+                                console.warn(`[PayOS Webhook] ⚠️ Booking ${bookingIdStr} not updated after 200ms, attempting direct update`);
+                                
+                                // Direct update as last resort
+                                booking.paymentStatus = 'paid';
+                                if (booking.type !== 'coach') {
+                                    booking.status = BookingStatus.CONFIRMED;
+                                }
+                                await booking.save();
+                                
+                                console.log(`[PayOS Webhook] ✅ Directly updated booking ${bookingIdStr} as fallback`);
+                                
+                                // Emit booking.confirmed event
+                                this.eventEmitter.emit('booking.confirmed', {
+                                    bookingId: bookingIdStr,
+                                    userId: userIdStr,
+                                    fieldId: booking.field?.toString() || null,
+                                    courtId: booking.court?.toString() || null,
+                                    date: booking.date,
+                                });
+                            } else if (booking) {
+                                console.log(`[PayOS Webhook] ✅ Booking ${bookingIdStr} already updated by event handler`);
+                            }
+                        } catch (fallbackError) {
+                            console.error(`[PayOS Webhook] ❌ Error in fallback booking update: ${fallbackError.message}`);
+                        }
+                    }, 200); // Wait 200ms for event handler
+                }
             }
 
             console.log(`[PayOS Webhook] Transaction updated: ${newStatus}`);
@@ -1185,13 +1212,8 @@ export class TransactionsController {
 
                 // ✅ ENHANCED IDEMPOTENCY CHECK: Only update if status has actually changed
                 if (shouldEmitFailedEvent) {
-                    const bookingIdStr = updated.booking
-                        ? (typeof updated.booking === 'string'
-                            ? updated.booking
-                            : (updated.booking as any)?._id
-                                ? String((updated.booking as any)._id)
-                                : String(updated.booking))
-                        : undefined;
+                    // ✅ OPTIMIZED: Use centralized helper method to extract bookingId
+                    const bookingIdStr = await this.transactionsService.extractBookingIdFromTransaction(updated);
 
                     const userIdStr = updated.user
                         ? (typeof updated.user === 'string'
@@ -1231,13 +1253,11 @@ export class TransactionsController {
                 if (shouldEmitSuccessEvent) {
                     console.log(`[PayOS Return] ✅ Transaction ${updated._id} succeeded, emitting payment.success event`);
 
-                    const bookingIdStr = updated.booking
-                        ? (typeof updated.booking === 'string'
-                            ? updated.booking
-                            : (updated.booking as any)?._id
-                                ? String((updated.booking as any)._id)
-                                : String(updated.booking))
-                        : undefined;
+                    // ✅ OPTIMIZED: Use centralized helper method to extract bookingId
+                    const bookingIdStr = await this.transactionsService.extractBookingIdFromTransaction(updated);
+                    if (bookingIdStr) {
+                        console.log(`[PayOS Return] Found bookingId ${bookingIdStr} from transaction`);
+                    }
 
                     const userIdStr = updated.user
                         ? (typeof updated.user === 'string'
@@ -1275,13 +1295,8 @@ export class TransactionsController {
                 // This handles cases where webhook processed the transaction but the booking handler failed or missed the event
                 if (transaction.status === TransactionStatus.SUCCEEDED && shouldEmitSuccessEvent) {
                     console.log(`[PayOS Return] ℹ️ Force emitting payment.success for already succeeded transaction ${transaction._id}`);
-                    const bookingIdStr = updated.booking
-                        ? (typeof updated.booking === 'string'
-                            ? updated.booking
-                            : (updated.booking as any)?._id
-                                ? String((updated.booking as any)._id)
-                                : String(updated.booking))
-                        : undefined;
+                    const bookingDoc = await this.bookingModel.findOne({ transaction: updated._id }).select('_id');
+                    const bookingIdStr = bookingDoc?._id?.toString();
 
                     const userIdStr = updated.user
                         ? (typeof updated.user === 'string'
@@ -1291,6 +1306,7 @@ export class TransactionsController {
                                 : String(updated.user))
                         : undefined;
 
+                    console.log(`[PayOS Return] 🔔 Force emitting payment.success event for transaction ${updated._id}`);
                     this.eventEmitter.emit('payment.success', {
                         paymentId: String(updated._id),
                         bookingId: bookingIdStr,
@@ -1302,13 +1318,8 @@ export class TransactionsController {
                 }
             }
 
-            const bookingId = updated.booking
-                ? (typeof updated.booking === 'string'
-                    ? updated.booking
-                    : (updated.booking as any)?._id
-                        ? String((updated.booking as any)._id)
-                        : String(updated.booking))
-                : '';
+            const bookingDoc = await this.bookingModel.findOne({ transaction: updated._id }).select('_id');
+            const bookingId = bookingDoc?._id?.toString() || '';
 
             return {
                 success: paymentStatus === 'succeeded',
@@ -1483,13 +1494,7 @@ export class TransactionsController {
 
                 // Emit payment events based on status
                 if (newStatus === TransactionStatus.FAILED) {
-                    const bookingIdStr = updated.booking
-                        ? (typeof updated.booking === 'string'
-                            ? updated.booking
-                            : (updated.booking as any)?._id
-                                ? String((updated.booking as any)._id)
-                                : String(updated.booking))
-                        : undefined;
+
 
                     const reason = payosTransaction.status === 'CANCELLED'
                         ? 'PayOS transaction cancelled'
@@ -1513,13 +1518,7 @@ export class TransactionsController {
                     );
 
                     if (verifiedTransaction && verifiedTransaction.status === TransactionStatus.SUCCEEDED) {
-                        const bookingIdStr = updated.booking
-                            ? (typeof updated.booking === 'string'
-                                ? updated.booking
-                                : (updated.booking as any)?._id
-                                    ? String((updated.booking as any)._id)
-                                    : String(updated.booking))
-                            : undefined;
+
 
                         // ✅ Emit payment.success event for tournament with all required fields
                         this.eventEmitter.emit('payment.success', {

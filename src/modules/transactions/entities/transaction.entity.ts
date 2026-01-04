@@ -10,9 +10,7 @@ import { TransactionStatus, TransactionType } from '@common/enums/transaction.en
  */
 @Schema({ collection: 'transactions' }) // Đổi collection name
 export class Transaction extends BaseEntity {
-  // Liên kết booking (NULL nếu phí hệ thống)
-  @Prop({ type: Types.ObjectId, ref: 'Booking' })
-  booking?: Types.ObjectId;
+
 
   // Link to Invoice (for Host subscription)
   @Prop({ type: Types.ObjectId, ref: 'Invoice' })
@@ -98,7 +96,7 @@ export const TransactionSchema = SchemaFactory.createForClass(Transaction);
 configureBaseEntitySchema(TransactionSchema);
 export type TransactionDocument = HydratedDocument<Transaction>;
 // Indexes
-TransactionSchema.index({ booking: 1 });
+
 TransactionSchema.index({ user: 1 });
 TransactionSchema.index({ type: 1, status: 1 });
 TransactionSchema.index({ direction: 1 });

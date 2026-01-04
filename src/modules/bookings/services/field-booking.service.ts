@@ -216,9 +216,8 @@ export class FieldBookingService {
           externalTransactionId, // ✅ Pass PayOS orderCode
         }, session);
 
-        // Update booking with transaction reference
-        // ✅ REMOVED: booking.transaction (bidirectional reference cleanup)
-        // Use TransactionsService.getPaymentByBookingId(bookingId) instead
+        // ✅ Link transaction to booking (for single booking)
+        booking.transaction = payment._id as Types.ObjectId;
         await booking.save({ session });
 
         // ✅ CRITICAL SECURITY: Atomic update with optimistic locking

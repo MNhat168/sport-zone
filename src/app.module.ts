@@ -93,7 +93,7 @@ import { BillingModule } from './modules/billing/billing.module';
         return connection;
       },
     }),
-    EventEmitterModule.forRoot(),
+    EventEmitterModule.forRoot({ global: true }),
     CommonModule,
     AuthModule,
     UsersModule,

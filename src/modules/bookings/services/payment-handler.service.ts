@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types, ClientSession } from 'mongoose';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Booking } from '../entities/booking.entity';
 import { BookingStatus, BookingType } from '@common/enums/booking.enum';
 import { Schedule } from '../../schedules/entities/schedule.entity';
@@ -16,6 +16,7 @@ import { CleanupService } from '../../../service/cleanup.service';
 import { WalletService } from '../../wallet/wallet.service';
 import { WalletRole } from '@common/enums/wallet.enum';
 import { InjectConnection } from '@nestjs/mongoose';
+import { BookingsService } from '../bookings.service';
 
 /**
  * Payment Handler Service
@@ -41,24 +42,22 @@ export class PaymentHandlerService implements OnModuleInit {
     private readonly transactionsService: TransactionsService,
     private readonly walletService: WalletService,
     @Inject(forwardRef(() => CleanupService)) private readonly cleanupService: CleanupService,
-  ) { }
+    @Inject(forwardRef(() => BookingsService)) private readonly bookingsService: BookingsService,
+  ) {
+    this.logger.log('PaymentHandlerService CONSTRUCTOR call');
+  }
 
   /**
    * Setup event listeners when module initializes
    */
   onModuleInit() {
-    // Listen for payment expired events (from payment cleanup service)
-    this.eventEmitter.on('payment.expired', this.handlePaymentExpired.bind(this));
-
-    // [V2] Listen for check-in success events
-    this.eventEmitter.on('booking.checkedIn', this.handleCheckInEvent.bind(this));
-
-    this.logger.log('✅ Payment event listeners registered (payment.expired, booking.checkedIn)');
+    this.logger.log('✅ PaymentHandlerService initialized');
   }
 
   /**
    * [V2] Event handler wrapper for check-in success
    */
+  @OnEvent('booking.checkedIn')
   private async handleCheckInEvent(event: { bookingId: string }): Promise<void> {
     try {
       await this.handleCheckInSuccess(event.bookingId);
@@ -71,6 +70,7 @@ export class PaymentHandlerService implements OnModuleInit {
    * Handle payment expired event (from payment cleanup service)
    * Cancels booking and releases schedule slots when payment expires
    */
+  @OnEvent('payment.expired')
   private async handlePaymentExpired(event: {
     paymentId: string;
     bookingId: string;
@@ -102,9 +102,22 @@ export class PaymentHandlerService implements OnModuleInit {
    * [V2] Adds money to admin systemBalance
    * ✅ SECURITY: Idempotent with atomic update to prevent race conditions
    */
+  /**
+   * Handle payment success event
+   * Updates booking status from PENDING to CONFIRMED
+   * [V2] Adds money to admin systemBalance
+   * ✅ SECURITY: Idempotent with atomic update to prevent race conditions
+   */
+  /**
+   * Handle payment success event
+   * Updates booking status from PENDING to CONFIRMED
+   * [V2] Adds money to admin systemBalance
+   * ✅ SECURITY: Idempotent with atomic update to prevent race conditions
+   */
+  @OnEvent('payment.success')
   async handlePaymentSuccess(event: {
     paymentId: string;
-    bookingId: string;
+    bookingId: string; // Primary booking ID (or any format)
     userId: string;
     amount: number;
     method?: string;
@@ -114,209 +127,183 @@ export class PaymentHandlerService implements OnModuleInit {
     session.startTransaction();
 
     try {
-      this.logger.log(`[Payment Success] Processing for booking ${event.bookingId}`);
+      this.logger.log(`[Payment Success] Processing payment ${event.paymentId} for booking ${event.bookingId}`);
 
-      // Validate bookingId format
-      if (!Types.ObjectId.isValid(event.bookingId)) {
-        this.logger.error(`[Payment Success] Invalid booking ID: ${event.bookingId}`);
-        await session.abortTransaction();
-        return;
-      }
-
-      // ✅ CRITICAL: Verify transaction status is SUCCEEDED before updating booking
-      // This ensures transaction is actually succeeded before confirming booking
+      // ✅ CRITICAL FIX 2: Query transaction WITHOUT session to avoid read isolation
+      // Transaction was updated in webhook handler (no session), so we need to read latest data
       const transaction = await this.transactionsService.getPaymentById(event.paymentId);
 
       if (!transaction) {
-        this.logger.error(
-          `[Payment Success] Transaction ${event.paymentId} not found - cannot confirm booking`
-        );
+        this.logger.error(`[Payment Success] Transaction ${event.paymentId} not found`);
         await session.abortTransaction();
         return;
       }
 
       if (transaction.status !== TransactionStatus.SUCCEEDED) {
-        this.logger.warn(
-          `[Payment Success] Transaction ${event.paymentId} status is ${transaction.status}, ` +
-          `not SUCCEEDED - cannot confirm booking. Waiting for transaction to be updated.`
-        );
+        this.logger.warn(`[Payment Success] Transaction ${event.paymentId} status is ${transaction.status}, waiting...`);
         await session.abortTransaction();
         return;
       }
 
-      this.logger.log(
-        `[Payment Success] ✅ Transaction ${event.paymentId} verified as ${transaction.status}, ` +
-        `proceeding to confirm booking ${event.bookingId}`
-      );
-
-      // Trường hợp giao dịch XÁC THỰC TÀI KHOẢN COACH (không gắn booking)
-      if (!transaction.booking && (transaction as any).metadata?.purpose === 'ACCOUNT_VERIFICATION' && (transaction as any).metadata?.targetRole === 'coach') {
+      // Handle Coach Verification (Non-booking)
+      if ((transaction as any).metadata?.purpose === 'ACCOUNT_VERIFICATION' && (transaction as any).metadata?.targetRole === 'coach') {
         const coachUserId = (transaction.user as any)?.toString?.() || String(transaction.user);
         const coachProfileId = (transaction as any).metadata?.coachId;
-        // Đánh dấu verified (idempotent)
         if (coachProfileId) {
-          await this.coachProfileModel.findByIdAndUpdate(coachProfileId, {
-            $set: { bankVerified: true, bankVerifiedAt: new Date() }
-          }, { new: true });
+          await this.coachProfileModel.findByIdAndUpdate(coachProfileId, { $set: { bankVerified: true, bankVerifiedAt: new Date() } }, { new: true });
         } else if (coachUserId) {
-          await this.coachProfileModel.findOneAndUpdate({ user: new Types.ObjectId(coachUserId) }, {
-            $set: { bankVerified: true, bankVerifiedAt: new Date() }
-          }, { new: true });
+          await this.coachProfileModel.findOneAndUpdate({ user: new Types.ObjectId(coachUserId) }, { $set: { bankVerified: true, bankVerifiedAt: new Date() } }, { new: true });
         }
-        this.logger.log(`[Payment Success] ✅ Marked coach ${coachProfileId || coachUserId} as bankVerified`);
-        // Không cần xử lý booking, kết thúc nhanh
         await session.commitTransaction();
         return;
       }
 
-      // ✅ CRITICAL: Atomic update with condition check (prevents race condition)
-      // This ensures only ONE update happens even if webhook is called multiple times
-      // Determine booking type to decide lifecycle change
-      const current = await this.bookingModel.findById(event.bookingId).session(session).select('type status');
-      const isCoach = !!current && (current as any).type === BookingType.COACH;
+      // ✅ CRITICAL FIX 2: Query bookings WITHOUT session first to avoid read isolation
+      // Then retry with session if needed
+      let bookings: Booking[] = [];
+      let retryCount = 0;
+      const maxRetries = 3;
+      const retryDelay = 100; // ms
 
-      const updateResult = await this.bookingModel.findOneAndUpdate(
-        {
-          _id: new Types.ObjectId(event.bookingId),
-        },
-        {
-          $set: {
-            paymentStatus: 'paid',
-            ...(isCoach ? {} : { status: BookingStatus.CONFIRMED }),
-            // ✅ REMOVED: booking.transaction field (bidirectional reference cleanup)
-            // Use TransactionsService.getPaymentByBookingId() or getLatestSuccessfulTransaction() instead
+      while (bookings.length === 0 && retryCount < maxRetries) {
+        if (retryCount > 0) {
+          this.logger.warn(`[Payment Success] Retry ${retryCount}/${maxRetries} to find bookings for transaction ${transaction._id}`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        }
+
+        // Try finding bookings WITHOUT session first (to see latest data)
+        bookings = await this.bookingsService.findBookingsByTransaction(transaction, undefined);
+
+        // If not found, try with session (for transaction consistency)
+        if (bookings.length === 0) {
+          bookings = await this.bookingsService.findBookingsByTransaction(transaction, session);
+        }
+
+        retryCount++;
+      }
+
+      // ✅ CRITICAL FIX 3: Improved fallback logic
+      if (bookings.length === 0) {
+        this.logger.warn(`[Payment Success] No bookings found by transaction, trying fallbacks`);
+
+        // Fallback 1: Try event.bookingId
+        if (event.bookingId && Types.ObjectId.isValid(event.bookingId)) {
+          const singleBooking = await this.bookingModel.findById(event.bookingId).exec();
+          if (singleBooking) {
+            this.logger.log(`[Payment Success] ✅ Found booking via event.bookingId`);
+            bookings = [singleBooking];
           }
-        },
-        {
-          new: true,
-          session,
-          writeConcern: { w: 'majority', j: true }
-        }
-      ).exec();
-
-      // ✅ SECURITY: Idempotency check - if no update, already processed
-      if (!updateResult) {
-        const booking = await this.bookingModel.findById(event.bookingId).session(session);
-        if (!booking) {
-          this.logger.error(`[Payment Success] Booking ${event.bookingId} not found`);
-          await session.abortTransaction();
-          return;
         }
 
-        if (booking.status === BookingStatus.CONFIRMED) {
-          this.logger.warn(`[Payment Success] Booking ${event.bookingId} already confirmed (idempotent)`);
-          await session.abortTransaction();
-          return;
+        // Fallback 2: Try transaction.metadata.bookingId
+        if (bookings.length === 0 && transaction.metadata?.bookingId && Types.ObjectId.isValid(String(transaction.metadata.bookingId))) {
+          const metadataBookingId = String(transaction.metadata.bookingId);
+          const metadataBooking = await this.bookingModel.findById(metadataBookingId).exec();
+          if (metadataBooking) {
+            this.logger.log(`[Payment Success] ✅ Found booking via metadata.bookingId`);
+            bookings = [metadataBooking];
+          }
         }
 
-        this.logger.error(`[Payment Success] Failed to update booking ${event.bookingId}`);
+        // Fallback 3: Try direct booking.transaction link
+        if (bookings.length === 0) {
+          const directLinkBookings = await this.bookingModel.find({ transaction: transaction._id }).exec();
+          if (directLinkBookings.length > 0) {
+            this.logger.log(`[Payment Success] ✅ Found ${directLinkBookings.length} booking(s) via direct transaction link`);
+            bookings = directLinkBookings;
+          }
+        }
+      }
+
+      if (bookings.length === 0) {
+        this.logger.error(`[Payment Success] ❌ No bookings found for payment ${event.paymentId}`);
         await session.abortTransaction();
         return;
       }
 
-      // ====================================================================
-      // [V2 LOGIC] Add money to admin systemBalance và field-owner pendingBalance
-      // ====================================================================
+      this.logger.log(`[Payment Success] Found ${bookings.length} booking(s) to confirm`);
 
-      // Step 1: Get booking with field info to find owner
-      const bookingWithField = await this.bookingModel
-        .findById(event.bookingId)
-        .populate('field')
-        .session(session);
-
-      if (!bookingWithField || !bookingWithField.field) {
-        this.logger.error(`[Payment Success V2] Booking ${event.bookingId} or field not found`);
-        await session.abortTransaction();
-        return;
-      }
-
-      const field = bookingWithField.field as any;
-      const fieldOwnerId = field.owner?.toString();
-
-      if (!fieldOwnerId) {
-        this.logger.error(`[Payment Success V2] Field ${field._id} has no owner`);
-        await session.abortTransaction();
-        return;
-      }
-
-      // Step 2: Add to admin systemBalance (FULL amount - includes system fee)
-      const adminWallet = await this.walletService.getOrCreateWallet(
-        'ADMIN_SYSTEM_ID',
-        WalletRole.ADMIN,
-        session,
-      );
-
+      // ✅ 2. Admin Balance Update (ONCE per transaction)
+      const adminWallet = await this.walletService.getOrCreateWallet('ADMIN_SYSTEM_ID', WalletRole.ADMIN, session);
       adminWallet.systemBalance = (adminWallet.systemBalance || 0) + event.amount;
       await adminWallet.save({ session });
+      this.logger.log(`[Payment Success V2] ✅ Added ${event.amount}₫ to Admin. New Balance: ${adminWallet.systemBalance}₫`);
 
-      this.logger.log(
-        `[Payment Success V2] ✅ Added ${event.amount}₫ to admin systemBalance. ` +
-        `New balance: ${adminWallet.systemBalance}₫`
-      );
+      // ✅ 3. Process Bookings & Calculate Owner Revenue
+      const ownerRevenueMap = new Map<string, number>(); // OwnerID -> Revenue
 
-      // Step 3: Calculate owner revenue from booking data
-      // Use bookingAmount directly (no reverse calculation needed)
-      // For backward compatibility: if bookingAmount doesn't exist, calculate from totalPrice
-      let ownerRevenue: number;
-      let platformFee: number;
-      let totalAmount: number;
+      for (const booking of bookings) {
+        // Idempotency check
+        if (booking.status === BookingStatus.CONFIRMED && booking.paymentStatus === 'paid') {
+          this.logger.debug(`[Payment Success] Booking ${booking._id} already confirmed and paid, skipping`);
+          continue; // Already processed
+        }
 
-      if (bookingWithField.bookingAmount !== undefined && bookingWithField.platformFee !== undefined) {
-        // New booking structure: use bookingAmount and platformFee directly
-        ownerRevenue = bookingWithField.bookingAmount;
-        platformFee = bookingWithField.platformFee;
-        totalAmount = ownerRevenue + platformFee;
-      } else {
-        // Old booking structure: calculate backwards from totalPrice for backward compatibility
-        const bookingTotalPrice = bookingWithField.totalPrice || event.amount;
-        const systemFeeRate = 0.05;
-        ownerRevenue = Math.round(bookingTotalPrice / (1 + systemFeeRate));
-        platformFee = bookingTotalPrice - ownerRevenue;
-        totalAmount = bookingTotalPrice;
-        this.logger.warn(
-          `[Payment Success V2] ⚠️ Old booking structure detected for ${event.bookingId}. ` +
-          `Calculated ownerRevenue: ${ownerRevenue}₫, platformFee: ${platformFee}₫ from totalPrice: ${bookingTotalPrice}₫`
-        );
+        const isCoach = booking.type === BookingType.COACH;
+
+        // Update Status
+        booking.paymentStatus = 'paid';
+        if (!isCoach) booking.status = BookingStatus.CONFIRMED;
+        
+        try {
+          await booking.save({ session });
+        } catch (saveError) {
+          this.logger.error(`[Payment Success] ❌ Failed to save booking ${booking._id}: ${saveError.message}`, saveError);
+          throw saveError; // Re-throw to trigger transaction rollback
+        }
+
+        // Emit Events
+        this.eventEmitter.emit('booking.confirmed', {
+          bookingId: booking._id.toString(),
+          userId: event.userId,
+          fieldId: booking.field?.toString() || null,
+          courtId: booking.court?.toString() || null,
+          date: booking.date,
+        });
+
+        // Send Email (async, non-blocking)
+        this.bookingEmailService.sendConfirmationEmails(booking._id.toString(), event.method).catch(e => this.logger.error(e));
+
+        // Calculate Revenue for Owner
+        if (booking.field) {
+          const bookingWithField = await this.bookingModel.findById(booking._id).populate('field').session(session);
+
+          if (bookingWithField && bookingWithField.field) {
+            const field = bookingWithField.field as any;
+            const ownerId = field.owner?.toString();
+
+            if (ownerId) {
+              let revenue = 0;
+              if (bookingWithField.bookingAmount !== undefined) {
+                revenue = bookingWithField.bookingAmount;
+              } else {
+                // Legacy calc
+                const total = booking.totalPrice || 0;
+                revenue = Math.round(total / 1.05);
+              }
+
+              const current = ownerRevenueMap.get(ownerId) || 0;
+              ownerRevenueMap.set(ownerId, current + revenue);
+            }
+          }
+        }
       }
 
-      // Step 4: Add to field owner pendingBalance (bookingAmount without platform fee)
-      const ownerWallet = await this.walletService.getOrCreateWallet(
-        fieldOwnerId,
-        WalletRole.FIELD_OWNER,
-        session,
-      );
+      // ✅ 4. Owner Balance Update (Aggregated)
+      for (const [ownerId, revenue] of ownerRevenueMap.entries()) {
+        const ownerWallet = await this.walletService.getOrCreateWallet(ownerId, WalletRole.FIELD_OWNER, session);
+        ownerWallet.pendingBalance = (ownerWallet.pendingBalance || 0) + revenue;
+        ownerWallet.lastTransactionAt = new Date();
+        await ownerWallet.save({ session });
+        this.logger.log(`[Payment Success V2] ✅ Added ${revenue}₫ to Owner ${ownerId}. New Pending: ${ownerWallet.pendingBalance}₫`);
+      }
 
-      ownerWallet.pendingBalance = (ownerWallet.pendingBalance || 0) + ownerRevenue;
-      ownerWallet.lastTransactionAt = new Date();
-      await ownerWallet.save({ session });
-
-      this.logger.log(
-        `[Payment Success V2] ✅ Added ${ownerRevenue}₫ (bookingAmount) to field owner ${fieldOwnerId} pendingBalance. ` +
-        `Platform fee: ${platformFee}₫, Total: ${totalAmount}₫. New balance: ${ownerWallet.pendingBalance}₫`
-      );
-
-      // Commit transaction
       await session.commitTransaction();
-
-      this.logger.log(`[Payment Success] ✅ Booking ${event.bookingId} confirmed successfully`);
-
-      // Emit booking confirmed event for other services
-      this.eventEmitter.emit('booking.confirmed', {
-        bookingId: event.bookingId,
-        userId: event.userId,
-        fieldId: updateResult.field?.toString() || null,
-        courtId: (updateResult as any).court?.toString?.() || null,
-        date: updateResult.date,
-      });
-
-      // Send confirmation emails via unified handler
-      await this.bookingEmailService.sendConfirmationEmails(event.bookingId, event.method);
+      this.logger.log(`[Payment Success] ✅ Successfully confirmed ${bookings.length} booking(s)`);
 
     } catch (error) {
-      // Rollback on error
       await session.abortTransaction();
-      // ✅ SECURITY: Log errors but don't throw - payment webhooks shouldn't fail
-      this.logger.error('[Payment Success] Error processing payment success event', error);
+      this.logger.error(`[Payment Success] ❌ Error processing payment success: ${error.message}`, error);
     } finally {
       session.endSession();
     }
