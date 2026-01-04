@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types, ClientSession } from 'mongoose';
 import { Transaction } from './entities/transaction.entity';
+import { Booking } from '../bookings/entities/booking.entity';
 import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 import * as crypto from 'crypto';
@@ -16,6 +17,7 @@ export interface CreatePaymentData {
   paymentNote?: string;
   transactionId?: string;
   externalTransactionId?: string; // ✅ PayOS orderCode
+  metadata?: Record<string, any>; // ✅ Add optional metadata for custom fields like recurringGroupId
 }
 
 @Injectable()
@@ -24,6 +26,7 @@ export class TransactionsService {
 
   constructor(
     @InjectModel(Transaction.name) private readonly transactionModel: Model<Transaction>,
+    @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
     private readonly configService: ConfigService,
   ) { }
 
@@ -41,8 +44,16 @@ export class TransactionsService {
           ? TransactionStatus.SUCCEEDED
           : TransactionStatus.PENDING;
 
+      // ✅ Build metadata: merge bookingId and custom metadata
+      const metadata: Record<string, any> = {};
+      if (data.bookingId && Types.ObjectId.isValid(data.bookingId)) {
+        metadata.bookingId = data.bookingId;
+      }
+      if (data.metadata) {
+        Object.assign(metadata, data.metadata);
+      }
+
       const transaction = new this.transactionModel({
-        booking: data.bookingId ? new Types.ObjectId(data.bookingId) : undefined,
         user: new Types.ObjectId(data.userId),
         amount: data.amount,
         direction: 'in',
@@ -52,6 +63,8 @@ export class TransactionsService {
         notes: data.paymentNote || null,
         // ✅ CRITICAL: Store externalTransactionId for PayOS lookup
         ...(data.externalTransactionId && { externalTransactionId: data.externalTransactionId }),
+        // ✅ Store metadata (bookingId + custom metadata like recurringGroupId)
+        ...(Object.keys(metadata).length > 0 && { metadata }),
       });
 
       // ✅ CRITICAL: Save with session if provided (for transaction atomicity)
@@ -85,7 +98,6 @@ export class TransactionsService {
     const amount = params.amount ?? 10000;
     try {
       const tx = new this.transactionModel({
-        booking: undefined,
         user: new Types.ObjectId(params.coachUserId),
         amount,
         direction: 'in',
@@ -128,14 +140,8 @@ export class TransactionsService {
       throw new NotFoundException(`Transaction with ID ${transactionId} not found`);
     }
 
-    // ✅ Log existing metadata for debugging
-    this.logger.debug(`[updatePaymentStatus] Existing metadata before update: ${JSON.stringify(existingTransaction.metadata)}`);
-
     // ✅ Preserve existing metadata and merge with new PayOS data
     const existingMetadata = existingTransaction.metadata || {};
-
-    // ✅ Log existing metadata for debugging
-    this.logger.debug(`[updatePaymentStatus] Existing metadata keys: ${Object.keys(existingMetadata).join(', ')}`);
 
     // 1. Build atomic update operations
     const updateOperations: any = {
@@ -143,8 +149,6 @@ export class TransactionsService {
         status,
       }
     };
-
-    this.logger.debug(`[updatePaymentStatus] Initial updateOperations: ${JSON.stringify(updateOperations)}`);
 
     // ✅ CRITICAL FIX: Use dot notation for PayOS fields to preserve existing metadata
     // DO NOT replace entire metadata object - use individual field updates
@@ -188,8 +192,6 @@ export class TransactionsService {
 
     // 3. ✅ CRITICAL: Use findOneAndUpdate with atomic operations
     // This ensures metadata is properly merged and preserved
-    this.logger.debug(`[updatePaymentStatus] Final updateOperations: ${JSON.stringify(updateOperations)}`);
-
     const transaction = await this.transactionModel.findOneAndUpdate(
       {
         _id: transactionId,
@@ -199,13 +201,13 @@ export class TransactionsService {
         new: true,
         runValidators: true
       }
-    ).populate('booking').populate('user');
+    ).populate('user');
 
     if (!transaction) {
       throw new NotFoundException(`Transaction with ID ${transactionId} not found after update`);
     }
 
-    // ✅ Verify metadata was preserved
+    // ✅ CRITICAL FIX 4: Verify metadata was preserved and restore if lost
     const preservedKeys = Object.keys(existingMetadata);
     const finalKeys = Object.keys(transaction.metadata || {});
     const missingKeys = preservedKeys.filter(key => !finalKeys.includes(key));
@@ -215,12 +217,44 @@ export class TransactionsService {
       this.logger.error(`[updatePaymentStatus] Expected keys: ${preservedKeys.join(', ')}, Final keys: ${finalKeys.join(', ')}`);
       this.logger.error(`[updatePaymentStatus] Existing metadata was: ${JSON.stringify(existingMetadata)}`);
       this.logger.error(`[updatePaymentStatus] Final metadata is: ${JSON.stringify(transaction.metadata)}`);
-    } else {
-      this.logger.debug(`[updatePaymentStatus] ✅ All metadata keys preserved: ${preservedKeys.join(', ')}`);
+
+      // ✅ CRITICAL: Restore missing metadata keys
+      const restoreOperations: any = { $set: {} };
+      for (const key of missingKeys) {
+        restoreOperations.$set[`metadata.${key}`] = existingMetadata[key];
+        this.logger.warn(`[updatePaymentStatus] Restoring metadata.${key} = ${JSON.stringify(existingMetadata[key])}`);
+      }
+
+      // Restore missing metadata
+      const restoredTransaction = await this.transactionModel.findByIdAndUpdate(
+        transactionId,
+        restoreOperations,
+        { new: true, runValidators: true }
+      ).populate('user');
+
+      if (restoredTransaction) {
+        this.logger.log(`[updatePaymentStatus] ✅ Restored ${missingKeys.length} missing metadata key(s)`);
+        return restoredTransaction;
+      } else {
+        this.logger.error(`[updatePaymentStatus] ❌ Failed to restore metadata for transaction ${transactionId}`);
+      }
     }
 
-    this.logger.log(`Updated transaction ${transactionId} status to ${status} via Atomic $set Update`);
-    this.logger.debug(`Transaction metadata after update: ${JSON.stringify(transaction.metadata)}`);
+    // ✅ CRITICAL: Double-check critical metadata fields
+    if (existingMetadata.bookingId && !transaction.metadata?.bookingId) {
+      this.logger.error(`[updatePaymentStatus] ❌ CRITICAL: bookingId was lost! Restoring...`);
+      const restored = await this.transactionModel.findByIdAndUpdate(
+        transactionId,
+        { $set: { 'metadata.bookingId': existingMetadata.bookingId } },
+        { new: true, runValidators: true }
+      ).populate('user');
+      if (restored) {
+        this.logger.log(`[updatePaymentStatus] ✅ Restored metadata.bookingId`);
+        return restored;
+      }
+    }
+
+    this.logger.log(`Updated transaction ${transactionId} status to ${status}`);
 
     return transaction;
   }
@@ -229,9 +263,12 @@ export class TransactionsService {
    * Lấy transaction theo booking ID
    */
   async getPaymentByBookingId(bookingId: string): Promise<Transaction | null> {
+    const booking = await this.bookingModel.findById(bookingId).select('transaction').exec();
+    if (!booking?.transaction) return null;
+
     return this.transactionModel
       .findOne({
-        booking: new Types.ObjectId(bookingId),
+        _id: booking.transaction,
         type: TransactionType.PAYMENT
       })
       .populate('user', 'fullName email')
@@ -243,13 +280,15 @@ export class TransactionsService {
    * Replaces direct access to booking.transaction field
    */
   async getLatestSuccessfulTransaction(bookingId: string): Promise<Transaction | null> {
+    const booking = await this.bookingModel.findById(bookingId).select('transaction').exec();
+    if (!booking?.transaction) return null;
+
     return this.transactionModel
       .findOne({
-        booking: new Types.ObjectId(bookingId),
+        _id: booking.transaction,
         type: TransactionType.PAYMENT,
         status: TransactionStatus.SUCCEEDED
       })
-      .sort({ createdAt: -1 })
       .populate('user', 'fullName email')
       .exec();
   }
@@ -259,9 +298,15 @@ export class TransactionsService {
    * Useful for getting complete transaction history
    */
   async getBookingTransactions(bookingId: string): Promise<Transaction[]> {
+    const booking = await this.bookingModel.findById(bookingId).select('transaction').exec();
+    if (!booking?.transaction) return [];
+
     return this.transactionModel
       .find({
-        booking: new Types.ObjectId(bookingId)
+        $or: [
+          { _id: booking.transaction },
+          { relatedTransaction: booking.transaction }
+        ]
       })
       .sort({ createdAt: -1 })
       .populate('user', 'fullName email')
@@ -277,7 +322,6 @@ export class TransactionsService {
   async getPaymentByExternalId(externalId: string): Promise<Transaction | null> {
     return await this.transactionModel
       .findOne({ externalTransactionId: externalId })
-      .populate('booking')
       .populate('user', 'fullName email')
       .exec();
   }
@@ -285,9 +329,60 @@ export class TransactionsService {
   async getPaymentById(transactionId: string): Promise<Transaction | null> {
     return this.transactionModel
       .findById(transactionId)
-      .populate('booking')
       .populate('user', 'fullName email')
       .exec();
+  }
+
+  /**
+   * ✅ OPTIMIZED: Extract bookingId from transaction with priority order
+   * This method centralizes the logic to find bookingId from a transaction,
+   * avoiding code duplication across webhook handlers.
+   * 
+   * Priority order:
+   * 1. Direct link via booking.transaction (fastest - single query)
+   * 2. Recurring group via metadata.recurringGroupId (returns first booking ID for event)
+   * 3. Single booking via metadata.bookingId
+   * 4. Fallback: Extract bookingId from transaction notes
+   * 
+   * @param transaction - Transaction object
+   * @returns bookingId string or undefined if not found
+   */
+  async extractBookingIdFromTransaction(transaction: Transaction): Promise<string | undefined> {
+    try {
+      // ✅ Priority 1: Direct link via booking.transaction
+      const bookingDoc = await this.bookingModel.findOne({ transaction: transaction._id }).select('_id').exec();
+      if (bookingDoc) {
+        return bookingDoc._id?.toString();
+      }
+
+      // ✅ Priority 2: Recurring bookings via metadata.recurringGroupId
+      if (transaction.metadata?.recurringGroupId) {
+        const recurringGroupId = transaction.metadata.recurringGroupId;
+        const bookings = await this.bookingModel.find({ 
+          recurringGroupId: new Types.ObjectId(recurringGroupId) 
+        }).select('_id').exec();
+        // Return first booking ID for event (payment-handler will process all)
+        return bookings[0]?._id?.toString();
+      }
+
+      // ✅ Priority 3: Single booking via metadata.bookingId
+      if (transaction.metadata?.bookingId && Types.ObjectId.isValid(String(transaction.metadata.bookingId))) {
+        return String(transaction.metadata.bookingId);
+      }
+
+      // ✅ Priority 4: Fallback - Extract bookingId from notes
+      if (transaction.notes) {
+        const bookingIdMatch = transaction.notes.match(/Payment for booking\s+([a-f0-9]{24})/i);
+        if (bookingIdMatch && Types.ObjectId.isValid(bookingIdMatch[1])) {
+          return bookingIdMatch[1];
+        }
+      }
+
+      return undefined;
+    } catch (error) {
+      this.logger.error(`[extractBookingIdFromTransaction] Error: ${error.message}`, error);
+      return undefined;
+    }
   }
 
   /**
@@ -329,13 +424,16 @@ export class TransactionsService {
       });
 
       // Log for monitoring/alerting systems
+      // Lookup booking for logging
+      const booking = await this.bookingModel.findOne({ transaction: transactionId }).select('_id').exec();
+
       this.logger.error(
         `Transaction Error [${transactionId}]: Code ${errorCode} - ${errorMessage}`,
         JSON.stringify({
           transactionId,
           errorCode,
           errorMessage,
-          bookingId: transaction.booking,
+          bookingId: booking?._id,
           userId: transaction.user,
           amount: transaction.amount,
           ...additionalData,
@@ -359,16 +457,16 @@ export class TransactionsService {
     refundedByUserId?: string
   ): Promise<{
     paymentId: string;
-    bookingId: string;
+    bookingId: string | null;
     refundAmount: number;
     originalAmount: number;
     refundPaymentId: string;
     refundedAt: string;
   }> {
     // Get original transaction
+
     const originalTransaction = await this.transactionModel
       .findById(transactionId)
-      .populate('booking')
       .populate('user')
       .exec();
 
@@ -400,7 +498,6 @@ export class TransactionsService {
 
     // Create refund transaction record
     const refundTransaction = new this.transactionModel({
-      booking: originalTransaction.booking,
       amount: finalRefundAmount,
       direction: 'out',
       method: originalTransaction.method,
@@ -429,7 +526,8 @@ export class TransactionsService {
 
     return {
       paymentId: (originalTransaction._id as any).toString(),
-      bookingId: (originalTransaction.booking as any)?.toString?.() || originalTransaction.booking,
+
+      bookingId: null, // Booking ID is not stored on transaction anymore
       refundAmount: finalRefundAmount,
       originalAmount: originalTransaction.amount,
       refundPaymentId: (refundTransaction._id as any).toString(),
@@ -465,23 +563,41 @@ export class TransactionsService {
     const total = await this.transactionModel.countDocuments(query);
 
     // Get transactions with pagination
+    // Get transactions with pagination
     const transactions = await this.transactionModel
       .find(query)
-      .populate('booking', 'fieldId date startTime endTime totalPrice status')
       .populate('user', 'fullName email')
       .sort({ createdAt: -1 })
       .limit(limit)
       .skip(offset)
       .exec();
 
+    // Collect transaction IDs to find associated bookings
+    const transactionIds = transactions.map(t => t._id);
+    const bookings = await this.bookingModel.find({ transaction: { $in: transactionIds } })
+      .select('fieldId date startTime endTime totalPrice status transaction')
+      .populate('field', 'name') // Optional: populate field info if needed
+      .exec();
+
+    const bookingMap = new Map();
+    bookings.forEach(b => {
+      // Create a booking object similar to what was originally populated
+      const bookingObj = b.toObject();
+      // Ensure we map by string ID
+      if (b.transaction) {
+        bookingMap.set(b.transaction.toString(), bookingObj);
+      }
+    });
+
     const formattedPayments = transactions.map((transaction) => {
       // Extract refund information from notes if exists
       const refundInfo = this.extractRefundInfo(transaction.notes);
+      const booking = bookingMap.get((transaction._id as any).toString());
 
       return {
         paymentId: (transaction._id as any).toString(),
-        bookingId: (transaction.booking as any)?._id?.toString() || transaction.booking,
-        booking: transaction.booking,
+        bookingId: booking?._id?.toString() || null,
+        booking: booking || null,
         amount: transaction.amount,
         status: transaction.status,
         method: transaction.method,
@@ -587,7 +703,6 @@ export class TransactionsService {
 
     const transactions = await this.transactionModel
       .find(query)
-      .populate('booking')
       .populate('user', 'fullName email')
       .populate('relatedTransaction')
       .sort({ createdAt: -1 })
@@ -628,10 +743,52 @@ export class TransactionsService {
       transactionId,
       { $set: updateData },
       { new: true }
-    ).populate('booking').populate('user', 'fullName email');
+    ).populate('user', 'fullName email');
 
     if (transaction) {
       this.logger.log(`Updated transaction ${transactionId} metadata atomically`);
+    }
+
+    return transaction;
+  }
+
+  /**
+   * Update transaction externalTransactionId (PayOS orderCode)
+   * Used when reusing existing transaction for PayOS payment
+   */
+  async updateTransactionExternalId(
+    transactionId: string,
+    externalTransactionId: string
+  ): Promise<Transaction | null> {
+    const transaction = await this.transactionModel.findByIdAndUpdate(
+      transactionId,
+      { $set: { externalTransactionId } },
+      { new: true }
+    ).exec();
+
+    if (transaction) {
+      this.logger.log(`Updated transaction ${transactionId} externalTransactionId to ${externalTransactionId}`);
+    }
+
+    return transaction;
+  }
+
+  /**
+   * Update transaction amount
+   * Used when amount changes due to bulk discount application or other adjustments
+   */
+  async updateTransactionAmount(
+    transactionId: string,
+    amount: number
+  ): Promise<Transaction | null> {
+    const transaction = await this.transactionModel.findByIdAndUpdate(
+      transactionId,
+      { $set: { amount } },
+      { new: true }
+    ).exec();
+
+    if (transaction) {
+      this.logger.log(`Updated transaction ${transactionId} amount to ${amount}`);
     }
 
     return transaction;
@@ -643,11 +800,11 @@ export class TransactionsService {
   async getTransactionById(transactionId: string): Promise<Transaction | null> {
     return await this.transactionModel
       .findById(transactionId)
-      .populate('booking')
       .populate('user', 'fullName email')
       .populate('relatedTransaction')
       .exec();
   }
+
 
   /**
    * Get all transactions for a transaction (including refunds)
@@ -661,7 +818,6 @@ export class TransactionsService {
           { relatedTransaction: new Types.ObjectId(transactionId) },
         ]
       })
-      .populate('booking')
       .populate('user', 'fullName email')
       .populate('relatedTransaction')
       .sort({ createdAt: 1 })
@@ -710,7 +866,6 @@ export class TransactionsService {
   async createPayout(bookingId: string, coachId: string, amount: number, bankAccount?: string, bankName?: string): Promise<Transaction> {
     try {
       const payout = new this.transactionModel({
-        booking: new Types.ObjectId(bookingId),
         amount: -amount, // Negative for outgoing
         direction: 'out',
         type: TransactionType.PAYOUT,
@@ -743,7 +898,6 @@ export class TransactionsService {
       const userId = systemUserId || new Types.ObjectId('000000000000000000000000');
 
       const fee = new this.transactionModel({
-        booking: new Types.ObjectId(bookingId),
         amount: amount,
         direction: 'in',
         type: TransactionType.FEE,

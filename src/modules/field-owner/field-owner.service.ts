@@ -522,19 +522,21 @@ export class FieldOwnerService {
         .exec();
 
       // ✅ Query transactions separately to avoid bidirectional reference
-      const bookingIds = bookings.map(b => (b._id as Types.ObjectId).toString());
+      // ✅ Query transactions using IDs stored in bookings
+      const transactionIds = bookings
+        .map(b => (b as any).transaction)
+        .filter(id => id && Types.ObjectId.isValid(id.toString()));
+
       const transactions = await this.transactionModel
-        .find({ booking: { $in: bookingIds.map(id => new Types.ObjectId(id)) } })
-        .select('booking status')
+        .find({ _id: { $in: transactionIds } })
+        .select('_id status')
         .lean()
         .exec();
 
-      // Create a map for quick lookup: bookingId -> transaction status
+      // Create a map for quick lookup: transactionId -> transaction status
       const transactionStatusMap = new Map<string, string>();
       transactions.forEach(tx => {
-        if (tx.booking) {
-          transactionStatusMap.set(tx.booking.toString(), tx.status);
-        }
+        transactionStatusMap.set(tx._id.toString(), tx.status);
       });
 
       const formattedBookings = bookings.map((booking) => {
@@ -555,7 +557,9 @@ export class FieldOwnerService {
           startTime: booking.startTime,
           endTime: booking.endTime,
           status: booking.status,
-          transactionStatus: transactionStatusMap.get((booking._id as Types.ObjectId).toString()) || null,
+          transactionStatus: (booking as any).transaction
+            ? transactionStatusMap.get(((booking as any).transaction).toString())
+            : null,
           approvalStatus: (booking as any).approvalStatus || (booking as any).noteStatus || undefined,
           totalPrice: booking.totalPrice,
           customer: {
@@ -806,20 +810,21 @@ export class FieldOwnerService {
         .limit(limit)
         .exec();
 
-      // ✅ Query transactions separately to avoid bidirectional reference
-      const bookingIds = bookings.map(b => (b._id as Types.ObjectId).toString());
+      // ✅ Query transactions using IDs stored in bookings
+      const transactionIds = bookings
+        .map(b => (b as any).transaction)
+        .filter(id => id && Types.ObjectId.isValid(id.toString()));
+
       const transactions = await this.transactionModel
-        .find({ booking: { $in: bookingIds.map(id => new Types.ObjectId(id)) } })
-        .select('booking status')
+        .find({ _id: { $in: transactionIds } })
+        .select('_id status')
         .lean()
         .exec();
 
-      // Create a map for quick lookup: bookingId -> transaction status
+      // Create a map for quick lookup: transactionId -> transaction status
       const transactionStatusMap = new Map<string, string>();
       transactions.forEach(tx => {
-        if (tx.booking) {
-          transactionStatusMap.set(tx.booking.toString(), tx.status);
-        }
+        transactionStatusMap.set(tx._id.toString(), tx.status);
       });
 
       const formattedBookings = bookings.map((booking) => {
@@ -841,7 +846,9 @@ export class FieldOwnerService {
           endTime: booking.endTime,
           status: booking.status,
           type: booking.type,
-          transactionStatus: transactionStatusMap.get((booking._id as Types.ObjectId).toString()) || null,
+          transactionStatus: (booking as any).transaction
+            ? transactionStatusMap.get(((booking as any).transaction).toString())
+            : null,
           approvalStatus: (booking as any).approvalStatus || (booking as any).noteStatus || undefined,
           totalPrice: booking.totalPrice,
           customer: {

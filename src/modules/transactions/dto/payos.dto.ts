@@ -42,7 +42,7 @@ export class PayOSItemDto {
  */
 export class CreatePayOSUrlDto {
   @ApiProperty({
-    description: 'Order ID (payment ID or booking ID)',
+    description: 'Order ID (payment ID)',
     example: '675abc123def456'
   })
   @IsString()

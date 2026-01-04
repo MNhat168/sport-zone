@@ -161,6 +161,35 @@ export class BookingsService {
     return court;
   }
 
+  /**
+   * Calculate total amenities fee from selected amenity IDs
+   * Fetches amenity prices from Field's amenities array
+   */
+  private async calculateAmenitiesFee(
+    fieldId: string,
+    amenityIds: string[],
+    session?: ClientSession
+  ): Promise<number> {
+    if (!amenityIds || amenityIds.length === 0) return 0;
+
+    // Fetch field with amenities
+    const field = await this.fieldModel
+      .findById(fieldId)
+      .select('amenities')
+      .session(session || null)
+      .lean();
+
+    if (!field || !field.amenities || field.amenities.length === 0) return 0;
+
+    // Calculate total from field's amenities that match selected IDs
+    const amenityIdStrings = amenityIds.map(id => id.toString());
+    const total = field.amenities
+      .filter((a: any) => amenityIdStrings.includes((a.amenity || a.amenityId)?.toString()))
+      .reduce((sum: number, a: any) => sum + (a.price || 0), 0);
+
+    return total;
+  }
+
   // ============================================================================
   // OWNER OPERATIONS - Delegated to OwnerBookingService
   // ============================================================================
@@ -238,13 +267,13 @@ export class BookingsService {
     try {
       return await session.withTransaction(async () => {
         // 1. Generate date range
-        const dates = this.generateDateRange(dto.startDate, dto.endDate);
+        const allDates = this.generateDateRange(dto.startDate, dto.endDate);
 
-        if (dates.length === 0) {
+        if (allDates.length === 0) {
           throw new BadRequestException('Invalid date range');
         }
 
-        if (dates.length > 30) {
+        if (allDates.length > 30) {
           throw new BadRequestException('Cannot book more than 30 consecutive days at once');
         }
 
@@ -273,26 +302,98 @@ export class BookingsService {
 
         const court = await this.validateCourt(dto.courtId, dto.fieldId, session);
 
-        // 4. Batch availability check (ALL dates must be available)
-        const conflicts = await this.checkBatchAvailability(
-          dto.courtId,
-          dates,
-          dto.startTime,
-          dto.endTime,
-          session
-        );
+        // 3.5 Filter dates based on operating hours
+        const operatingDays = (field.operatingHours || [])
+          .filter(h => h && h.day)
+          .map(h => h.day.toLowerCase());
+
+        const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+        const skippedDates: string[] = [];
+        let dates = allDates.filter(date => {
+          const dayName = dayNames[date.getDay()];
+          const isOperating = operatingDays.length === 0 || operatingDays.includes(dayName);
+          if (!isOperating) {
+            skippedDates.push(date.toISOString().split('T')[0]);
+          }
+          return isOperating;
+        });
+
+        // 3.6 Filter out user-specified skipDates (from conflict resolution)
+        const userSkipDates = new Set((dto.skipDates || []).map((d: string) => d.split('T')[0]));
+        if (userSkipDates.size > 0) {
+          dates = dates.filter(date => {
+            const dateStr = date.toISOString().split('T')[0];
+            if (userSkipDates.has(dateStr)) {
+              skippedDates.push(dateStr);
+              return false;
+            }
+            return true;
+          });
+          this.logger.debug(`[createConsecutiveDaysBooking] Skipping ${userSkipDates.size} user-specified dates`);
+        }
+
+        // 3.7 Prepare dateOverrides map (from conflict resolution - reschedule/switch)
+        const dateOverrides: Record<string, { courtId?: string; startTime?: string; endTime?: string }> = dto.dateOverrides || {};
+        if (Object.keys(dateOverrides).length > 0) {
+          this.logger.debug(`[createConsecutiveDaysBooking] DateOverrides: ${JSON.stringify(dateOverrides)}`);
+        }
+
+        if (dates.length === 0) {
+          throw new BadRequestException('No operating days in the selected date range. The venue is closed on all selected dates.');
+        }
+
+        // 4. Batch availability check
+        // For dates WITH overrides, check using the overridden time/court
+        // For dates WITHOUT overrides, check using original time/court
+        const datesWithoutOverrides = dates.filter(d => !dateOverrides[d.toISOString().split('T')[0]]);
+        const datesWithOverrides = dates.filter(d => !!dateOverrides[d.toISOString().split('T')[0]]);
+
+        // Check availability for dates without overrides (using original time/court)
+        let conflicts: Array<{ date: Date; existingStartTime?: string; existingEndTime?: string; reason?: string }> = [];
+        if (datesWithoutOverrides.length > 0) {
+          conflicts = await this.checkBatchAvailability(
+            dto.fieldId,
+            dto.courtId,
+            datesWithoutOverrides,
+            dto.startTime,
+            dto.endTime,
+            session
+          );
+        }
+
+        // Check availability for dates WITH overrides (using overridden time/court)
+        for (const date of datesWithOverrides) {
+          const dateStr = date.toISOString().split('T')[0];
+          const override = dateOverrides[dateStr];
+          const overrideConflicts = await this.checkBatchAvailability(
+            dto.fieldId,
+            override.courtId || dto.courtId,
+            [date],
+            override.startTime || dto.startTime,
+            override.endTime || dto.endTime,
+            session
+          );
+          conflicts.push(...overrideConflicts);
+        }
 
         if (conflicts.length > 0) {
           throw new BadRequestException({
             message: 'Some dates are not available. Please select different dates or court.',
             conflicts: conflicts.map(c => ({
               date: c.date.toISOString().split('T')[0],
-              reason: `Already booked ${c.existingStartTime}-${c.existingEndTime}`
+              reason: c.reason || `Already booked ${c.existingStartTime}-${c.existingEndTime}`
             }))
           });
         }
 
-        // 5. Calculate pricing (same for all dates)
+        // 5. Calculate amenities fee (constant per day)
+        const amenitiesFee = await this.calculateAmenitiesFee(
+          dto.fieldId,
+          dto.selectedAmenities || [],
+          session
+        );
+
+        // Validate time slots once
         const sampleDate = dates[0];
         this.availabilityService.validateTimeSlots(dto.startTime, dto.endTime, field, sampleDate);
 
@@ -302,41 +403,63 @@ export class BookingsService {
           field.slotDuration
         );
 
-        const pricingInfo = this.availabilityService.calculatePricing(
-          dto.startTime,
-          dto.endTime,
-          field,
-          sampleDate
-        );
-
-        // Calculate amenities fee (if provided)
-        const amenitiesFee = 0; // TODO: Calculate from Amenity model
-
-        const bookingAmount = pricingInfo.totalPrice + amenitiesFee;
-        const platformFeeRate = 0.05;
-        const platformFee = Math.round(bookingAmount * platformFeeRate);
-        const pricePerBooking = bookingAmount + platformFee;
-        const totalPrice = pricePerBooking * dates.length;
-
         // 6. Create recurring group ID (link all bookings)
         const recurringGroupId = new Types.ObjectId();
 
         // 7. Create all bookings
-        const bookings: Booking[] = []; // ⭐ Fix: Explicit type
+        let totalPrice = 0;
+        let firstPricePerBooking = 0; // For summary
+        const bookings: Booking[] = [];
+
         for (const date of dates) {
           const dateStr = date.toISOString().split('T')[0];
 
-          // Upsert schedule for this date
+          // Check if there's an override for this date (from conflict resolution)
+          const override = dateOverrides[dateStr];
+          const effectiveStartTime = override?.startTime || dto.startTime;
+          const effectiveEndTime = override?.endTime || dto.endTime;
+
+          // If courtId is overridden, validate and use the new court
+          let effectiveCourt = court;
+          if (override?.courtId && override.courtId !== dto.courtId) {
+            const overriddenCourt = await this.validateCourt(override.courtId, dto.fieldId, session);
+            effectiveCourt = overriddenCourt;
+          }
+
+          // Calculate price for THIS specific date with effective times
+          const pricingInfo = this.availabilityService.calculatePricing(
+            effectiveStartTime,
+            effectiveEndTime,
+            field,
+            date
+          );
+
+          // Recalculate numSlots for this specific booking if time changed
+          const effectiveNumSlots = this.availabilityService.calculateNumSlots(
+            effectiveStartTime,
+            effectiveEndTime,
+            field.slotDuration
+          );
+
+          const bookingAmount = pricingInfo.totalPrice + amenitiesFee;
+          const platformFeeRate = 0.05;
+          const platformFee = Math.round(bookingAmount * platformFeeRate);
+          const pricePerBooking = bookingAmount + platformFee;
+
+          if (totalPrice === 0) firstPricePerBooking = pricePerBooking;
+          totalPrice += pricePerBooking;
+
+          // Upsert schedule for this date (use effective court)
           await this.scheduleModel.findOneAndUpdate(
             {
               field: new Types.ObjectId(dto.fieldId),
-              court: court._id,
+              court: effectiveCourt._id,
               date: date
             },
             {
               $setOnInsert: {
                 field: new Types.ObjectId(dto.fieldId),
-                court: court._id,
+                court: effectiveCourt._id,
                 date: date,
                 bookedSlots: [],
                 isHoliday: false
@@ -348,16 +471,16 @@ export class BookingsService {
             }
           );
 
-          // Create booking
+          // Create booking with effective values
           const booking = new this.bookingModel({
             user: new Types.ObjectId(finalUserId),
             field: new Types.ObjectId(dto.fieldId),
-            court: court._id,
+            court: effectiveCourt._id,
             date: date,
             type: BookingType.FIELD,
-            startTime: dto.startTime,
-            endTime: dto.endTime,
-            numSlots,
+            startTime: effectiveStartTime,
+            endTime: effectiveEndTime,
+            numSlots: effectiveNumSlots,
             status: BookingStatus.PENDING,
             paymentStatus: 'unpaid',
             bookingAmount,
@@ -377,18 +500,18 @@ export class BookingsService {
           await booking.save({ session });
           bookings.push(booking);
 
-          // Update schedule slots
+          // Update schedule slots with effective times and court
           await this.scheduleModel.findOneAndUpdate(
             {
               field: new Types.ObjectId(dto.fieldId),
-              court: court._id,
+              court: effectiveCourt._id,
               date: date
             },
             {
               $push: {
                 bookedSlots: {
-                  startTime: dto.startTime,
-                  endTime: dto.endTime
+                  startTime: effectiveStartTime,
+                  endTime: effectiveEndTime
                 }
               }
             },
@@ -396,37 +519,30 @@ export class BookingsService {
           );
         }
 
-        // 8. Create single transaction for all bookings
-        // ⭐ Fix: Use createPayment() instead of create()
-        const transaction = await this.transactionsService.createPayment({
-          userId: finalUserId,
-          amount: totalPrice,
-          method: dto.paymentMethod || PaymentMethod.PAYOS,
-        }, session);
-
-        // 9. Link transaction to all bookings
-        for (const booking of bookings) {
-          booking.transaction = transaction._id as Types.ObjectId;
-          await booking.save({ session });
-        }
-
-        // Turn 4 Feature 3: Calculate bulk discount
-        const bulkDiscount = this.calculateBulkDiscount(dates.length, totalPrice);
+        // 8. Calculate bulk discount (NO transaction created here - will be created at PayOS step)
+        // Transaction will be created when user initiates PayOS payment via createPayOSPaymentForRecurringGroup
+        // Collect daily prices for progressive discount calculation
+        // Note: bookings[] contains 'totalPrice' which is pricePerBooking
+        const dailyPrices = bookings.map(b => b.totalPrice || 0);
+        const bulkDiscount = this.calculateBulkDiscount(dates.length, dailyPrices);
 
         return {
           success: true,
-          bookings,
-          transaction,
+          bookings: bookings.map(b => b.toObject()),
+          // Note: No transaction returned - will be created at payment step
           summary: {
+            totalBookings: dates.length,
             datesBooked: dates.length,
-            pricePerDay: pricePerBooking,
+            pricePerDay: firstPricePerBooking,
             subtotal: totalPrice,
             discount: {
               rate: bulkDiscount.discountRate * 100, // percentage
               amount: bulkDiscount.discountAmount
             },
             totalPrice: bulkDiscount.finalTotal,
+            totalAmount: bulkDiscount.finalTotal, // Alias for frontend compatibility
             dates: dates.map(d => d.toISOString().split('T')[0]),
+            skippedDates, // Days that were not operating
             recurringGroupId: recurringGroupId.toString()
           }
         };
@@ -496,6 +612,7 @@ export class BookingsService {
 
         // 4. Batch availability check (ALL dates must be available)
         const conflicts = await this.checkBatchAvailability(
+          dto.fieldId,
           dto.courtId,
           dates,
           dto.startTime,
@@ -508,12 +625,19 @@ export class BookingsService {
             message: 'Some dates are not available. Please select different pattern or court.',
             conflicts: conflicts.map(c => ({
               date: c.date.toISOString().split('T')[0],
-              reason: `Already booked ${c.existingStartTime}-${c.existingEndTime}`
+              reason: c.reason || `Already booked ${c.existingStartTime}-${c.existingEndTime}`
             }))
           });
         }
 
-        // 5. Calculate pricing (same for all dates)
+        // 5. Calculate amenities fee (constant per day)
+        const amenitiesFee = await this.calculateAmenitiesFee(
+          dto.fieldId,
+          dto.selectedAmenities || [],
+          session
+        );
+
+        // Validate time slots once
         const sampleDate = dates[0];
         this.availabilityService.validateTimeSlots(dto.startTime, dto.endTime, field, sampleDate);
 
@@ -523,26 +647,30 @@ export class BookingsService {
           field.slotDuration
         );
 
-        const pricingInfo = this.availabilityService.calculatePricing(
-          dto.startTime,
-          dto.endTime,
-          field,
-          sampleDate
-        );
-
-        const amenitiesFee = 0; // TODO: Calculate from Amenity model
-        const bookingAmount = pricingInfo.totalPrice + amenitiesFee;
-        const platformFeeRate = 0.05;
-        const platformFee = Math.round(bookingAmount * platformFeeRate);
-        const pricePerBooking = bookingAmount + platformFee;
-        const totalPrice = pricePerBooking * dates.length;
-
         // 6. Create recurring group ID (link all bookings)
         const recurringGroupId = new Types.ObjectId();
 
-        // 7. Create all bookings (reuse logic from createConsecutiveDaysBooking)
+        // 7. Create all bookings - Calculate price for EACH date individually (like consecutive)
+        let totalPrice = 0;
+        let firstPricePerBooking = 0; // For summary
         const bookings: Booking[] = [];
+
         for (const date of dates) {
+          // Calculate price for THIS specific date (not using sample date)
+          const pricingInfo = this.availabilityService.calculatePricing(
+            dto.startTime,
+            dto.endTime,
+            field,
+            date
+          );
+
+          const bookingAmount = pricingInfo.totalPrice + amenitiesFee;
+          const platformFeeRate = 0.05;
+          const platformFee = Math.round(bookingAmount * platformFeeRate);
+          const pricePerBooking = bookingAmount + platformFee;
+
+          if (totalPrice === 0) firstPricePerBooking = pricePerBooking;
+          totalPrice += pricePerBooking;
           const dateStr = date.toISOString().split('T')[0];
 
           // Upsert schedule for this date
@@ -615,32 +743,35 @@ export class BookingsService {
           );
         }
 
-        // 8. Create single transaction for all bookings
-        const transaction = await this.transactionsService.createPayment({
-          userId: finalUserId,
-          amount: totalPrice,
-          method: dto.paymentMethod || PaymentMethod.PAYOS,
-        }, session);
-
-        // 9. Link transaction to all bookings
-        for (const booking of bookings) {
-          booking.transaction = transaction._id as Types.ObjectId;
-          await booking.save({ session });
+        // 8. Validate pricing from FE if provided (optional - for verification)
+        // If FE sent pricing data, we can log it for comparison but still use our calculated values
+        // This ensures backend is source of truth while allowing FE to display accurate preview
+        if (dto.subtotal !== undefined || dto.totalAmount !== undefined) {
+          this.logger.debug('[WEEKLY BOOKING] FE pricing data received:', {
+            feSubtotal: dto.subtotal,
+            feSystemFee: dto.systemFee,
+            feTotalAmount: dto.totalAmount,
+            beCalculatedTotal: totalPrice
+          });
+          // Note: We still use BE calculated values for consistency and security
         }
 
-        // 10. Build pattern summary
+        // 9. Build pattern summary (NO transaction created here - will be created at PayOS step)
+        // Transaction will be created when user initiates PayOS payment via createPayOSPaymentForRecurringGroup
         const patternDescription = `Every ${dto.weekdays.join(', ')} for ${dto.numberOfWeeks} ${dto.numberOfWeeks === 1 ? 'week' : 'weeks'}`;
 
         // Turn 4 Feature 3: Calculate bulk discount
-        const bulkDiscount = this.calculateBulkDiscount(dates.length, totalPrice);
+        // Collect daily prices. 'bookings' array matches 'dates' order which is sorted.
+        const dailyPrices = bookings.map(b => b.totalPrice || 0);
+        const bulkDiscount = this.calculateBulkDiscount(dates.length, dailyPrices);
 
         return {
           success: true,
-          bookings,
-          transaction,
+          bookings: bookings.map(b => b.toObject()),
+          // Note: No transaction returned - will be created at payment step
           summary: {
             totalBookings: dates.length,
-            pricePerBooking: pricePerBooking,
+            pricePerBooking: firstPricePerBooking,
             subtotal: totalPrice,
             discount: {
               rate: bulkDiscount.discountRate * 100, // percentage
@@ -664,6 +795,409 @@ export class BookingsService {
     }
   }
 
+  /**
+   * Validate consecutive days booking availability WITHOUT creating bookings
+   * Used for dry-run validation at booking step
+   */
+  async validateConsecutiveDaysBooking(dto: any) {
+    // 1. Generate date range
+    const allDates = this.generateDateRange(dto.startDate, dto.endDate);
+
+    if (allDates.length === 0) {
+      throw new BadRequestException('Invalid date range');
+    }
+
+    if (allDates.length > 30) {
+      throw new BadRequestException('Cannot book more than 30 consecutive days at once');
+    }
+
+    // 2. Validate field and court
+    const field = await this.fieldModel.findById(dto.fieldId);
+    if (!field || !field.isActive) {
+      throw new NotFoundException('Field not found or inactive');
+    }
+
+    if (!Types.ObjectId.isValid(dto.courtId)) {
+      throw new BadRequestException('Invalid court ID format');
+    }
+
+    const court = await this.courtModel.findById(dto.courtId);
+    if (!court || !court.isActive) {
+      throw new NotFoundException('Court not found or inactive');
+    }
+
+    if (court.field.toString() !== dto.fieldId.toString()) {
+      throw new BadRequestException('Court does not belong to the specified field');
+    }
+
+    // 3. Filter dates based on operating hours
+    const operatingDays = (field.operatingHours || [])
+      .filter(h => h && h.day)
+      .map(h => h.day.toLowerCase());
+
+    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const skippedDates: string[] = [];
+    const dates = allDates.filter(date => {
+      const dayName = dayNames[date.getDay()];
+      const isOperating = operatingDays.length === 0 || operatingDays.includes(dayName);
+      if (!isOperating) {
+        skippedDates.push(date.toISOString().split('T')[0]);
+      }
+      return isOperating;
+    });
+
+    if (dates.length === 0) {
+      throw new BadRequestException('No operating days in the selected date range');
+    }
+
+    // 4. Check availability (without transaction/session for validation)
+    const conflictsList = await this.checkBatchAvailability(
+      dto.fieldId,
+      dto.courtId,
+      dates,
+      dto.startTime,
+      dto.endTime,
+      null as any
+    );
+
+    // 5. Build conflicts list
+    const conflicts = conflictsList.map(c => {
+      return {
+        date: c.date.toISOString().split('T')[0],
+        reason: c.reason || `Already booked ${c.existingStartTime}-${c.existingEndTime}`,
+      };
+    });
+
+    // 5. Calculate pricing preview
+    const sampleDate = dates[0];
+    const pricingInfo = this.availabilityService.calculatePricing(
+      dto.startTime,
+      dto.endTime,
+      field,
+      sampleDate
+    );
+
+    const amenitiesFee = 0;
+    const bookingAmount = pricingInfo.totalPrice + amenitiesFee;
+    const platformFeeRate = 0.05;
+    const platformFee = Math.round(bookingAmount * platformFeeRate);
+    const pricePerBooking = bookingAmount + platformFee;
+    const totalPrice = pricePerBooking * dates.length;
+
+    // Create array of prices for validation preview (e.g. [120k, 120k, ...])
+    const dailyPrices = new Array(dates.length).fill(pricePerBooking);
+    const bulkDiscount = this.calculateBulkDiscount(dates.length, dailyPrices);
+
+    return {
+      valid: conflicts.length === 0,
+      conflicts: conflicts.length > 0 ? conflicts : undefined,
+      summary: {
+        totalDates: dates.length,
+        validDates: dates.length - conflicts.length,
+        skippedDates,
+        dates: dates.map(d => d.toISOString().split('T')[0]),
+        pricePerDay: pricePerBooking,
+        subtotal: totalPrice,
+        discount: {
+          rate: bulkDiscount.discountRate * 100,
+          amount: bulkDiscount.discountAmount
+        },
+        totalAmount: bulkDiscount.finalTotal
+      }
+    };
+  }
+
+  /**
+   * Validate weekly recurring booking availability WITHOUT creating bookings
+   * Used for dry-run validation at booking step
+   */
+  async validateWeeklyRecurringBooking(dto: any) {
+    // 1. Generate dates based on weekdays pattern
+    const dates = this.generateWeeklyDates(
+      dto.weekdays,
+      dto.numberOfWeeks,
+      dto.startDate,
+      dto.skipDates || []
+    );
+
+    if (dates.length === 0) {
+      throw new BadRequestException('No valid dates generated from weekdays pattern');
+    }
+
+    if (dates.length > 84) {
+      throw new BadRequestException('Cannot book more than 84 dates at once');
+    }
+
+    // 2. Validate field and court
+    const field = await this.fieldModel.findById(dto.fieldId);
+    if (!field || !field.isActive) {
+      throw new NotFoundException('Field not found or inactive');
+    }
+
+    if (!Types.ObjectId.isValid(dto.courtId)) {
+      throw new BadRequestException('Invalid court ID format');
+    }
+
+    const court = await this.courtModel.findById(dto.courtId);
+    if (!court || !court.isActive) {
+      throw new NotFoundException('Court not found or inactive');
+    }
+
+    if (court.field.toString() !== dto.fieldId.toString()) {
+      throw new BadRequestException('Court does not belong to the specified field');
+    }
+
+    // 3. Check availability (without transaction/session for validation)
+    const conflictsList = await this.checkBatchAvailability(
+      dto.fieldId,
+      dto.courtId,
+      dates,
+      dto.startTime,
+      dto.endTime,
+      null as any
+    );
+
+    // 4. Build conflicts list
+    const conflicts = conflictsList.map(c => {
+      return {
+        date: c.date.toISOString().split('T')[0],
+        reason: c.reason || `Already booked ${c.existingStartTime}-${c.existingEndTime}`,
+      };
+    });
+
+    // 4. Calculate pricing preview
+    const sampleDate = dates[0];
+    const pricingInfo = this.availabilityService.calculatePricing(
+      dto.startTime,
+      dto.endTime,
+      field,
+      sampleDate
+    );
+
+    const amenitiesFee = 0;
+    const bookingAmount = pricingInfo.totalPrice + amenitiesFee;
+    const platformFeeRate = 0.05;
+    const platformFee = Math.round(bookingAmount * platformFeeRate);
+    const pricePerBooking = bookingAmount + platformFee;
+    const totalPrice = pricePerBooking * dates.length;
+
+    // Create array of prices for validation preview
+    const dailyPrices = new Array(dates.length).fill(pricePerBooking);
+    const bulkDiscount = this.calculateBulkDiscount(dates.length, dailyPrices);
+
+    const patternDescription = `Every ${dto.weekdays.join(', ')} for ${dto.numberOfWeeks} ${dto.numberOfWeeks === 1 ? 'week' : 'weeks'}`;
+
+    return {
+      valid: conflicts.length === 0,
+      conflicts: conflicts.length > 0 ? conflicts : undefined,
+      summary: {
+        totalDates: dates.length,
+        validDates: dates.length - conflicts.length,
+        skippedDates: dto.skipDates || [],
+        dates: dates.map(d => d.toISOString().split('T')[0]),
+        pattern: patternDescription,
+        weekdays: dto.weekdays,
+        numberOfWeeks: dto.numberOfWeeks,
+        pricePerBooking,
+        subtotal: totalPrice,
+        discount: {
+          rate: bulkDiscount.discountRate * 100,
+          amount: bulkDiscount.discountAmount
+        },
+        totalAmount: bulkDiscount.finalTotal
+      }
+    };
+  }
+
+  /**
+   * Get detailed schedule for a specific conflict date
+   * Returns all available time slots with their status for TimeSlotPickerModal
+   * @param fieldId - Field ID
+   * @param courtId - Court ID  
+   * @param date - Date string (YYYY-MM-DD)
+   * @param duration - Required duration in minutes (to filter slots that can accommodate)
+   */
+  async getConflictDateSchedule(
+    fieldId: string,
+    courtId: string,
+    dateStr: string,
+    duration: number
+  ): Promise<{
+    operatingHours: { start: string; end: string };
+    slotDuration: number;
+    requiredSlots: number; // Number of consecutive slots needed (duration / slotDuration)
+    allSlots: Array<{
+      startTime: string;
+      endTime: string;
+      status: 'available' | 'booked' | 'blocked' | 'past';
+      reason?: string;
+    }>;
+  }> {
+    // 1. Validate field
+    const field = await this.fieldModel.findById(fieldId);
+    if (!field || !field.isActive) {
+      throw new NotFoundException('Field not found or inactive');
+    }
+
+    // 2. Validate court
+    if (!Types.ObjectId.isValid(courtId)) {
+      throw new BadRequestException('Invalid court ID format');
+    }
+    const court = await this.courtModel.findById(courtId);
+    if (!court || !court.isActive) {
+      throw new NotFoundException('Court not found or inactive');
+    }
+
+    // 3. Parse date and get day name
+    // Use UTC to avoid timezone issues when parsing date string
+    const dateParts = dateStr.split('-');
+    const date = new Date(Date.UTC(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2])));
+    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const dayName = dayNames[date.getUTCDay()];
+
+    // 4. Get operating hours for this day
+    let operatingHour = field.operatingHours?.find(h => h.day.toLowerCase() === dayName);
+    if (!operatingHour) {
+      operatingHour = field.operatingHours?.[0];
+      if (!operatingHour) {
+        throw new BadRequestException('No operating hours configured for this field');
+      }
+    }
+
+    const slotDuration = field.slotDuration || 60;
+    const requiredSlots = Math.ceil(duration / slotDuration);
+    const [opStartH, opStartM] = operatingHour.start.split(':').map(Number);
+    const [opEndH, opEndM] = operatingHour.end.split(':').map(Number);
+    const opStartMinutes = opStartH * 60 + (opStartM || 0);
+    const opEndMinutes = opEndH * 60 + (opEndM || 0);
+
+    // 5. Get existing bookings for this court on this date
+    // Use UTC dates to ensure we only get bookings for the exact date, avoiding timezone issues
+    const dateStart = new Date(Date.UTC(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]), 0, 0, 0, 0));
+    const dateEnd = new Date(Date.UTC(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]), 23, 59, 59, 999));
+
+    const existingBookings = await this.bookingModel.find({
+      court: new Types.ObjectId(courtId),
+      date: { $gte: dateStart, $lte: dateEnd },
+      status: { $in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] }
+    });
+
+    // 6. Get schedule for blocked slots
+    const schedule = await this.scheduleModel.findOne({
+      field: new Types.ObjectId(fieldId),
+      court: new Types.ObjectId(courtId),
+      date: { $gte: dateStart, $lte: dateEnd }
+    });
+
+    // 7. Generate all possible time blocks with the required duration
+    const allSlots: Array<{
+      startTime: string;
+      endTime: string;
+      status: 'available' | 'booked' | 'blocked' | 'past';
+      reason?: string;
+    }> = [];
+
+    // Check if holiday
+    if (schedule?.isHoliday) {
+      return {
+        operatingHours: { start: operatingHour.start, end: operatingHour.end },
+        slotDuration,
+        requiredSlots,
+        allSlots: [] // No slots available on holiday
+      };
+    }
+
+    // Current time for past slot detection
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const isToday = date.toDateString() === now.toDateString();
+
+    // DEBUG: Log operating hours and slot generation parameters
+    this.logger.debug(`[getConflictDateSchedule] Field: ${field.name}, Date: ${dateStr}, Day: ${dayName}`);
+    this.logger.debug(`[getConflictDateSchedule] Operating hours: ${operatingHour.start} - ${operatingHour.end}`);
+    this.logger.debug(`[getConflictDateSchedule] slotDuration: ${slotDuration}, requested duration: ${duration}, requiredSlots: ${requiredSlots}`);
+    this.logger.debug(`[getConflictDateSchedule] opStartMinutes: ${opStartMinutes}, opEndMinutes: ${opEndMinutes}`);
+    this.logger.debug(`[getConflictDateSchedule] Date range: ${dateStart.toISOString()} to ${dateEnd.toISOString()}`);
+    this.logger.debug(`[getConflictDateSchedule] Existing bookings: ${existingBookings.length}, Schedule blocked slots: ${schedule?.bookedSlots?.length || 0}`);
+    if (existingBookings.length > 0) {
+      this.logger.debug(`[getConflictDateSchedule] Existing bookings details: ${JSON.stringify(existingBookings.map(b => ({
+        id: (b._id as any).toString(),
+        date: b.date,
+        startTime: b.startTime,
+        endTime: b.endTime,
+        status: b.status
+      })))}`);
+    }
+
+    // Generate individual slots (slotDuration) instead of large slots (duration)
+    // This allows frontend to display a timeline and let users select consecutive slots
+    for (let m = opStartMinutes; m + slotDuration <= opEndMinutes; m += slotDuration) {
+      const slotStart = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+      const endMin = m + slotDuration;
+      const slotEnd = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
+
+      let status: 'available' | 'booked' | 'blocked' | 'past' = 'available';
+      let reason: string | undefined;
+
+      // Check if past (for today)
+      if (isToday && m < nowMinutes) {
+        status = 'past';
+        reason = 'Slot already passed';
+      }
+      // Check booking conflicts (check if this individual slot overlaps with any booking)
+      else {
+        const hasBookingConflict = existingBookings.some(b => {
+          const bStartMin = this.timeToMinutes(b.startTime);
+          const bEndMin = this.timeToMinutes(b.endTime);
+          // Check if this slot overlaps with the booking
+          return m < bEndMin && endMin > bStartMin;
+        });
+
+        if (hasBookingConflict) {
+          status = 'booked';
+          const conflictingBooking = existingBookings.find(b => {
+            const bStartMin = this.timeToMinutes(b.startTime);
+            const bEndMin = this.timeToMinutes(b.endTime);
+            return m < bEndMin && endMin > bStartMin;
+          });
+          reason = `Trùng lịch: ${conflictingBooking?.startTime}-${conflictingBooking?.endTime}`;
+        }
+        // Check schedule blocked slots
+        else if (schedule?.bookedSlots?.length) {
+          const hasScheduleConflict = schedule.bookedSlots.some(s => {
+            const sStartMin = this.timeToMinutes(s.startTime);
+            const sEndMin = this.timeToMinutes(s.endTime);
+            return m < sEndMin && endMin > sStartMin;
+          });
+          if (hasScheduleConflict) {
+            status = 'blocked';
+            reason = 'Slot blocked by owner';
+          }
+        }
+      }
+
+      allSlots.push({
+        startTime: slotStart,
+        endTime: slotEnd,
+        status,
+        reason
+      });
+    }
+
+    // DEBUG: Log slot generation results
+    const statusCounts = allSlots.reduce((acc, slot) => {
+      acc[slot.status] = (acc[slot.status] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    this.logger.debug(`[getConflictDateSchedule] Generated ${allSlots.length} slots: ${JSON.stringify(statusCounts)}`);
+
+    return {
+      operatingHours: { start: operatingHour.start, end: operatingHour.end },
+      slotDuration,
+      requiredSlots,
+      allSlots
+    };
+  }
 
   /**
    * Helper: Generate array of dates from startDate to endDate (inclusive)
@@ -688,31 +1222,153 @@ export class BookingsService {
   }
 
   /**
-   * Turn 4 Feature 3: Calculate bulk discount based on number of bookings
-   * Discount tiers:
-   * - 5-10 bookings: 5% off
-   * - 11-20 bookings: 10% off
-   * - 21+ bookings: 15% off
+   * Turn 4 Feature 3: Calculate bulk discount based on BOOKED DAYS count (Progressive Tiers)
+   * Tiers (based on Day Index 1-based):
+   * - Days 1-5: 0% off
+   * - Days 6-10: 10% off
+   * - Days 11+: 20% off
+   *
+   * @param dailyPrices - Array of prices for each booked day (should be sorted chronologically if prices differ, though usually constant)
    */
-  private calculateBulkDiscount(numberOfBookings: number, baseTotal: number): {
-    discountRate: number;
+  private calculateBulkDiscount(numberOfBookings: number, dailyPrices: number[]): {
+    discountRate: number; // Overall effective rate (for info)
     discountAmount: number;
     finalTotal: number;
   } {
-    let discountRate = 0;
-
-    if (numberOfBookings >= 21) {
-      discountRate = 0.15; // 15% off for 21+ bookings
-    } else if (numberOfBookings >= 11) {
-      discountRate = 0.10; // 10% off for 11-20 bookings
-    } else if (numberOfBookings >= 5) {
-      discountRate = 0.05; // 5% off for 5-10 bookings
+    // If we only have dates.length but no prices (should not happen in new logic), return 0
+    if (!dailyPrices || dailyPrices.length === 0) {
+      return { discountRate: 0, discountAmount: 0, finalTotal: 0 };
     }
 
-    const discountAmount = Math.round(baseTotal * discountRate);
-    const finalTotal = baseTotal - discountAmount;
+    let discountAmount = 0;
+    let totalBasePrice = 0;
+
+    // Iterate through each day's price and apply tier based on index
+    dailyPrices.forEach((price, index) => {
+      totalBasePrice += price;
+      const dayNumber = index + 1; // 1-based index
+
+      if (dayNumber >= 11) {
+        // Tier 3: 20% off
+        discountAmount += Math.round(price * 0.20);
+      } else if (dayNumber >= 6) {
+        // Tier 2: 10% off
+        discountAmount += Math.round(price * 0.10);
+      } else {
+        // Tier 1: 0% off
+        // discountAmount += 0;
+      }
+    });
+
+    const finalTotal = totalBasePrice - discountAmount;
+    // Calculate effective overall rate for display
+    const discountRate = totalBasePrice > 0 ? Number((discountAmount / totalBasePrice).toFixed(4)) : 0;
 
     return { discountRate, discountAmount, finalTotal };
+  }
+
+  /**
+   * ✅ OPTIMIZED: Find bookings linked to a transaction with priority order
+   * This method centralizes the logic to find bookings from a transaction,
+   * avoiding code duplication across webhook handlers and payment handlers.
+   * 
+   * Priority order:
+   * 1. Direct link via booking.transaction (fastest - single query)
+   * 2. Recurring group via metadata.recurringGroupId (for recurring bookings)
+   * 3. Single booking via metadata.bookingId
+   * 4. Fallback: Extract bookingId from transaction notes
+   * 
+   * @param transaction - Transaction object or transaction ID string
+   * @param session - Optional MongoDB session for transactional queries
+   * @returns Array of bookings found, empty array if none found
+   */
+  async findBookingsByTransaction(
+    transaction: Transaction | string,
+    session?: ClientSession
+  ): Promise<Booking[]> {
+    try {
+      // Resolve transaction if ID string provided
+      let tx: Transaction | null = null;
+      if (typeof transaction === 'string') {
+        tx = await this.transactionModel.findById(transaction).exec();
+        if (!tx) {
+          this.logger.warn(`[findBookingsByTransaction] Transaction ${transaction} not found`);
+          return [];
+        }
+      } else {
+        tx = transaction;
+      }
+
+      // ✅ Priority 1: Direct link via booking.transaction (fastest - single query)
+      const queryBuilder = this.bookingModel.find({ transaction: tx._id });
+      if (session) {
+        queryBuilder.session(session);
+      }
+      let bookings = await queryBuilder.exec();
+
+      if (bookings.length > 0) {
+        this.logger.log(`[findBookingsByTransaction] 🔔 Found ${bookings.length} booking(s) by transaction link`);
+        return bookings;
+      } else {
+        this.logger.warn(`[findBookingsByTransaction] ⚠️ No bookings found by direct link for transaction ${tx._id}`);
+      }
+
+      // ✅ Priority 2: Recurring bookings via metadata.recurringGroupId
+      if (tx.metadata?.recurringGroupId) {
+        const recurringGroupId = tx.metadata.recurringGroupId;
+        const recurringQuery = this.bookingModel.find({
+          recurringGroupId: new Types.ObjectId(recurringGroupId)
+        });
+        if (session) {
+          recurringQuery.session(session);
+        }
+        bookings = await recurringQuery.exec();
+
+        if (bookings.length > 0) {
+          this.logger.log(`[findBookingsByTransaction] 🔔 Found ${bookings.length} booking(s) in recurring group ${recurringGroupId}`);
+          return bookings;
+        }
+      }
+
+      // ✅ Priority 3: Single booking via metadata.bookingId
+      if (tx.metadata?.bookingId && Types.ObjectId.isValid(String(tx.metadata.bookingId))) {
+        const bookingId = String(tx.metadata.bookingId);
+        const singleQuery = this.bookingModel.findById(bookingId);
+        if (session) {
+          singleQuery.session(session);
+        }
+        const singleBooking = await singleQuery.exec();
+
+        if (singleBooking) {
+          this.logger.log(`[findBookingsByTransaction] 🔔 Found single booking ${bookingId} from metadata`);
+          return [singleBooking];
+        }
+      }
+
+      // ✅ Priority 4: Fallback - Extract bookingId from notes
+      if (tx.notes) {
+        const bookingIdMatch = tx.notes.match(/Payment for booking\s+([a-f0-9]{24})/i);
+        if (bookingIdMatch && Types.ObjectId.isValid(bookingIdMatch[1])) {
+          const extractedBookingId = bookingIdMatch[1];
+          const fallbackQuery = this.bookingModel.findById(extractedBookingId);
+          if (session) {
+            fallbackQuery.session(session);
+          }
+          const fallbackBooking = await fallbackQuery.exec();
+
+          if (fallbackBooking) {
+            this.logger.log(`[findBookingsByTransaction] 🔔 Extracted bookingId ${extractedBookingId} from transaction notes`);
+            return [fallbackBooking];
+          }
+        }
+      }
+
+      this.logger.warn(`[findBookingsByTransaction] ❌ No bookings found for transaction ${tx._id}`);
+      return [];
+    } catch (error) {
+      this.logger.error(`[findBookingsByTransaction] Error finding bookings: ${error.message}`, error);
+      return [];
+    }
   }
 
   /**
@@ -791,30 +1447,48 @@ export class BookingsService {
    * Helper: Check availability for batch of dates
    * Returns array of conflicts (empty if all available)
    */
+  /**
+   * Helper: Check availability for batch of dates
+   * Returns array of conflicts (empty if all available)
+   * Checks both Booking table and Schedule table (Source of Truth)
+   */
   private async checkBatchAvailability(
+    fieldId: string,
     courtId: string,
     dates: Date[],
     startTime: string,
     endTime: string,
     session: ClientSession
-  ): Promise<Array<{ date: Date; existingStartTime: string; existingEndTime: string }>> {
+  ): Promise<Array<{ date: Date; existingStartTime?: string; existingEndTime?: string; reason?: string }>> {
 
     const dateStrings = dates.map(d => d.toISOString().split('T')[0]);
 
-    // Find all conflicting bookings in one query
+    // 1. Check existing Bookings (Source 1)
+    // We use an $or of range queries for each date to be timezone-robust
+    const dateQueryOr = dates.map(d => {
+      const start = new Date(d);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(d);
+      end.setHours(23, 59, 59, 999);
+      return { date: { $gte: start, $lte: end } };
+    });
+
     const existingBookings = await this.bookingModel.find({
-      court: new Types.ObjectId(courtId),
-      date: { $in: dateStrings },
-      status: { $in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] },
-      // Time overlap check
-      $or: [
-        { startTime: { $lt: endTime }, endTime: { $gt: startTime } }
+      $and: [
+        { court: new Types.ObjectId(courtId) },
+        { $or: dateQueryOr },
+        { status: { $in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] } },
+        {
+          $or: [
+            { startTime: { $lt: endTime }, endTime: { $gt: startTime } }
+          ]
+        }
       ]
     }).session(session);
 
-    // Map conflicts
-    // ⭐ Fix: Explicit type annotation
-    const conflicts: Array<{ date: Date; existingStartTime: string; existingEndTime: string }> = [];
+    const conflicts: Array<{ date: Date; existingStartTime?: string; existingEndTime?: string; reason?: string }> = [];
+
+    // Map booking conflicts
     for (const booking of existingBookings) {
       const bookingDateStr = new Date(booking.date).toISOString().split('T')[0];
       const matchingDate = dates.find(d => d.toISOString().split('T')[0] === bookingDateStr);
@@ -823,12 +1497,69 @@ export class BookingsService {
         conflicts.push({
           date: matchingDate,
           existingStartTime: booking.startTime,
-          existingEndTime: booking.endTime
+          existingEndTime: booking.endTime,
+          reason: `Already booked ${booking.startTime}-${booking.endTime}`
         });
       }
     }
 
+    // 2. Check Schedule Table (Source 2 - Holidays & Blocked Slots)
+    // Important: Even if no booking exists, the schedule might have the slot blocked
+    const schedules = await this.scheduleModel.find({
+      field: new Types.ObjectId(fieldId),
+      court: new Types.ObjectId(courtId),
+      date: { $in: dates }
+    }).session(session);
+
+    for (const schedule of schedules) {
+      const scheduleDateStr = new Date(schedule.date).toISOString().split('T')[0];
+      const matchingDate = dates.find(d => d.toISOString().split('T')[0] === scheduleDateStr);
+
+      if (!matchingDate) continue;
+
+      // Check if already in conflict list (optimization)
+      if (conflicts.some(c => c.date.toISOString().split('T')[0] === scheduleDateStr)) {
+        continue;
+      }
+
+      // Check Holiday
+      if (schedule.isHoliday) {
+        conflicts.push({
+          date: matchingDate,
+          reason: `Holiday: ${schedule.holidayReason || 'Venue closed'}`
+        });
+        continue;
+      }
+
+      // Check Blocked Slots in Schedule
+      if (schedule.bookedSlots && schedule.bookedSlots.length > 0) {
+        const conflictSlot = this.availabilityService.findSlotConflict(
+          startTime,
+          endTime,
+          schedule.bookedSlots
+        );
+
+        if (conflictSlot) {
+          conflicts.push({
+            date: matchingDate,
+            existingStartTime: conflictSlot.startTime,
+            existingEndTime: conflictSlot.endTime,
+            reason: `Slot blocked ${conflictSlot.startTime}-${conflictSlot.endTime}`
+          });
+        }
+      }
+    }
+
     return conflicts;
+  }
+
+
+  /**
+   * Helper: Convert time string HH:MM to minutes
+   */
+  private timeToMinutes(time: string): number {
+    const [h, m] = (time || '00:00').split(':').map(Number);
+    return h * 60 + (m || 0);
   }
 
 
@@ -1720,13 +2451,18 @@ export class BookingsService {
 
   /**
    * Initiate PayOS payment for an existing booking (e.g. held booking)
+   * FIXED: Reuse existing transaction instead of creating duplicate
    */
   async createPayOSPaymentForBooking(
     userId: string | null,
     bookingId: string
   ): Promise<{ checkoutUrl: string; paymentLinkId: string; orderCode: number }> {
-    // 1. Find booking
-    const booking = await this.bookingModel.findById(bookingId).populate('field').exec();
+    // 1. Find booking with transaction populated
+    const booking = await this.bookingModel
+      .findById(bookingId)
+      .populate('field')
+      .populate('transaction')
+      .exec();
     if (!booking) {
       throw new NotFoundException('Booking not found');
     }
@@ -1743,20 +2479,45 @@ export class BookingsService {
       throw new BadRequestException('Booking is already paid');
     }
 
-    // 3. Create Transaction
-    // Generate a unique order code for this attempt
-    const orderCode = Number(String(Date.now()).slice(-6) + Math.floor(Math.random() * 1000));
     const totalPrice = booking.totalPrice || booking.bookingAmount || 0;
 
-    // Create pending transaction
-    const transaction = await this.transactionsService.createPayment({
-      bookingId: (booking._id as any).toString(),
-      userId: userId || booking.user?.toString() || new Types.ObjectId().toString(), // handle guest or missing user
-      amount: totalPrice,
-      method: PaymentMethod.PAYOS,
-      paymentNote: `Payment for booking ${bookingId}`,
-      externalTransactionId: orderCode.toString(),
-    });
+    // 3. Check if transaction already exists (created during booking creation)
+    // FIXED: Reuse existing transaction instead of creating duplicate
+    let transaction = booking.transaction as any;
+    let orderCode: number;
+
+    if (transaction && transaction._id) {
+      // Transaction already exists, check if it has externalTransactionId (PayOS orderCode)
+      this.logger.log(`[PayOS Single] Reusing existing transaction: ${transaction._id}`);
+
+      if (transaction.externalTransactionId) {
+        orderCode = parseInt(transaction.externalTransactionId, 10);
+      } else {
+        // Generate new order code and update existing transaction
+        orderCode = Number(String(Date.now()).slice(-6) + Math.floor(Math.random() * 1000));
+        await this.transactionsService.updateTransactionExternalId(
+          transaction._id.toString(),
+          orderCode.toString()
+        );
+      }
+    } else {
+      // No transaction exists, create new one (for bookings created without transaction)
+      this.logger.log(`[PayOS Single] No existing transaction found, creating new one`);
+      orderCode = Number(String(Date.now()).slice(-6) + Math.floor(Math.random() * 1000));
+
+      transaction = await this.transactionsService.createPayment({
+        bookingId: (booking._id as any).toString(),
+        userId: userId || booking.user?.toString() || new Types.ObjectId().toString(),
+        amount: totalPrice,
+        method: PaymentMethod.PAYOS,
+        paymentNote: `Payment for booking ${bookingId}`,
+        externalTransactionId: orderCode.toString(),
+      });
+
+      // ✅ Link transaction to booking (for single booking)
+      booking.transaction = transaction._id as Types.ObjectId;
+      await booking.save();
+    }
 
     // 4. Create PayOS Link
     const fieldName = (booking.field as any)?.name || 'Field';
@@ -1775,10 +2536,154 @@ export class BookingsService {
       // Use defaults from PayOSService config
     });
 
-    // 5. Update booking with transaction
-    // ✅ REMOVED: booking.transaction (bidirectional reference cleanup)
-    // Use TransactionsService.getPaymentByBookingId(bookingId) instead
+    // 5. Booking transaction link already set above (if new transaction was created)
     await booking.save();
+
+    return {
+      checkoutUrl: paymentLinkRes.checkoutUrl,
+      paymentLinkId: paymentLinkRes.paymentLinkId,
+      orderCode: orderCode
+    };
+  }
+
+  /**
+   * Create PayOS payment for recurring/multiple bookings
+   * Calculates total from all bookings in the recurring group
+   * FIXED: Reuse existing transaction instead of creating duplicate
+   */
+  async createPayOSPaymentForRecurringGroup(
+    userId: string | null,
+    bookingId: string
+  ): Promise<{ checkoutUrl: string; paymentLinkId: string; orderCode: number }> {
+    // 1. Find the primary booking with transaction populated
+    const booking = await this.bookingModel
+      .findById(bookingId)
+      .populate('field')
+      .populate('transaction')
+      .exec();
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    // 2. Validate this is a recurring booking
+    if (!booking.recurringGroupId) {
+      throw new BadRequestException('This endpoint is for recurring bookings only. Use regular payment endpoint for single bookings.');
+    }
+
+    // 3. Validate booking state
+    if (booking.status === BookingStatus.CANCELLED || booking.status === BookingStatus.COMPLETED) {
+      throw new BadRequestException(`Booking is ${booking.status}, cannot proceed with payment`);
+    }
+
+    if (booking.paymentStatus === 'paid') {
+      throw new BadRequestException('Booking is already paid');
+    }
+
+    // 4. Find all bookings in this recurring group
+    this.logger.log(`[PayOS Recurring] Processing recurring group: ${booking.recurringGroupId}`);
+
+    const allBookings = await this.bookingModel.find({
+      recurringGroupId: booking.recurringGroupId,
+      status: { $in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] }
+    }).exec();
+
+    if (allBookings.length === 0) {
+      throw new NotFoundException('No bookings found in recurring group');
+    }
+
+    this.logger.log(`[PayOS Recurring] Found ${allBookings.length} bookings in group`);
+
+    // 5. Calculate total price from all bookings
+    const rawTotalPrice = allBookings.reduce((sum, b) => {
+      const bookingPrice = b.totalPrice || b.bookingAmount || 0;
+      return sum + bookingPrice;
+    }, 0);
+
+    this.logger.log(`[PayOS Recurring] Raw total price calculated: ${rawTotalPrice}`);
+
+    // Apply bulk discount to match Frontend calculation
+    // Collect daily prices. 'allBookings' array order doesn't strictly matter for sum but for tiered logic we should sort by date
+    // Sort bookings by date just in case
+    allBookings.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const dailyPrices = allBookings.map(b => b.totalPrice || 0);
+    const bulkDiscount = this.calculateBulkDiscount(allBookings.length, dailyPrices);
+    const totalPrice = bulkDiscount.finalTotal;
+
+    this.logger.log(`[PayOS Recurring] Applied bulk discount: ${bulkDiscount.discountAmount} (${bulkDiscount.discountRate * 100}%), Final Amount: ${totalPrice}`);
+
+    // 6. Check if transaction already exists (created during booking creation)
+    // FIXED: Reuse existing transaction instead of creating duplicate
+    let transaction = booking.transaction as any;
+    let orderCode: number;
+
+    if (transaction && transaction._id) {
+      // Transaction already exists, check if it has externalTransactionId (PayOS orderCode)
+      this.logger.log(`[PayOS Recurring] Reusing existing transaction: ${transaction._id}`);
+
+      if (transaction.externalTransactionId) {
+        orderCode = parseInt(transaction.externalTransactionId, 10);
+      } else {
+        // Generate new order code and update existing transaction
+        orderCode = Number(String(Date.now()).slice(-6) + Math.floor(Math.random() * 1000));
+        await this.transactionsService.updateTransactionExternalId(
+          transaction._id.toString(),
+          orderCode.toString()
+        );
+      }
+
+      // Update transaction amount if it differs (e.g. if discount wasn't applied initially)
+      if (transaction.amount !== totalPrice) {
+        this.logger.log(`[PayOS Recurring] Updating transaction amount from ${transaction.amount} to ${totalPrice}`);
+        await this.transactionsService.updateTransactionAmount(
+          transaction._id.toString(),
+          totalPrice
+        );
+      }
+
+    } else {
+      // No transaction exists, create new one (fallback for edge cases)
+      this.logger.log(`[PayOS Recurring] No existing transaction found, creating new one`);
+      orderCode = Number(String(Date.now()).slice(-6) + Math.floor(Math.random() * 1000));
+
+      transaction = await this.transactionsService.createPayment({
+        bookingId: (booking._id as any).toString(),
+        userId: userId || booking.user?.toString() || new Types.ObjectId().toString(),
+        amount: totalPrice,
+        method: PaymentMethod.PAYOS,
+        paymentNote: `Payment for ${allBookings.length} recurring bookings`,
+        externalTransactionId: orderCode.toString(),
+        // ✅ Add recurringGroupId to metadata for webhook lookup
+        metadata: {
+          recurringGroupId: booking.recurringGroupId.toString(),
+          bookingCount: allBookings.length,
+        },
+      });
+
+      // Link transaction to ALL bookings in the recurring group
+      for (const b of allBookings) {
+        b.transaction = transaction._id as Types.ObjectId;
+        await b.save();
+      }
+      this.logger.log(`[PayOS Recurring] Linked transaction ${transaction._id} to ${allBookings.length} bookings`);
+    }
+
+    // 7. Create PayOS Link
+    const fieldName = (booking.field as any)?.name || 'Field';
+    const paymentLinkRes = await this.payOSService.createPaymentUrl({
+      orderId: bookingId,
+      orderCode: orderCode,
+      amount: totalPrice,
+      description: `Thanh toan ${allBookings.length} lich`, // Max 25 chars
+      items: [
+        {
+          name: `${allBookings.length} sessions at ${fieldName}`,
+          quantity: 1,
+          price: totalPrice,
+        }
+      ],
+    });
+
+    // No need to save booking again since we already saved all bookings above
 
     return {
       checkoutUrl: paymentLinkRes.checkoutUrl,

@@ -52,6 +52,37 @@ export class WalletService {
     role: WalletRole,
     session?: ClientSession,
   ): Promise<WalletDocument> {
+    // ✅ CRITICAL FIX: Handle admin wallet specially
+    // Admin wallet uses ADMIN_SYSTEM_ID which is not a valid ObjectId
+    // We need to find/create it by role instead
+    if (userId === this.ADMIN_SYSTEM_ID && role === WalletRole.ADMIN) {
+      let wallet = await this.walletModel
+        .findOne({ role: WalletRole.ADMIN })
+        .session(session || null);
+
+      if (!wallet) {
+        this.logger.log(`Creating new admin system wallet`);
+        
+        // Use a fixed ObjectId for admin wallet (24 hex chars)
+        // This is a constant ObjectId that represents the admin system
+        const adminObjectId = new Types.ObjectId('000000000000000000000001');
+        
+        wallet = new this.walletModel({
+          user: adminObjectId,
+          role: WalletRole.ADMIN,
+          currency: 'VND',
+          systemBalance: 0,
+          status: WalletStatus.ACTIVE,
+        });
+
+        await wallet.save({ session });
+        this.logger.log(`✅ Admin system wallet created`);
+      }
+
+      return wallet;
+    }
+
+    // Normal wallet lookup for regular users
     let wallet = await this.walletModel
       .findOne({ user: this.toObjectId(userId) })
       .session(session || null);

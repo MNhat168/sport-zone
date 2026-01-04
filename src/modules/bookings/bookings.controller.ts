@@ -231,6 +231,107 @@ export class BookingsController {
   }
 
   /**
+   * Validate consecutive days booking availability WITHOUT creating bookings
+   * Used for dry-run validation at booking step before proceeding to amenities/payment
+   */
+  @Post('bookings/consecutive-days/validate')
+  @UseGuards(OptionalJwtAuthGuard)
+  @RateLimit({ ttl: 60, limit: 20 }) // 20 validation requests per minute
+  @ApiOperation({
+    summary: 'Validate consecutive days booking (dry-run)',
+    description: 'Checks availability for consecutive days without creating bookings. Returns conflicts if any dates are unavailable.'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Validation result with conflicts (if any) and pricing preview'
+  })
+  @ApiResponse({ status: 400, description: 'Invalid data' })
+  @ApiResponse({ status: 404, description: 'Field or court not found' })
+  async validateConsecutiveDaysBooking(
+    @Body() bookingData: CreateConsecutiveDaysBookingDto,
+  ) {
+    return await this.bookingsService.validateConsecutiveDaysBooking(bookingData);
+  }
+
+  /**
+   * Validate weekly recurring booking availability WITHOUT creating bookings
+   * Used for dry-run validation at booking step before proceeding to amenities/payment
+   */
+  @Post('bookings/weekly-recurring/validate')
+  @UseGuards(OptionalJwtAuthGuard)
+  @RateLimit({ ttl: 60, limit: 20 }) // 20 validation requests per minute
+  @ApiOperation({
+    summary: 'Validate weekly recurring booking (dry-run)',
+    description: 'Checks availability for weekly pattern without creating bookings. Returns conflicts if any dates are unavailable.'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Validation result with conflicts (if any) and pricing preview'
+  })
+  @ApiResponse({ status: 400, description: 'Invalid data' })
+  @ApiResponse({ status: 404, description: 'Field or court not found' })
+  async validateWeeklyRecurringBooking(
+    @Body() bookingData: CreateWeeklyRecurringBookingDto,
+  ) {
+    return await this.bookingsService.validateWeeklyRecurringBooking(bookingData);
+  }
+
+  /**
+   * Get schedule for a specific conflict date
+   * Returns all time slots with status for TimeSlotPickerModal
+   */
+  @Get('bookings/conflict-date-schedule')
+  @UseGuards(OptionalJwtAuthGuard)
+  @RateLimit({ ttl: 10, limit: 30 })
+  @ApiOperation({
+    summary: 'Get schedule for conflict date resolution',
+    description: 'Returns all time slots with their availability status for a specific date. Used by TimeSlotPickerModal to display available alternatives.'
+  })
+  @ApiQuery({
+    name: 'fieldId',
+    description: 'Field ID',
+    example: '507f1f77bcf86cd799439011'
+  })
+  @ApiQuery({
+    name: 'courtId',
+    description: 'Court ID',
+    example: '657f1f77bcf86cd799439011'
+  })
+  @ApiQuery({
+    name: 'date',
+    description: 'Date (YYYY-MM-DD)',
+    example: '2026-01-05'
+  })
+  @ApiQuery({
+    name: 'duration',
+    description: 'Required duration in minutes',
+    example: '60'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Schedule with all time slots and their status'
+  })
+  @ApiResponse({ status: 400, description: 'Invalid parameters' })
+  @ApiResponse({ status: 404, description: 'Field or court not found' })
+  async getConflictDateSchedule(
+    @Query('fieldId') fieldId: string,
+    @Query('courtId') courtId: string,
+    @Query('date') date: string,
+    @Query('duration') duration: string,
+  ) {
+    if (!fieldId || !courtId || !date || !duration) {
+      throw new BadRequestException('Missing required query parameters: fieldId, courtId, date, duration');
+    }
+
+    const durationNum = parseInt(duration, 10);
+    if (isNaN(durationNum) || durationNum <= 0) {
+      throw new BadRequestException('Duration must be a positive number');
+    }
+
+    return await this.bookingsService.getConflictDateSchedule(fieldId, courtId, date, durationNum);
+  }
+
+  /**
    * ⭐ TURN 3: Parse natural language booking request using AI
    * Converts user's natural language query into structured booking data
    * Example: "Đặt sân từ thứ 2 đến thứ 6 tuần này, 9h-11h"
@@ -579,6 +680,29 @@ export class BookingsController {
   }
 
   /**
+   * Initiate PayOS payment for recurring booking group
+   * Calculates total from all bookings in the group
+   */
+  @Post('bookings/:bookingId/payment/payos/recurring')
+  @UseGuards(OptionalJwtAuthGuard)
+  @RateLimit({ ttl: 60, limit: 10 })
+  @ApiOperation({
+    summary: 'Initiate PayOS payment for recurring booking group',
+    description: 'Creates a PayOS payment link for a recurring booking group. Calculates total from all related bookings.'
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Payment link created successfully',
+  })
+  async createPayOSPaymentForRecurringBooking(
+    @Request() req: any,
+    @Param('bookingId') bookingId: string,
+  ) {
+    const userId = req.user?.userId || null;
+    return await this.bookingsService.createPayOSPaymentForRecurringGroup(userId, bookingId);
+  }
+
+  /**
    * Tạo booking coach V2 với chuyển khoản ngân hàng và ảnh chứng minh
    * Sử dụng PaymentMethod.BANK_TRANSFER và yêu cầu upload ảnh chứng minh
    * ✅ SECURITY: Rate limited to prevent booking spam
@@ -856,7 +980,9 @@ export class BookingsController {
       }
 
       // 2. Get booking ID (should be a string or ObjectId)
-      const bookingId = (transaction.booking as any)?._id?.toString() || transaction.booking?.toString();
+      const booking = await this.bookingModel.findOne({ transaction: transaction._id }).select('_id');
+      const bookingId = booking?._id?.toString();
+
       if (!bookingId) {
         throw new BadRequestException('No booking associated with this transaction');
       }
