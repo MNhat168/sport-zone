@@ -244,7 +244,7 @@ export class PaymentHandlerService implements OnModuleInit {
         // Update Status
         booking.paymentStatus = 'paid';
         if (!isCoach) booking.status = BookingStatus.CONFIRMED;
-        
+
         try {
           await booking.save({ session });
         } catch (saveError) {
@@ -254,7 +254,7 @@ export class PaymentHandlerService implements OnModuleInit {
 
         // Emit Events
         this.eventEmitter.emit('booking.confirmed', {
-          bookingId: booking._id.toString(),
+          bookingId: booking.id.toString(),
           userId: event.userId,
           fieldId: booking.field?.toString() || null,
           courtId: booking.court?.toString() || null,
@@ -262,7 +262,7 @@ export class PaymentHandlerService implements OnModuleInit {
         });
 
         // Send Email (async, non-blocking)
-        this.bookingEmailService.sendConfirmationEmails(booking._id.toString(), event.method).catch(e => this.logger.error(e));
+        this.bookingEmailService.sendConfirmationEmails(booking.id.toString(), event.method).catch(e => this.logger.error(e));
 
         // Calculate Revenue for Owner
         if (booking.field) {

@@ -53,7 +53,7 @@ export class NotificationsService {
 
     try {
       const notifications = await this.notificationRepository.createMany(dtos);
-      
+
       // Emit real-time notifications for each recipient
       for (const notification of notifications) {
         try {
@@ -84,12 +84,30 @@ export class NotificationsService {
     }
   }
 
-  async getUserNotifications(userId: string): Promise<Notification[]> {
-    const notifications = await this.notificationRepository.findByCondition({
-      recipient: new Types.ObjectId(userId)
-    });
-    // Sorted by createdAt descending in repository
-    return notifications;
+  async getUserNotifications(
+    userId: string,
+    type: 'all' | 'admin' | 'non-admin' = 'all',
+  ): Promise<Notification[]> {
+    const condition: any = {
+      recipient: new Types.ObjectId(userId),
+    };
+
+    switch (type) {
+      case 'admin':
+        condition.type = NotificationType.ADMIN_NOTIFICATION;
+        break;
+
+      case 'non-admin':
+        condition.type = { $ne: NotificationType.ADMIN_NOTIFICATION };
+        break;
+
+      case 'all':
+      default:
+        // no extra condition
+        break;
+    }
+
+    return this.notificationRepository.findByCondition(condition);
   }
 
   async getUnreadCount(userId: string): Promise<number> {

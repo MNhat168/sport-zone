@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { CreateNotificationDto } from './dtos/create-notification.dto';
 
@@ -12,8 +12,14 @@ export class NotificationsController {
     }
 
     @Get('user/:userId')
-    getUserNotifications(@Param('userId') userId: string) {
-        return this.notificationsService.getUserNotifications(userId);
+    getUserNotifications(
+        @Param('userId') userId: string,
+        @Query('type') type?: 'all' | 'admin' | 'non-admin',
+    ) {
+        return this.notificationsService.getUserNotifications(
+            userId,
+            type ?? 'all',
+        );
     }
 
     @Get('user/:userId/unread-count')

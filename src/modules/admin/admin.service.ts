@@ -2784,7 +2784,7 @@ export class AdminService {
 
         const notifications = users.map((user) => ({
             recipient: user._id as Types.ObjectId,
-            type: 'admin_notifcation',
+            type: 'admin_notification',
             title,
             message,
             metadata,
