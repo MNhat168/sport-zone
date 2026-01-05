@@ -13,7 +13,7 @@ export enum NotificationType {
   SUBSCRIPTION_SUSPENDED = 'subscription_suspended',
   SUBSCRIPTION_REACTIVATED = 'subscription_reactivated',
   PAYMENT_PROOF_SUBMITTED = 'payment_proof_submitted',
-  ADMIN_NOTIFICATION = 'admin_notifcation',
+  ADMIN_NOTIFICATION = 'admin_notification',
   BOOKMARKED_FIELD_PRICE_CHANGED = 'bookmarked_field_price_changed',
   BOOKMARKED_FIELD_STATUS_CHANGED = 'bookmarked_field_status_changed',
   BOOKMARKED_COACH_PRICE_CHANGED = 'bookmarked_coach_price_changed',
