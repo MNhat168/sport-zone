@@ -29,6 +29,7 @@ import { Logger } from '@nestjs/common';
 import { ChatModule } from '@modules/chat/chat.module';
 import { CourtsModule } from './modules/courts/courts.module';
 import { BillingModule } from './modules/billing/billing.module';
+import { QrCheckinModule } from './modules/qr-checkin/qr-checkin.module';
 @Module({
   imports: [
 
@@ -114,7 +115,8 @@ import { BillingModule } from './modules/billing/billing.module';
     NotificationsModule,
     ChatModule,
     CourtsModule,
-    BillingModule
+    BillingModule,
+    QrCheckinModule
   ],
   controllers: [AppController],
   providers: [

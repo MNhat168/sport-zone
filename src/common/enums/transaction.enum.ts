@@ -21,4 +21,5 @@ export enum TransactionType {
   ADJUSTMENT = 'adjustment',         // Manual ±
   PAYOUT = 'payout',                 // Hệ thống → coach / field owner
   FEE = 'fee',                       // Phí hệ thống thu
+  WITHDRAWAL = 'withdrawal',         // Chủ sân / Coach rút tiền từ availableBalance
 }

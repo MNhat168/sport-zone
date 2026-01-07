@@ -139,6 +139,15 @@ export class Booking extends BaseEntity {
    */
   @Prop({ type: Types.ObjectId, required: false })
   recurringGroupId?: Types.ObjectId;
+
+  /**
+   * Check-in tracking fields for QR check-in system
+   */
+  @Prop({ type: Date })
+  checkedInAt?: Date;
+
+  @Prop({ type: Types.ObjectId, ref: 'User' })
+  checkedInBy?: Types.ObjectId;
 }
 
 export type BookingDocument = HydratedDocument<Booking>;

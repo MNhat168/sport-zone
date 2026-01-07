@@ -9,7 +9,7 @@ export type WalletDocument = HydratedDocument<Wallet>;
  * Wallet Entity V2
  * LOGIC MỚI:
  * - USER: Không nạp tiền trước, wallet chỉ tạo khi có refund credit (lazy creation)
- * - FIELD_OWNER/COACH: Chỉ có pendingBalance (UI display only), tiền tự động chuyển bank sau check-in
+ * - FIELD_OWNER/COACH: pendingBalance (chờ check-in) + availableBalance (có thể rút)
  * - ADMIN: Giữ tiền thật trong systemBalance, xử lý tất cả bank transfers
  */
 @Schema({ collection: 'wallets' })
@@ -38,12 +38,20 @@ export class Wallet extends BaseEntity {
   systemBalance?: number;
 
   /**
-   * [FIELD_OWNER/COACH ONLY] Số dư chờ check-in (UI display only)
+   * [FIELD_OWNER/COACH ONLY] Số dư chờ check-in
    * Hiển thị: "Đang chờ check-in: X đồng"
-   * Tự động về 0 sau khi bank transfer
+   * Chuyển sang availableBalance sau khi khách check-in
    */
   @Prop({ type: Number, default: 0 })
   pendingBalance?: number;
+
+  /**
+   * [FIELD_OWNER/COACH ONLY] Số dư khả dụng (có thể rút)
+   * Tăng sau khi check-in thành công (từ pendingBalance)
+   * Giảm khi chủ sân thực hiện rút tiền về ngân hàng
+   */
+  @Prop({ type: Number, default: 0 })
+  availableBalance?: number;
 
   /**
    * [USER ONLY] Số dư hoàn tiền (lazy creation)

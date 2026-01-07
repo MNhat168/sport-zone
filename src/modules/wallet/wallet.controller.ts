@@ -15,7 +15,7 @@ export class WalletController {
     private readonly walletService: WalletService,
     @Inject(forwardRef(() => PaymentHandlerService))
     private readonly paymentHandlerService: PaymentHandlerService,
-  ) {}
+  ) { }
 
   /**
    * Get wallet info for current authenticated user
@@ -143,6 +143,33 @@ export class WalletController {
   ) {
     await this.paymentHandlerService.withdrawRefund(userId, dto.amount);
     return { success: true, message: 'Withdrawal processed successfully' };
+  }
+
+  /**
+   * [V2 NEW] Withdraw available balance for Field Owner
+   * Field owner endpoint to withdraw from availableBalance to bank
+   * Requires authentication and field_owner role
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Post('field-owner/withdraw')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Withdraw available balance to bank account' })
+  @ApiResponse({ status: 200, description: 'Withdrawal processed successfully' })
+  async withdrawFieldOwnerBalance(
+    @Request() req,
+    @Body() dto: WithdrawRequestDto,
+  ) {
+    const userId = req.user?.userId || req.user?._id || req.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('User ID not found in request');
+    }
+
+    await this.paymentHandlerService.withdrawAvailableBalance(userId, dto.amount);
+    return {
+      success: true,
+      message: 'Yeu cau rut tien da duoc xu ly thanh cong'
+    };
   }
 }
 
