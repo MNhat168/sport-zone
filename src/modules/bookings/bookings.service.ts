@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, InternalServerErrorException, HttpException, HttpStatus } from '@nestjs/common';
 import { InjectModel, InjectConnection } from '@nestjs/mongoose';
 import { Model, Types, Connection, ClientSession } from 'mongoose';
 import { Booking } from './entities/booking.entity';
@@ -42,6 +42,9 @@ import { OwnerBookingService } from './services/owner-booking.service';
 import { BookingQueryService } from './services/booking-query.service';
 import { BookingCancellationService } from './services/booking-cancellation.service';
 import { PaymentProofService } from './services/payment-proof.service';
+import { QrCheckinService } from '../qr-checkin/qr-checkin.service';
+import { CheckInLog } from '../qr-checkin/entities/check-in-log.entity';
+import { WalletService } from '../wallet/wallet.service';
 
 /**
  * Interface for availability slot
@@ -100,6 +103,9 @@ export class BookingsService {
     private readonly bookingQueryService: BookingQueryService,
     private readonly bookingCancellationService: BookingCancellationService,
     private readonly paymentProofService: PaymentProofService,
+    private readonly qrCheckinService: QrCheckinService,
+    private readonly walletService: WalletService,
+    @InjectModel(CheckInLog.name) private readonly checkInLogModel: Model<CheckInLog>,
   ) { }
 
   /**
@@ -2690,5 +2696,232 @@ export class BookingsService {
       paymentLinkId: paymentLinkRes.paymentLinkId,
       orderCode: orderCode
     };
+  }
+
+  // ============================================================================
+  // QR CHECK-IN SYSTEM METHODS
+  // ============================================================================
+
+  /**
+   * Generate QR check-in token for a booking
+   * Only available within configured time window before match start
+   */
+  async generateCheckInQR(bookingId: string, userId: string) {
+    // 1. Find and validate booking
+    if (!Types.ObjectId.isValid(bookingId)) {
+      throw new BadRequestException('Invalid booking ID format');
+    }
+
+    const booking = await this.bookingModel
+      .findById(bookingId)
+      .populate('field')
+      .lean();
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    // 2. Verify ownership
+    if (booking.user.toString() !== userId) {
+      throw new BadRequestException('You are not authorized to generate QR for this booking');
+    }
+
+    // 3. Check if already checked in (check this BEFORE checking status)
+    if (booking.status === BookingStatus.CHECKED_IN) {
+      throw new BadRequestException('Đã check-in rồi');
+    }
+
+    // 4. Check booking status and payment
+    if (booking.paymentStatus !== 'paid') {
+      throw new BadRequestException('Booking must be paid to generate check-in QR');
+    }
+
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new BadRequestException('Booking must be confirmed to generate check-in QR');
+    }
+
+    // 5. Get booking start time (combine date + startTime)
+    const startDateTime = this.combineDateTime(booking.date, booking.startTime);
+
+    // 6. Generate token (will throw if outside time window)
+    const { token, expiresAt } = await this.qrCheckinService.generateCheckInToken(
+      bookingId,
+      startDateTime
+    );
+
+    this.logger.log(`[QR Check-in] Generated token for booking ${bookingId}, expires at ${expiresAt}`);
+
+    return {
+      token,
+      expiresAt,
+      bookingId,
+      startTime: startDateTime,
+      fieldName: (booking.field as any)?.name
+    };
+  }
+
+  /**
+   * Confirm check-in by validating QR token
+   * Triggers wallet transaction to unlock funds
+   */
+  async confirmCheckIn(
+    bookingId: string,
+    token: string,
+    staffId: string,
+    ipAddress?: string
+  ) {
+    // 1. Validate token
+    const tokenPayload = await this.qrCheckinService.validateCheckInToken(token);
+
+    // 2. Verify token matches booking
+    if (tokenPayload.bookingId !== bookingId) {
+      throw new BadRequestException('Token does not match booking ID');
+    }
+
+    // 3. Find booking with all relations
+    const booking = await this.bookingModel
+      .findById(bookingId)
+      .populate('field')
+      .populate('transaction')
+      .populate('user');
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    // 4. Check if already checked in
+    if (booking.status === BookingStatus.CHECKED_IN) {
+      throw new HttpException('Đã check-in rồi', HttpStatus.CONFLICT);
+    }
+
+    // 5. Verify booking is paid and confirmed
+    if (booking.paymentStatus !== 'paid') {
+      throw new BadRequestException('Booking must be  paid before check-in');
+    }
+
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new BadRequestException('Booking must be confirmed before check-in');
+    }
+
+    // 6. Update booking status
+    booking.status = BookingStatus.CHECKED_IN;
+    booking.checkedInAt = new Date();
+    booking.checkedInBy = new Types.ObjectId(staffId);
+    await booking.save();
+
+    this.logger.log(`[QR Check-in] Booking ${bookingId} checked in by staff ${staffId}`);
+
+    // 7. Trigger wallet transaction (unlock funds)
+    let walletTransaction: any = null;
+    try {
+      // Type-safe transaction access
+      const transactionId = booking.transaction;
+      if (transactionId) {
+        const transaction = await this.transactionModel.findById(transactionId).lean();
+
+        if (transaction && transaction.amount > 0) {
+          const field = booking.field as any;
+          const fieldOwner = field?.owner;
+
+          if (fieldOwner) {
+            walletTransaction = await this.walletService.transferPendingToAvailable(
+              fieldOwner.toString(),
+              transaction.amount,
+              bookingId,
+              transaction._id.toString()
+            );
+
+            this.logger.log(`[QR Check-in] Transferred ${transaction.amount} from pending to available for field owner ${fieldOwner}`);
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.error(`[QR Check-in] Failed to transfer wallet funds: ${error.message}`, error.stack);
+      // Don't fail the check-in if wallet transfer fails - log for manual intervention
+    }
+
+    // 8. Create check-in log (audit trail)
+    try {
+      const checkInLog = new this.checkInLogModel({
+        booking: booking._id,
+        checkedInBy: new Types.ObjectId(staffId),
+        checkedInAt: new Date(),
+        ipAddress,
+        tokenPayload,
+        status: 'success'
+      });
+      await checkInLog.save();
+    } catch (error) {
+      // Log but don't fail
+      this.logger.error(`[QR Check-in] Failed to create check-in log: ${error.message}`, error.stack);
+    }
+
+    // 9. Emit event for real-time updates
+    this.eventEmitter.emit('booking.checkedIn', {
+      bookingId: booking._id.toString(),
+      userId: booking.user.toString(),
+      fieldId: booking.field?.toString() || '',
+      checkedInAt: booking.checkedInAt,
+      staffId
+    });
+
+    return {
+      success: true,
+      booking: booking.toObject(),
+      walletTransaction,
+      checkedInAt: booking.checkedInAt
+    };
+  }
+
+  /**
+   * Get check-in time window information for a booking
+   * Used for displaying countdown timers
+   */
+  async getCheckInWindow(bookingId: string, userId: string) {
+    if (!Types.ObjectId.isValid(bookingId)) {
+      throw new BadRequestException('Invalid booking ID format');
+    }
+
+    const booking = await this.bookingModel.findById(bookingId).lean();
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    // Verify ownership
+    if (booking.user.toString() !== userId) {
+      throw new BadRequestException('You are not authorized to view this booking');
+    }
+
+    // Get booking start time
+    const startDateTime = this.combineDateTime(booking.date, booking.startTime);
+
+    // Get window info from QR service
+    const windowInfo = this.qrCheckinService.getCheckInWindow(startDateTime);
+    const timeUntilWindow = this.qrCheckinService.getTimeUntilWindow(startDateTime);
+    const canGenerateResult = this.qrCheckinService.canGenerateQR(startDateTime);
+
+    return {
+      ...windowInfo,
+      canGenerateNow: canGenerateResult.canGenerate,
+      timeUntilWindowMs: timeUntilWindow,
+      bookingStartTime: startDateTime,
+      message: canGenerateResult.message
+    };
+  }
+
+  /**
+   * Helper: Combine date and time string to create DateTime
+   * @param date - Date object or ISO string
+   * @param timeString - Time string in format "HH:MM"
+   */
+  private combineDateTime(date: Date | string, timeString: string): Date {
+    const dateObj = typeof date === 'string' ? new Date(date) : date;
+    const [hours, minutes] = timeString.split(':').map(Number);
+
+    const combined = new Date(dateObj);
+    combined.setHours(hours, minutes, 0, 0);
+
+    return combined;
   }
 }

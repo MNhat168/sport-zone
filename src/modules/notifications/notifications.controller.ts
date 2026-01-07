@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards, Request, ForbiddenException } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
 import { NotificationsService } from './notifications.service';
 import { CreateNotificationDto } from './dtos/create-notification.dto';
 
@@ -33,7 +34,15 @@ export class NotificationsController {
     }
 
     @Patch(':id/read')
-    markAsRead(@Param('id') id: string) {
-        return this.notificationsService.markAsRead(id);
+    @UseGuards(AuthGuard('jwt'))
+    async markAsRead(
+        @Param('id') id: string,
+        @Request() req: any,
+    ) {
+        const userId = req.user?.userId || req.user?._id || req.user?.id;
+        if (!userId) {
+            throw new ForbiddenException('User ID not found in request');
+        }
+        return this.notificationsService.markAsRead(id, userId);
     }
 }

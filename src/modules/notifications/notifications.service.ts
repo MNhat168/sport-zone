@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, Logger, ForbiddenException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { CreateNotificationDto } from './dtos/create-notification.dto';
 import { Notification } from './entities/notification.entity';
@@ -125,17 +125,36 @@ export class NotificationsService {
     );
   }
 
-  async markAsRead(notificationId: string): Promise<Notification> {
-    const notification = await this.notificationRepository.update(
-      notificationId,
-      { isRead: true }
-    );
+  async markAsRead(notificationId: string, userId: string): Promise<Notification> {
+    // First, find the notification to check ownership
+    const notification = await this.notificationRepository.findById(notificationId);
 
     if (!notification) {
       throw new NotFoundException('Notification not found');
     }
 
-    return notification;
+    // Verify ownership - check if the notification belongs to the current user
+    const recipientId = typeof notification.recipient === 'string'
+      ? notification.recipient
+      : (notification.recipient as any)?.toString?.() ?? '';
+
+    const currentUserId = userId;
+
+    if (recipientId !== currentUserId) {
+      throw new ForbiddenException('You do not have permission to mark this notification as read');
+    }
+
+    // Update notification as read
+    const updatedNotification = await this.notificationRepository.update(
+      notificationId,
+      { isRead: true }
+    );
+
+    if (!updatedNotification) {
+      throw new NotFoundException('Notification not found');
+    }
+
+    return updatedNotification;
   }
 
   async findById(id: string): Promise<Notification> {

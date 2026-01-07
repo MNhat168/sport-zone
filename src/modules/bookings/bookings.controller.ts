@@ -45,6 +45,10 @@ import { FieldBookingService } from './services/field-booking.service';
 import { TransactionsService } from '../transactions/transactions.service';
 import { AiService } from '../ai/ai.service'; // Turn 3
 import { BookingCancellationService } from './services/booking-cancellation.service'; // Turn 4
+import { CheckInRateLimitGuard } from '../qr-checkin/guards/check-in-rate-limit.guard';
+import { RolesGuard } from '@common/guards/roles.guard';
+import { Roles } from '../../decorators/roles.decorator';
+import { UserRole } from '@common/enums/user.enum';
 
 /**
  * Bookings Controller with Pure Lazy Creation pattern
@@ -1609,6 +1613,163 @@ export class BookingsController {
       userId,
       cancellationReason: body.cancellationReason,
     });
+  }
+
+  // ============================================================================
+  // QR CHECK-IN SYSTEM (Dynamic QR with Time Windows)
+  // ============================================================================
+
+  /**
+   * Generate QR code token for check-in
+   * Only available within time window (default: 15 minutes before match start)
+   * ✅ SECURITY: Rate limited to prevent QR generation spam
+   */
+  @Get('bookings/:id/check-in-qr')
+  @UseGuards(AuthGuard('jwt'), CheckInRateLimitGuard)
+  @ApiBearerAuth()
+  @RateLimit({ ttl: 60, limit: 5 }) // 5 QR generations per minute
+  @ApiOperation({
+    summary: 'Generate QR code for check-in',
+    description: 'Generate a signed JWT token for QR check-in. Only available within configured time window before match start (default: 15 minutes).'
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Booking ID',
+    example: '507f1f77bcf86cd799439011'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'QR token generated successfully',
+    schema: {
+      example: {
+        token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+        expiresAt: '2026-01-07T14:15:00Z',
+        bookingId: '507f1f77bcf86cd799439011'
+      }
+    }
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Too early or too late to generate QR',
+    schema: {
+      example: {
+        message: 'Chưa đến giờ nhận sân. Vui lòng đợi thêm 10 phút.',
+        canGenerateAt: '2026-01-07T13:45:00Z',
+        windowEndsAt: '2026-01-07T14:00:00Z'
+      }
+    }
+  })
+  @ApiResponse({ status: 400, description: 'Booking not eligible (not paid or not confirmed)' })
+  @ApiResponse({ status: 404, description: 'Booking not found' })
+  @ApiResponse({ status: 429, description: 'Too many requests - Rate limit exceeded' })
+  async generateCheckInQR(
+    @Param('id') bookingId: string,
+    @Request() req: any,
+  ) {
+    const userId = this.getUserId(req);
+    return await this.bookingsService.generateCheckInQR(bookingId, userId);
+  }
+
+  /**
+   * Confirm check-in by validating QR token
+   * Updates booking status and triggers wallet transaction (pending → available)
+   * ✅ SECURITY: Only staff, admin, and field owners can confirm check-ins
+   */
+  @Post('bookings/:id/check-in')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.FIELD_OWNER)
+  @ApiBearerAuth()
+  @RateLimit({ ttl: 60, limit: 30 }) // 30 check-ins per minute for staff
+  @ApiOperation({
+    summary: 'Confirm check-in with QR token',
+    description: 'Validate QR token and confirm customer check-in. Triggers wallet transaction to unlock funds. Only staff, admin, and field owners can perform check-ins.'
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Booking ID',
+    example: '507f1f77bcf86cd799439011'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Check-in confirmed successfully',
+    schema: {
+      example: {
+        booking: { /* full booking object */ },
+        walletTransaction: {
+          type: 'check_in_unlock',
+          amount: 500000,
+          newAvailableBalance: 500000
+        },
+        checkedInAt: '2026-01-07T14:05:32Z'
+      }
+    }
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid or expired token',
+    schema: {
+      example: { message: 'Mã QR đã hết hạn' }
+    }
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Invalid signature',
+    schema: {
+      example: { message: 'Mã QR không hợp lệ' }
+    }
+  })
+  @ApiResponse({ status: 409, description: 'Already checked in' })
+  @ApiResponse({ status: 404, description: 'Booking not found' })
+  async confirmCheckIn(
+    @Param('id') bookingId: string,
+    @Body('token') token: string,
+    @Request() req: any,
+  ) {
+    const staffId = this.getUserId(req);
+
+    if (!token) {
+      throw new BadRequestException('QR token is required');
+    }
+
+    return await this.bookingsService.confirmCheckIn(bookingId, token, staffId, req.ip);
+  }
+
+  /**
+   * Get check-in time window information for a booking
+   * Useful for displaying countdown timers on frontend
+   */
+  @Get('bookings/:id/check-in-window')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get check-in time window information',
+    description: 'Returns when QR generation becomes available and when it expires. Useful for countdown timers.'
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Booking ID',
+    example: '507f1f77bcf86cd799439011'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Check-in window information',
+    schema: {
+      example: {
+        windowStartsAt: '2026-01-07T13:45:00Z',
+        windowEndsAt: '2026-01-07T14:00:00Z',
+        windowDurationMinutes: 15,
+        canGenerateNow: false,
+        timeUntilWindowMs: 600000
+      }
+    }
+  })
+  @ApiResponse({ status: 404, description: 'Booking not found' })
+  async getCheckInWindow(
+    @Param('id') bookingId: string,
+    @Request() req: any,
+  ) {
+    const userId = this.getUserId(req);
+    return await this.bookingsService.getCheckInWindow(bookingId, userId);
   }
 }
 

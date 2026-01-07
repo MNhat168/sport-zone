@@ -11,6 +11,7 @@ import { User, UserSchema } from '../users/entities/user.entity';
 import { CoachProfile, CoachProfileSchema } from '../coaches/entities/coach-profile.entity';
 import { Transaction, TransactionSchema } from '../transactions/entities/transaction.entity';
 import { Court, CourtSchema } from '../courts/entities/court.entity';
+import { CheckInLog, CheckInLogSchema } from '../qr-checkin/entities/check-in-log.entity';
 
 // Services and Controllers
 import { BookingsService } from './bookings.service';
@@ -57,6 +58,7 @@ import { PaymentProofService } from './services/payment-proof.service';
       { name: User.name, schema: UserSchema },
       { name: CoachProfile.name, schema: CoachProfileSchema },
       { name: Transaction.name, schema: TransactionSchema },
+      { name: CheckInLog.name, schema: CheckInLogSchema },
     ]),
     EventEmitterModule,
     forwardRef(() => TransactionsModule),
@@ -66,6 +68,7 @@ import { PaymentProofService } from './services/payment-proof.service';
     WalletModule, // [V2] Import WalletModule for wallet operations
     forwardRef(() => ServiceModule), // Import để dùng CleanupService
     AiModule,
+    forwardRef(() => import('../qr-checkin/qr-checkin.module').then(m => m.QrCheckinModule)),
   ],
   controllers: [BookingsController],
   providers: [

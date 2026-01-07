@@ -3,8 +3,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Model, Types } from 'mongoose';
 import { CreateWalletDto } from './dto/create-wallet.dto';
 import { AdjustWalletBalanceDto } from './dto/adjust-wallet-balance.dto';
-import { 
-  Wallet, 
+import {
+  Wallet,
   WalletDocument
 } from './entities/wallet.entity';
 import { WalletStatus, WalletRole } from '@common/enums/wallet.enum';
@@ -31,7 +31,7 @@ export class WalletService {
   constructor(
     @InjectModel(Wallet.name)
     private readonly walletModel: Model<WalletDocument>,
-  ) {}
+  ) { }
 
   // ===================================================================
   // CORE METHOD - ALWAYS USE THIS FOR WALLET ACCESS
@@ -62,11 +62,11 @@ export class WalletService {
 
       if (!wallet) {
         this.logger.log(`Creating new admin system wallet`);
-        
+
         // Use a fixed ObjectId for admin wallet (24 hex chars)
         // This is a constant ObjectId that represents the admin system
         const adminObjectId = new Types.ObjectId('000000000000000000000001');
-        
+
         wallet = new this.walletModel({
           user: adminObjectId,
           role: WalletRole.ADMIN,
@@ -89,7 +89,7 @@ export class WalletService {
 
     if (!wallet) {
       this.logger.log(`Creating new wallet for user ${userId} with role ${role}`);
-      
+
       wallet = new this.walletModel({
         user: this.toObjectId(userId),
         role,
@@ -97,6 +97,7 @@ export class WalletService {
         // Initialize balance fields based on role
         systemBalance: role === WalletRole.ADMIN ? 0 : undefined,
         pendingBalance: role === WalletRole.FIELD_OWNER ? 0 : undefined,
+        availableBalance: role === WalletRole.FIELD_OWNER ? 0 : undefined,
         refundBalance: role === WalletRole.USER ? 0 : undefined,
         status: WalletStatus.ACTIVE,
       });
@@ -224,7 +225,7 @@ export class WalletService {
     // Note: This method uses old fields (availableBalance, totalEarned, totalWithdrawn)
     // which are deprecated in V2
     // Keep for backward compatibility but should not be used in new code
-    
+
     throw new BadRequestException(
       'This method is deprecated. Please use payment flow handlers instead.'
     );
@@ -280,10 +281,55 @@ export class WalletService {
    */
   async getWalletById(walletId: string): Promise<WalletDocument> {
     const wallet = await this.walletModel.findById(walletId);
-    
+
     if (!wallet) {
       throw new NotFoundException(`Wallet ${walletId} not found`);
     }
+
+    return wallet;
+  }
+
+  /**
+   * Transfer funds from pending to available balance
+   * Called when booking is checked-in via QR code
+   * 
+   * @param fieldOwnerId - Field owner user ID
+   * @param amount - Amount to transfer
+   * @param bookingId - Booking ID for reference
+   * @param transactionId - Original transaction ID
+   * @returns Updated wallet document
+   */
+  async transferPendingToAvailable(
+    fieldOwnerId: string,
+    amount: number,
+    bookingId: string,
+    transactionId: string
+  ): Promise<WalletDocument> {
+    if (!fieldOwnerId || !amount || amount <= 0) {
+      throw new BadRequestException('Invalid parameters for wallet transfer');
+    }
+
+    // Get field owner wallet
+    const wallet = await this.getOrCreateWallet(fieldOwnerId, WalletRole.FIELD_OWNER);
+
+    // Check if pending balance is sufficient
+    const currentPending = wallet.pendingBalance || 0;
+    if (currentPending < amount) {
+      throw new BadRequestException(
+        `Insufficient pending balance. Required: ${amount}, Available: ${currentPending}`
+      );
+    }
+
+    // Perform atomic transfer
+    wallet.pendingBalance = currentPending - amount;
+    wallet.availableBalance = (wallet.availableBalance || 0) + amount;
+
+    await wallet.save();
+
+    this.logger.log(
+      `[Wallet Transfer] Transferred ${amount} from pending to available for field owner ${fieldOwnerId}. ` +
+      `Booking: ${bookingId}, Transaction: ${transactionId}`
+    );
 
     return wallet;
   }

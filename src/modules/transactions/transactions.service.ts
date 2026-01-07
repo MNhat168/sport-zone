@@ -358,8 +358,8 @@ export class TransactionsService {
       // ✅ Priority 2: Recurring bookings via metadata.recurringGroupId
       if (transaction.metadata?.recurringGroupId) {
         const recurringGroupId = transaction.metadata.recurringGroupId;
-        const bookings = await this.bookingModel.find({ 
-          recurringGroupId: new Types.ObjectId(recurringGroupId) 
+        const bookings = await this.bookingModel.find({
+          recurringGroupId: new Types.ObjectId(recurringGroupId)
         }).select('_id').exec();
         // Return first booking ID for event (payment-handler will process all)
         return bookings[0]?._id?.toString();
@@ -915,6 +915,50 @@ export class TransactionsService {
     } catch (error) {
       this.logger.error('Error creating fee', error);
       throw new BadRequestException('Failed to create fee');
+    }
+  }
+
+  /**
+   * Create withdrawal transaction (Chu san / Coach rut tien tu availableBalance)
+   * @param data Withdrawal data
+   * @param session Optional MongoDB session for transaction support
+   */
+  async createWithdrawalTransaction(data: {
+    userId: string;
+    amount: number;
+    method: string;
+    bankAccount?: string;
+    bankName?: string;
+    notes?: string;
+  }, session?: ClientSession): Promise<Transaction> {
+    try {
+      const withdrawal = new this.transactionModel({
+        user: new Types.ObjectId(data.userId),
+        amount: data.amount,
+        direction: 'out',
+        method: data.method,
+        status: TransactionStatus.SUCCEEDED,
+        type: TransactionType.WITHDRAWAL,
+        payoutTo: new Types.ObjectId(data.userId),
+        payoutBankAccount: data.bankAccount,
+        payoutBankName: data.bankName,
+        notes: data.notes || 'Rut tien tu so du kha dung',
+        completedAt: new Date(),
+      });
+
+      const savedWithdrawal = session
+        ? await withdrawal.save({ session })
+        : await withdrawal.save();
+
+      this.logger.log(
+        `Created withdrawal ${savedWithdrawal._id} for user ${data.userId}, ` +
+        `amount: ${data.amount} VND`
+      );
+
+      return savedWithdrawal;
+    } catch (error) {
+      this.logger.error('Error creating withdrawal transaction', error);
+      throw new BadRequestException('Failed to create withdrawal transaction');
     }
   }
 }

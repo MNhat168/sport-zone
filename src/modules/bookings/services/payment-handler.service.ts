@@ -266,13 +266,26 @@ export class PaymentHandlerService implements OnModuleInit {
 
         // Calculate Revenue for Owner
         if (booking.field) {
-          const bookingWithField = await this.bookingModel.findById(booking._id).populate('field').session(session);
+          // Populate field and field.owner (FieldOwnerProfile) to get the actual userId
+          const bookingWithField = await this.bookingModel
+            .findById(booking._id)
+            .populate({
+              path: 'field',
+              populate: {
+                path: 'owner',
+                model: 'FieldOwnerProfile',
+              },
+            })
+            .session(session);
 
           if (bookingWithField && bookingWithField.field) {
             const field = bookingWithField.field as any;
-            const ownerId = field.owner?.toString();
+            // field.owner is now populated FieldOwnerProfile document
+            // We need the user field from FieldOwnerProfile, not the profile _id
+            const ownerProfile = field.owner;
+            const ownerUserId = ownerProfile?.user?.toString();
 
-            if (ownerId) {
+            if (ownerUserId) {
               let revenue = 0;
               if (bookingWithField.bookingAmount !== undefined) {
                 revenue = bookingWithField.bookingAmount;
@@ -282,8 +295,11 @@ export class PaymentHandlerService implements OnModuleInit {
                 revenue = Math.round(total / 1.05);
               }
 
-              const current = ownerRevenueMap.get(ownerId) || 0;
-              ownerRevenueMap.set(ownerId, current + revenue);
+              const current = ownerRevenueMap.get(ownerUserId) || 0;
+              ownerRevenueMap.set(ownerUserId, current + revenue);
+              this.logger.debug(`[Payment Success] Mapped revenue ${revenue}₫ for owner profile ${ownerProfile._id}, userId: ${ownerUserId}`);
+            } else {
+              this.logger.warn(`[Payment Success] ⚠️ Could not find owner userId for field ${field._id}`);
             }
           }
         }
@@ -649,14 +665,17 @@ export class PaymentHandlerService implements OnModuleInit {
 
   /**
    * [V2 NEW] Handle check-in success event
-   * Automatically transfers money from admin systemBalance to field owner pendingBalance
+   * Unlocks money from pendingBalance to availableBalance
    * Called after customer successfully checks in
    * 
    * Flow:
    * 1. Get booking details
-   * 2. Admin wallet: systemBalance -= amount
-   * 3. Field owner wallet: pendingBalance += amount
-   * 4. Field owner receives bank transfer notification (UI only)
+   * 2. Field owner wallet: pendingBalance -= amount
+   * 3. Field owner wallet: availableBalance += amount
+   * 4. Emit notification event
+   * 
+   * Note: Admin systemBalance is NOT touched here.
+   * Money will be deducted from admin when field owner withdraws.
    * 
    * @param bookingId - Booking ID that was checked in
    */
@@ -667,10 +686,16 @@ export class PaymentHandlerService implements OnModuleInit {
     try {
       this.logger.log(`[Check-In Success V2] Processing for booking ${bookingId}`);
 
-      // Get booking details
+      // Get booking details with field and owner populated
       const booking = await this.bookingModel
         .findById(bookingId)
-        .populate('field')
+        .populate({
+          path: 'field',
+          populate: {
+            path: 'owner',
+            model: 'FieldOwnerProfile',
+          },
+        })
         .session(session);
 
       if (!booking) {
@@ -689,10 +714,13 @@ export class PaymentHandlerService implements OnModuleInit {
       }
 
       const field = booking.field as any;
-      const fieldOwnerId = field.owner?.toString();
+      // field.owner is now populated FieldOwnerProfile document
+      // We need the user field from FieldOwnerProfile (User._id), not the profile _id
+      const ownerProfile = field.owner;
+      const fieldOwnerId = ownerProfile?.user?.toString();
 
       if (!fieldOwnerId) {
-        this.logger.error(`[Check-In Success V2] Field ${field._id} has no owner`);
+        this.logger.error(`[Check-In Success V2] Field ${field._id} has no owner userId (profile: ${ownerProfile?._id})`);
         await session.abortTransaction();
         return;
       }
@@ -702,7 +730,106 @@ export class PaymentHandlerService implements OnModuleInit {
         ? booking.bookingAmount
         : (booking.totalPrice ? Math.round(booking.totalPrice / 1.05) : 0);
 
-      // Step 1: Get admin wallet and deduct from systemBalance
+      // Get field owner wallet and move from pendingBalance to availableBalance
+      const ownerWallet = await this.walletService.getOrCreateWallet(
+        fieldOwnerId,
+        WalletRole.FIELD_OWNER,
+        session,
+      );
+
+      // Deduct from pendingBalance
+      const currentPending = ownerWallet.pendingBalance || 0;
+      if (currentPending < amount) {
+        this.logger.warn(
+          `[Check-In Success V2] Pending balance ${currentPending}d < ${amount}d, ` +
+          `using available amount: ${currentPending}d`
+        );
+      }
+      const unlockAmount = Math.min(currentPending, amount);
+
+      ownerWallet.pendingBalance = currentPending - unlockAmount;
+      ownerWallet.availableBalance = (ownerWallet.availableBalance || 0) + unlockAmount;
+      ownerWallet.lastTransactionAt = new Date();
+      await ownerWallet.save({ session });
+
+      this.logger.log(
+        `[Check-In Success V2] Unlocked ${unlockAmount}d for field owner ${fieldOwnerId}. ` +
+        `Pending: ${ownerWallet.pendingBalance}d, Available: ${ownerWallet.availableBalance}d`
+      );
+
+      // Commit transaction
+      await session.commitTransaction();
+
+      this.logger.log(
+        `[Check-In Success V2] Successfully unlocked ${unlockAmount}d to availableBalance for owner ${fieldOwnerId}`
+      );
+
+      // Emit event for notifications
+      this.eventEmitter.emit('wallet.balance.unlocked', {
+        bookingId,
+        fieldOwnerId,
+        amount: unlockAmount,
+        availableBalance: ownerWallet.availableBalance,
+        unlockedAt: new Date(),
+      });
+
+    } catch (error) {
+      await session.abortTransaction();
+      this.logger.error('[Check-In Success V2] Error processing check-in success event', error);
+    } finally {
+      session.endSession();
+    }
+  }
+
+  /**
+   * [V2 NEW] Handle Field Owner withdrawal from availableBalance
+   * Transfers money from system to owner's bank account
+   * 
+   * Flow:
+   * 1. Check owner has sufficient availableBalance
+   * 2. Owner wallet: availableBalance -= amount
+   * 3. Admin wallet: systemBalance -= amount
+   * 4. Create WITHDRAWAL transaction record
+   * 5. Call PayOS/Bank API to transfer to owner's bank (TODO)
+   * 
+   * @param ownerId - Field owner user ID
+   * @param amount - Amount to withdraw
+   */
+  async withdrawAvailableBalance(ownerId: string, amount: number): Promise<void> {
+    const session: ClientSession = await this.connection.startSession();
+    session.startTransaction();
+
+    try {
+      this.logger.log(`[Withdraw V2] Processing withdrawal for owner ${ownerId}, amount: ${amount}d`);
+
+      // Get owner wallet and check balance
+      const ownerWallet = await this.walletService.getOrCreateWallet(
+        ownerId,
+        WalletRole.FIELD_OWNER,
+        session,
+      );
+
+      const availableBalance = ownerWallet.availableBalance || 0;
+      if (availableBalance < amount) {
+        this.logger.error(
+          `[Withdraw V2] Insufficient availableBalance. ` +
+          `Required: ${amount}d, Available: ${availableBalance}d`
+        );
+        await session.abortTransaction();
+        throw new Error(`So du kha dung khong du. Can: ${amount}d, Hien co: ${availableBalance}d`);
+      }
+
+      // Step 1: Deduct from owner's availableBalance
+      ownerWallet.availableBalance = availableBalance - amount;
+      ownerWallet.lastTransactionAt = new Date();
+      await ownerWallet.save({ session });
+
+      this.logger.log(
+        `[Withdraw V2] Deducted ${amount}d from owner ${ownerId} availableBalance. ` +
+        `New balance: ${ownerWallet.availableBalance}d`
+      );
+
+      // Step 2: Deduct from admin systemBalance
       const adminWallet = await this.walletService.getOrCreateWallet(
         'ADMIN_SYSTEM_ID',
         WalletRole.ADMIN,
@@ -711,54 +838,48 @@ export class PaymentHandlerService implements OnModuleInit {
 
       if ((adminWallet.systemBalance || 0) < amount) {
         this.logger.error(
-          `[Check-In Success V2] Insufficient admin systemBalance. ` +
-          `Required: ${amount}₫, Available: ${adminWallet.systemBalance || 0}₫`
+          `[Withdraw V2] Insufficient admin systemBalance. ` +
+          `Required: ${amount}d, Available: ${adminWallet.systemBalance || 0}d`
         );
         await session.abortTransaction();
-        return;
+        throw new Error('Khong du so du he thong. Vui long lien he admin.');
       }
 
       adminWallet.systemBalance = (adminWallet.systemBalance || 0) - amount;
       await adminWallet.save({ session });
 
       this.logger.log(
-        `[Check-In Success V2] Deducted ${amount}₫ from admin systemBalance. ` +
-        `New balance: ${adminWallet.systemBalance}₫`
+        `[Withdraw V2] Deducted ${amount}d from admin systemBalance. ` +
+        `New balance: ${adminWallet.systemBalance}d`
       );
 
-      // Step 2: Get field owner wallet and add to pendingBalance
-      const ownerWallet = await this.walletService.getOrCreateWallet(
-        fieldOwnerId,
-        WalletRole.FIELD_OWNER,
-        session,
-      );
+      // Step 3: Create WITHDRAWAL transaction record
+      await this.transactionsService.createWithdrawalTransaction({
+        userId: ownerId,
+        amount,
+        method: 'BANK_TRANSFER',
+      });
 
-      ownerWallet.pendingBalance = (ownerWallet.pendingBalance || 0) + amount;
-      await ownerWallet.save({ session });
-
-      this.logger.log(
-        `[Check-In Success V2] Added ${amount}₫ to field owner ${fieldOwnerId} pendingBalance. ` +
-        `New balance: ${ownerWallet.pendingBalance}₫`
-      );
+      // TODO: Step 4 - Call PayOS/Bank API to transfer to owner's bank
+      this.logger.log(`[Withdraw V2] Initiating bank transfer via PayOS for ${amount}d`);
 
       // Commit transaction
       await session.commitTransaction();
 
-      this.logger.log(
-        `[Check-In Success V2] ✅ Successfully transferred ${amount}₫ from admin to field owner ${fieldOwnerId}`
-      );
+      this.logger.log(`[Withdraw V2] Successfully withdrew ${amount}d for owner ${ownerId}`);
 
-      // Emit event for notifications (field owner receives bank transfer)
-      this.eventEmitter.emit('wallet.transfer.completed', {
-        bookingId,
-        fieldOwnerId,
+      // Emit withdrawal event
+      this.eventEmitter.emit('wallet.withdrawal.completed', {
+        userId: ownerId,
         amount,
-        transferredAt: new Date(),
+        remainingBalance: ownerWallet.availableBalance,
+        withdrawnAt: new Date(),
       });
 
     } catch (error) {
       await session.abortTransaction();
-      this.logger.error('[Check-In Success V2] Error processing check-in success event', error);
+      this.logger.error('[Withdraw V2] Error processing withdrawal', error);
+      throw error;
     } finally {
       session.endSession();
     }
