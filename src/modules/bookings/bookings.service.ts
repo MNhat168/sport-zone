@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger, InternalServerErrorException, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger, InternalServerErrorException, HttpException, HttpStatus } from '@nestjs/common';
 import { InjectModel, InjectConnection } from '@nestjs/mongoose';
 import { Model, Types, Connection, ClientSession } from 'mongoose';
 import { Booking } from './entities/booking.entity';
@@ -496,6 +496,7 @@ export class BookingsService {
             selectedAmenities: dto.selectedAmenities?.map(id => new Types.ObjectId(id)) || [],
             note: dto.note,
             recurringGroupId, // Link to group
+            recurringType: 'CONSECUTIVE', // Mark as consecutive days booking
             pricingSnapshot: {
               basePrice: field.basePrice,
               appliedMultiplier: pricingInfo.multiplier,
@@ -1973,6 +1974,10 @@ export class BookingsService {
     approvalStatus?: 'pending' | 'approved' | 'rejected';
     coachStatus?: 'pending' | 'accepted' | 'declined';
     type?: string;
+    recurringFilter?: 'none' | 'only' | 'all';
+    startDate?: string;
+    endDate?: string;
+    search?: string;
     limit: number;
     page: number;
   }): Promise<{ bookings: any[]; pagination: any }> {
@@ -2721,17 +2726,27 @@ export class BookingsService {
       throw new NotFoundException('Booking not found');
     }
 
-    // 2. Verify ownership
-    if (booking.user.toString() !== userId) {
-      throw new BadRequestException('You are not authorized to generate QR for this booking');
+    // 2. Validate booking has required time fields
+    if (!booking.startTime || !booking.endTime) {
+      throw new BadRequestException('Vui lòng nhập giờ bắt đầu và kết thúc');
     }
 
-    // 3. Check if already checked in (check this BEFORE checking status)
+    // 3. Validate booking.user exists
+    if (!booking.user) {
+      throw new BadRequestException('Booking không có thông tin người dùng');
+    }
+
+    // 4. Verify ownership - use ForbiddenException for auth errors
+    if (booking.user.toString() !== userId) {
+      throw new ForbiddenException('Bạn không có quyền tạo QR cho booking này');
+    }
+
+    // 5. Check if already checked in (check this BEFORE checking status)
     if (booking.status === BookingStatus.CHECKED_IN) {
       throw new BadRequestException('Đã check-in rồi');
     }
 
-    // 4. Check booking status and payment
+    // 6. Check booking status and payment
     if (booking.paymentStatus !== 'paid') {
       throw new BadRequestException('Booking must be paid to generate check-in QR');
     }
@@ -2740,10 +2755,10 @@ export class BookingsService {
       throw new BadRequestException('Booking must be confirmed to generate check-in QR');
     }
 
-    // 5. Get booking start time (combine date + startTime)
+    // 7. Get booking start time (combine date + startTime)
     const startDateTime = this.combineDateTime(booking.date, booking.startTime);
 
-    // 6. Generate token (will throw if outside time window)
+    // 8. Generate token (will throw if outside time window)
     const { token, expiresAt } = await this.qrCheckinService.generateCheckInToken(
       bookingId,
       startDateTime
@@ -2756,7 +2771,7 @@ export class BookingsService {
       expiresAt,
       bookingId,
       startTime: startDateTime,
-      fieldName: (booking.field as any)?.name
+      fieldName: (booking.field as any)?.name || 'Sân không xác định'
     };
   }
 
@@ -2916,12 +2931,40 @@ export class BookingsService {
    * @param timeString - Time string in format "HH:MM"
    */
   private combineDateTime(date: Date | string, timeString: string): Date {
+    // Validate date
     const dateObj = typeof date === 'string' ? new Date(date) : date;
+    if (isNaN(dateObj.getTime())) {
+      throw new BadRequestException('Ngày đặt sân không hợp lệ');
+    }
+
+    // Validate timeString
+    if (!timeString || typeof timeString !== 'string') {
+      throw new BadRequestException('Vui lòng nhập giờ bắt đầu và kết thúc');
+    }
+
+    // Validate time format (HH:mm)
+    if (!/^\d{2}:\d{2}$/.test(timeString)) {
+      throw new BadRequestException('Định dạng giờ không hợp lệ. Vui lòng nhập theo định dạng HH:mm');
+    }
+
     const [hours, minutes] = timeString.split(':').map(Number);
 
-    const combined = new Date(dateObj);
-    combined.setHours(hours, minutes, 0, 0);
+    // Validate hours and minutes
+    if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+      throw new BadRequestException('Giờ không hợp lệ');
+    }
 
-    return combined;
+    // Convert to Vietnam Time (+07:00)
+    // We explicitly construct the date with +07:00 timezone offset because:
+    // 1. The booking times (HH:mm) are likely in Vietnam time
+    // 2. The server might be running in UTC or another timezone
+    // 3. We need a consistent absolute timestamp for QR validity checks
+    const dateStr = dateObj.toISOString().split('T')[0];
+    const timeStr = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
+
+    // Construct ISO string with Vietnam timezone (+07:00)
+    // This ensures that "22:00" is interpreted as "22:00 GMT+7" (15:00 UTC)
+    // regardless of the server's local timezone
+    return new Date(`${dateStr}T${timeStr}+07:00`);
   }
 }

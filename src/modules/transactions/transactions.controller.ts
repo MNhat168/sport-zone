@@ -1211,7 +1211,8 @@ export class TransactionsController {
                 }
 
                 // ✅ ENHANCED IDEMPOTENCY CHECK: Only update if status has actually changed
-                if (shouldEmitFailedEvent) {
+                // Emit payment.failed event for both FAILED and CANCELLED status
+                if (shouldEmitFailedEvent || newStatus === TransactionStatus.CANCELLED) {
                     // ✅ OPTIMIZED: Use centralized helper method to extract bookingId
                     const bookingIdStr = await this.transactionsService.extractBookingIdFromTransaction(updated);
 
@@ -1493,7 +1494,8 @@ export class TransactionsController {
                     (updated.metadata?.tournamentId ? String(updated.metadata.tournamentId) : undefined);
 
                 // Emit payment events based on status
-                if (newStatus === TransactionStatus.FAILED) {
+                // Emit payment.failed event for both FAILED and CANCELLED status
+                if (newStatus === TransactionStatus.FAILED || newStatus === TransactionStatus.CANCELLED) {
 
 
                     const reason = payosTransaction.status === 'CANCELLED'

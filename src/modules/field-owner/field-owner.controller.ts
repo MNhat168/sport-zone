@@ -70,6 +70,14 @@ import {
   EkycSessionResponseDto,
   EkycStatusResponseDto,
 } from '../ekyc/dto';
+import { OwnerOnlyGuard } from '../../common/guards/owner-only.guard';
+import { StaffAccountService } from './services/staff-account.service';
+import {
+  CreateStaffAccountDto,
+  UpdateStaffAccountDto,
+  StaffAccountResponseDto,
+  ListStaffAccountsQueryDto,
+} from './dtos/staff-account.dto';
 
 @ApiTags('Field Owner')
 @Controller('field-owner')
@@ -81,6 +89,7 @@ export class FieldOwnerController {
     private readonly fieldsService: FieldsService,
     private readonly awsS3Service: AwsS3Service,
     private readonly ekycService: EkycService,
+    private readonly staffAccountService: StaffAccountService,
   ) { }
 
   private async getOwnerProfileId(userId: string): Promise<string> {
@@ -278,9 +287,9 @@ export class FieldOwnerController {
   }
 
   @Post('fields/:id/schedule-price-update')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), OwnerOnlyGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Schedule price update' })
+  @ApiOperation({ summary: 'Schedule price update (owner only)' })
   async schedulePriceUpdate(
     @Request() req,
     @Param('id') fieldId: string,
@@ -305,9 +314,9 @@ export class FieldOwnerController {
   }
 
   @Delete('fields/:id/scheduled-price-update')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), OwnerOnlyGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Cancel scheduled price update' })
+  @ApiOperation({ summary: 'Cancel scheduled price update (owner only)' })
   async cancelScheduledPriceUpdate(
     @Request() req,
     @Param('id') fieldId: string,
@@ -666,6 +675,92 @@ export class FieldOwnerController {
     }
     return this.fieldOwnerService.setDefaultBankAccount(accountId, profile.id);
   }
+
+  // SECTION: Staff Account Management
+  // ---------------------------------
+
+  @Post('staff')
+  @UseGuards(AuthGuard('jwt'), OwnerOnlyGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Create staff account',
+    description: 'Field owners can create staff accounts for employees to handle check-ins. Staff accounts do not require eKYC.'
+  })
+  @ApiResponse({ status: 201, description: 'Staff account created successfully', type: StaffAccountResponseDto })
+  @ApiResponse({ status: 409, description: 'Email already exists' })
+  async createStaffAccount(
+    @Request() req: any,
+    @Body() dto: CreateStaffAccountDto,
+  ): Promise<StaffAccountResponseDto> {
+    const userId = req.user.userId;
+    const ownerProfile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(userId);
+    if (!ownerProfile) {
+      throw new BadRequestException('Field owner profile not found');
+    }
+    return this.staffAccountService.createStaffAccount(ownerProfile.id, dto);
+  }
+
+  @Get('staff')
+  @UseGuards(AuthGuard('jwt'), OwnerOnlyGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List all staff accounts for the owner' })
+  @ApiResponse({ status: 200, description: 'List of staff accounts retrieved successfully' })
+  async listStaffAccounts(
+    @Request() req: any,
+    @Query() query: ListStaffAccountsQueryDto,
+  ): Promise<{ staff: StaffAccountResponseDto[]; total: number; page: number; limit: number }> {
+    const userId = req.user.userId;
+    const ownerProfile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(userId);
+    if (!ownerProfile) {
+      throw new BadRequestException('Field owner profile not found');
+    }
+    return this.staffAccountService.listStaffAccounts(ownerProfile.id, query);
+  }
+
+  @Patch('staff/:id')
+  @UseGuards(AuthGuard('jwt'), OwnerOnlyGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update staff account details' })
+  @ApiParam({ name: 'id', description: 'Staff account ID' })
+  @ApiResponse({ status: 200, description: 'Staff account updated successfully', type: StaffAccountResponseDto })
+  @ApiResponse({ status: 404, description: 'Staff account not found or does not belong to this owner' })
+  async updateStaffAccount(
+    @Request() req: any,
+    @Param('id') staffId: string,
+    @Body() dto: UpdateStaffAccountDto,
+  ): Promise<StaffAccountResponseDto> {
+    const userId = req.user.userId;
+    const ownerProfile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(userId);
+    if (!ownerProfile) {
+      throw new BadRequestException('Field owner profile not found');
+    }
+    return this.staffAccountService.updateStaffAccount(staffId, ownerProfile.id, dto);
+  }
+
+  @Delete('staff/:id')
+  @UseGuards(AuthGuard('jwt'), OwnerOnlyGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Remove staff account (soft delete)',
+    description: 'Deactivates the staff account and removes them from the owner\'s staff list'
+  })
+  @ApiParam({ name: 'id', description: 'Staff account ID' })
+  @ApiResponse({ status: 200, description: 'Staff account removed successfully' })
+  @ApiResponse({ status: 404, description: 'Staff account not found or does not belong to this owner' })
+  async removeStaffAccount(
+    @Request() req: any,
+    @Param('id') staffId: string,
+  ): Promise<{ success: boolean; message: string }> {
+    const userId = req.user.userId;
+    const ownerProfile = await this.fieldOwnerService.getFieldOwnerProfileByUserId(userId);
+    if (!ownerProfile) {
+      throw new BadRequestException('Field owner profile not found');
+    }
+    return this.staffAccountService.removeStaffAccount(staffId, ownerProfile.id);
+  }
+
+  // SECTION: Public Endpoints
+  // --------------------------
 
   @Get('profile/:id')
   @ApiOperation({ summary: 'Get field owner profile by ID (public)' })

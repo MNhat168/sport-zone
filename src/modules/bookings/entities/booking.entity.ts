@@ -141,6 +141,19 @@ export class Booking extends BaseEntity {
   recurringGroupId?: Types.ObjectId;
 
   /**
+   * Recurring Type - Distinguishes between different types of recurring bookings
+   * - null/undefined: Single bookings (one-time)
+   * - 'CONSECUTIVE': Consecutive days bookings (batch bookings)
+   * - 'WEEKLY': Weekly recurring bookings (fixed weekly schedule)
+   */
+  @Prop({ 
+    type: String, 
+    enum: ['CONSECUTIVE', 'WEEKLY'],
+    required: false 
+  })
+  recurringType?: 'CONSECUTIVE' | 'WEEKLY';
+
+  /**
    * Check-in tracking fields for QR check-in system
    */
   @Prop({ type: Date })
