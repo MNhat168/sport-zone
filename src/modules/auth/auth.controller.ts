@@ -469,6 +469,37 @@ export class AuthController {
     });
   }
 
+  /**
+   * Google OAuth fallback endpoint - returns tokens in response body instead of cookies
+   * Used when Bearer token authentication is preferred
+   */
+  @Post('google-fallback')
+  @ApiOperation({ summary: 'Đăng nhập bằng Google OAuth (Bearer token mode)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Đăng nhập thành công, tokens trả về trong response body',
+    schema: {
+      properties: {
+        user: { type: 'object' },
+        accessToken: { type: 'string' },
+        refreshToken: { type: 'string' },
+        expiresIn: { type: 'number' },
+      },
+    },
+  })
+  async authWithGoogleFallback(
+    @Body() sign_in_token: SignInTokenDto & { rememberMe: boolean },
+  ) {
+    const result = await this.authService.authenticateWithGoogle(sign_in_token);
+
+    return {
+      user: result.user,
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      expiresIn: 1800, // 30 minutes
+    };
+  }
+
   // Làm mới access token bằng refresh token
   @Post('refresh')
   @ApiOperation({ summary: 'Làm mới access token' })
@@ -480,30 +511,43 @@ export class AuthController {
     const newAccessToken = this.authService.generateAccessToken({ userId, email, role });
     const newRefreshToken = this.authService.generateRefreshToken({ userId, email, role });
 
-    // Nếu refresh_token tồn tại, nghĩa là user đã đăng nhập (rememberMe hoặc session)
-    // → Giữ nguyên pattern của cookie (persistent hoặc session)
-    const hasRefreshToken =
-      !!req.cookies['refresh_token'] || !!req.cookies['refresh_token_admin'];
+    // Detect auth method: bearer token or cookie
+    const authMethod = req.authMethod || 'cookie';
 
-    // Xác định loại client:
-    // - Ưu tiên header X-Client-Type
-    // - Nếu không có, fallback theo cookie đang tồn tại
-    const headerClient = (req.headers['x-client-type'] as string) || '';
-    let clientType: 'admin' | 'web';
-    if (headerClient === 'admin') {
-      clientType = 'admin';
-    } else if (req.cookies['refresh_token_admin']) {
-      clientType = 'admin';
+    if (authMethod === 'bearer') {
+      // Bearer token flow: return tokens in response body
+      return res.status(HttpStatus.OK).json({
+        message: 'Token refreshed successfully',
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+      });
     } else {
-      clientType = 'web';
+      // Cookie flow: set cookies (backward compatibility)
+      // Nếu refresh_token tồn tại, nghĩa là user đã đăng nhập (rememberMe hoặc session)
+      // → Giữ nguyên pattern của cookie (persistent hoặc session)
+      const hasRefreshToken =
+        !!req.cookies['refresh_token'] || !!req.cookies['refresh_token_admin'];
+
+      // Xác định loại client:
+      // - Ưu tiên header X-Client-Type
+      // - Nếu không có, fallback theo cookie đang tồn tại
+      const headerClient = (req.headers['x-client-type'] as string) || '';
+      let clientType: 'admin' | 'web';
+      if (headerClient === 'admin') {
+        clientType = 'admin';
+      } else if (req.cookies['refresh_token_admin']) {
+        clientType = 'admin';
+      } else {
+        clientType = 'web';
+      }
+
+      // Set lại cookies với cùng pattern & đúng loại client
+      this.setAuthCookies(res, newAccessToken, newRefreshToken, hasRefreshToken, clientType, req);
+
+      return res.status(HttpStatus.OK).json({
+        message: 'Token refreshed successfully'
+      });
     }
-
-    // Set lại cookies với cùng pattern & đúng loại client
-    this.setAuthCookies(res, newAccessToken, newRefreshToken, hasRefreshToken, clientType, req);
-
-    return res.status(HttpStatus.OK).json({
-      message: 'Token refreshed successfully'
-    });
   }
 
   // Kiểm tra session hiện tại có hợp lệ không

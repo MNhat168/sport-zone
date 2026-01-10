@@ -49,6 +49,7 @@ import { CheckInRateLimitGuard } from '../qr-checkin/guards/check-in-rate-limit.
 import { RolesGuard } from '@common/guards/roles.guard';
 import { Roles } from '../../decorators/roles.decorator';
 import { UserRole } from '@common/enums/user.enum';
+import { FieldAccessGuard } from '@common/guards/field-access.guard';
 
 /**
  * Bookings Controller with Pure Lazy Creation pattern
@@ -1138,8 +1139,36 @@ export class BookingsController {
     name: 'type',
     description: 'Filter theo loại booking',
     required: false,
-    enum: ['field', 'coach'],
+    enum: ['field', 'coach', 'field_coach'],
     example: 'field'
+  })
+  @ApiQuery({
+    name: 'recurringFilter',
+    description: 'Filter theo recurring status: none (single), only (recurring), all (all)',
+    required: false,
+    enum: ['none', 'only', 'all'],
+    example: 'none'
+  })
+  @ApiQuery({
+    name: 'startDate',
+    description: 'Filter theo ngày bắt đầu (YYYY-MM-DD)',
+    required: false,
+    type: String,
+    example: '2025-01-01'
+  })
+  @ApiQuery({
+    name: 'endDate',
+    description: 'Filter theo ngày kết thúc (YYYY-MM-DD)',
+    required: false,
+    type: String,
+    example: '2025-12-31'
+  })
+  @ApiQuery({
+    name: 'search',
+    description: 'Search query (tìm kiếm theo field name, note, booking ID)',
+    required: false,
+    type: String,
+    example: 'Sân bóng'
   })
   @ApiQuery({
     name: 'limit',
@@ -1172,6 +1201,10 @@ export class BookingsController {
       approvalStatus: query.approvalStatus,
       coachStatus: query.coachStatus,
       type: query.type,
+      recurringFilter: query.recurringFilter,
+      startDate: query.startDate,
+      endDate: query.endDate,
+      search: query.search,
       limit: query.limit || 10,
       page: query.page || 1
     });
@@ -1625,9 +1658,8 @@ export class BookingsController {
    * ✅ SECURITY: Rate limited to prevent QR generation spam
    */
   @Get('bookings/:id/check-in-qr')
-  @UseGuards(AuthGuard('jwt'), CheckInRateLimitGuard)
+  @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
-  @RateLimit({ ttl: 60, limit: 5 }) // 5 QR generations per minute
   @ApiOperation({
     summary: 'Generate QR code for check-in',
     description: 'Generate a signed JWT token for QR check-in. Only available within configured time window before match start (default: 15 minutes).'
@@ -1666,23 +1698,28 @@ export class BookingsController {
     @Param('id') bookingId: string,
     @Request() req: any,
   ) {
+    // Debug logging
+    console.debug(`[QR Generation] Request user: ${JSON.stringify(req.user)}`);
+    console.debug(`[QR Generation] Booking ID: ${bookingId}`);
+
     const userId = this.getUserId(req);
+    console.debug(`[QR Generation] Extracted userId: ${userId}`);
+
     return await this.bookingsService.generateCheckInQR(bookingId, userId);
   }
 
   /**
    * Confirm check-in by validating QR token
    * Updates booking status and triggers wallet transaction (pending → available)
-   * ✅ SECURITY: Only staff, admin, and field owners can confirm check-ins
+   * ✅ SECURITY: Field owners and their staff can confirm check-ins
    */
   @Post('bookings/:id/check-in')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.FIELD_OWNER)
+  @UseGuards(AuthGuard('jwt'), FieldAccessGuard)
   @ApiBearerAuth()
   @RateLimit({ ttl: 60, limit: 30 }) // 30 check-ins per minute for staff
   @ApiOperation({
     summary: 'Confirm check-in with QR token',
-    description: 'Validate QR token and confirm customer check-in. Triggers wallet transaction to unlock funds. Only staff, admin, and field owners can perform check-ins.'
+    description: 'Validate QR token and confirm customer check-in. Triggers wallet transaction to unlock funds. Field owners and their staff can perform check-ins.'
   })
   @ApiParam({
     name: 'id',

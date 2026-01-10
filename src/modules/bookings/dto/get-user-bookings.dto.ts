@@ -73,6 +73,55 @@ export class GetUserBookingsDto {
   type?: BookingType;
 
   /**
+   * Filter theo recurring status
+   * @example "none" - chỉ single bookings, "only" - chỉ recurring bookings, "all" - tất cả
+   */
+  @ApiPropertyOptional({
+    enum: ['none', 'only', 'all'],
+    description: 'Filter theo recurring status: none (single), only (recurring), all (all)',
+    example: 'none'
+  })
+  @IsOptional()
+  @IsIn(['none', 'only', 'all'])
+  recurringFilter?: 'none' | 'only' | 'all';
+
+  /**
+   * Filter theo ngày bắt đầu (YYYY-MM-DD)
+   * @example "2025-01-01"
+   */
+  @ApiPropertyOptional({
+    type: String,
+    description: 'Filter theo ngày bắt đầu (YYYY-MM-DD)',
+    example: '2025-01-01'
+  })
+  @IsOptional()
+  startDate?: string;
+
+  /**
+   * Filter theo ngày kết thúc (YYYY-MM-DD)
+   * @example "2025-12-31"
+   */
+  @ApiPropertyOptional({
+    type: String,
+    description: 'Filter theo ngày kết thúc (YYYY-MM-DD)',
+    example: '2025-12-31'
+  })
+  @IsOptional()
+  endDate?: string;
+
+  /**
+   * Search query (tìm kiếm theo field name, note, booking ID)
+   * @example "Sân bóng"
+   */
+  @ApiPropertyOptional({
+    type: String,
+    description: 'Search query (tìm kiếm theo field name, note, booking ID)',
+    example: 'Sân bóng'
+  })
+  @IsOptional()
+  search?: string;
+
+  /**
    * Số lượng booking trả về
    * @example 10
    */

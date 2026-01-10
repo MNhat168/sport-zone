@@ -19,6 +19,9 @@ import { EmailModule } from '../email/email.module';
 import { FieldsModule } from '../fields/fields.module';
 import { EkycModule } from '../ekyc/ekyc.module';
 import { CourtsModule } from '../courts/courts.module';
+import { StaffAccountService } from './services/staff-account.service';
+import { OwnerOnlyGuard } from '../../common/guards/owner-only.guard';
+import { FieldAccessGuard } from '../../common/guards/field-access.guard';
 
 @Module({
   imports: [
@@ -43,8 +46,13 @@ import { CourtsModule } from '../courts/courts.module';
     CourtsModule,
   ],
   controllers: [FieldOwnerController],
-  providers: [FieldOwnerService],
+  providers: [
+    FieldOwnerService,
+    StaffAccountService,
+    OwnerOnlyGuard,
+    FieldAccessGuard,
+  ],
   exports: [FieldOwnerService],
 })
-export class FieldOwnerModule {}
+export class FieldOwnerModule { }
 

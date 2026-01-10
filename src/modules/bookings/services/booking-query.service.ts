@@ -25,6 +25,10 @@ export class BookingQueryService {
         approvalStatus?: 'pending' | 'approved' | 'rejected';
         coachStatus?: 'pending' | 'accepted' | 'declined';
         type?: string;
+        recurringFilter?: 'none' | 'only' | 'all';
+        startDate?: string;
+        endDate?: string;
+        search?: string;
         limit: number;
         page: number;
     }): Promise<{ bookings: any[]; pagination: any }> {
@@ -52,14 +56,58 @@ export class BookingQueryService {
                 filter.type = options.type.toLowerCase();
             }
 
+            // Filter by recurring status
+            if (options.recurringFilter) {
+                if (options.recurringFilter === 'none') {
+                    // Only single bookings (no recurringGroupId)
+                    filter.recurringGroupId = { $exists: false };
+                } else if (options.recurringFilter === 'only') {
+                    // Only recurring bookings (has recurringGroupId)
+                    filter.recurringGroupId = { $exists: true };
+                }
+                // 'all' means no filter on recurringGroupId
+            }
+
+            // Filter by date range
+            if (options.startDate || options.endDate) {
+                filter.date = {};
+                if (options.startDate) {
+                    const startDate = new Date(options.startDate + 'T00:00:00.000Z');
+                    filter.date.$gte = startDate;
+                }
+                if (options.endDate) {
+                    const endDate = new Date(options.endDate + 'T23:59:59.999Z');
+                    filter.date.$lte = endDate;
+                }
+            }
+
+            // Search filter (note, booking ID)
+            // Note: Field name search requires aggregation with $lookup, so we'll filter after populate
+            if (options.search && options.search.trim().length > 0) {
+                const searchTerm = options.search.trim();
+                const regex = new RegExp(searchTerm, 'i');
+                const isObjectId = /^[0-9a-fA-F]{24}$/.test(searchTerm);
+                
+                const searchConditions: any[] = [];
+                
+                // Search by booking ID
+                if (isObjectId) {
+                    searchConditions.push({ _id: new Types.ObjectId(searchTerm) });
+                }
+                
+                // Search by note
+                searchConditions.push({ note: regex });
+                
+                if (searchConditions.length > 0) {
+                    filter.$or = searchConditions;
+                }
+            }
+
             // Calculate skip for pagination
             const skip = (options.page - 1) * options.limit;
 
-            // Get total count for pagination
-            const total = await this.bookingModel.countDocuments(filter);
-
             // Get bookings with population
-            const rawBookings = await this.bookingModel
+            let rawBookings = await this.bookingModel
                 .find(filter)
                 .populate({
                     path: 'field',
@@ -81,12 +129,25 @@ export class BookingQueryService {
                 .populate('user', 'fullName email phoneNumber')
                 .populate('transaction', 'amount method status notes createdAt paidAt updatedAt')
                 .sort({ createdAt: -1 }) // Newest first
-                .skip(skip)
-                .limit(options.limit)
                 .exec();
 
+            // Filter by field name if search is provided (after populate)
+            if (options.search && options.search.trim().length > 0) {
+                const searchTerm = options.search.trim().toLowerCase();
+                rawBookings = rawBookings.filter((booking: any) => {
+                    const fieldName = booking.field?.name?.toLowerCase() || '';
+                    return fieldName.includes(searchTerm);
+                });
+            }
+
+            // Get total count after filtering
+            const total = rawBookings.length;
+
+            // Apply pagination after filtering
+            const paginatedBookings = rawBookings.slice(skip, skip + options.limit);
+
             // Convert to JSON
-            const bookings = rawBookings.map(booking => booking.toJSON());
+            const bookings = paginatedBookings.map(booking => booking.toJSON());
 
             const totalPages = Math.ceil(total / options.limit);
 

@@ -35,6 +35,8 @@ import { OwnerBookingService } from './services/owner-booking.service';
 import { BookingQueryService } from './services/booking-query.service';
 import { BookingCancellationService } from './services/booking-cancellation.service';
 import { PaymentProofService } from './services/payment-proof.service';
+import { FieldAccessGuard } from '@common/guards/field-access.guard';
+import { CheckInRateLimitGuard } from '../qr-checkin/guards/check-in-rate-limit.guard';
 
 /**
  * Bookings Module with Pure Lazy Creation pattern
@@ -83,6 +85,8 @@ import { PaymentProofService } from './services/payment-proof.service';
     BookingQueryService,
     BookingCancellationService,
     PaymentProofService,
+    FieldAccessGuard, // Enable staff access to check-in
+    CheckInRateLimitGuard, // Enable rate limiting for QR generation
   ],
   exports: [
     BookingsService,

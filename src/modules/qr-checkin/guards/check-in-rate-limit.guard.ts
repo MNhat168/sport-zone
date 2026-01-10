@@ -7,7 +7,7 @@ export class CheckInRateLimitGuard implements CanActivate {
 
     canActivate(context: ExecutionContext): boolean {
         const request = context.switchToHttp().getRequest();
-        const userId = request.user?.id || request.user?._id;
+        const userId = request.user?.userId || request.user?.id || request.user?._id;
         const bookingId = request.params?.id;
 
         if (!userId || !bookingId) {

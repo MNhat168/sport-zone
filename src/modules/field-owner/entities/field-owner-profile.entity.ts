@@ -28,6 +28,9 @@ export class FieldOwnerProfile extends BaseEntity {
 
   @Prop({ type: String })
   verificationDocument?: string;  // URL to business license or verification doc
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
+  staffAccounts: Types.ObjectId[];  // Staff members who can manage this owner's fields
 }
 
 export const FieldOwnerProfileSchema = SchemaFactory.createForClass(FieldOwnerProfile);

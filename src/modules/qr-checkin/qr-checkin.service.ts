@@ -20,6 +20,7 @@ export interface TimeWindowResult {
 export class QrCheckinService {
   private readonly qrCheckinWindowMinutes: number;
   private readonly qrTokenExpiryMinutes: number;
+  private readonly qrCheckinLateWindowMinutes: number;
 
   constructor(
     private readonly jwtService: JwtService,
@@ -31,6 +32,12 @@ export class QrCheckinService {
     );
     this.qrTokenExpiryMinutes = parseInt(
       this.configService.get('QR_TOKEN_EXPIRY_MINUTES', '10'),
+      10,
+    );
+    // Allow late check-in up to 60 minutes (or booking duration if we knew it)
+    // This allows users to check in even if they arrive late
+    this.qrCheckinLateWindowMinutes = parseInt(
+      this.configService.get('QR_CHECKIN_LATE_WINDOW_MINUTES', '60'),
       10,
     );
   }
@@ -98,40 +105,45 @@ export class QrCheckinService {
    * @returns TimeWindowResult with canGenerate status and related times
    */
   canGenerateQR(startTime: Date): TimeWindowResult {
-    const now = new Date();
-    const startTimeDate = new Date(startTime);
-    
-    // Calculate the window start time (e.g., 15 minutes before start)
-    const windowStartTime = new Date(
-      startTimeDate.getTime() - this.qrCheckinWindowMinutes * 60 * 1000,
+  const now = new Date();
+  const startTimeDate = new Date(startTime);
+
+  // Calculate the window start time (e.g., 15 minutes before start)
+  const windowStartTime = new Date(
+    startTimeDate.getTime() - this.qrCheckinWindowMinutes * 60 * 1000,
+  );
+
+  // Calculate late window end time (e.g., 60 minutes after start)
+  const lateWindowEndTime = new Date(
+    startTimeDate.getTime() + this.qrCheckinLateWindowMinutes * 60 * 1000,
+  );
+
+  // Too early - before the window opens
+  if (now < windowStartTime) {
+    const minutesUntilWindow = Math.ceil(
+      (windowStartTime.getTime() - now.getTime()) / (60 * 1000),
     );
+    return {
+      canGenerate: false,
+      canGenerateAt: windowStartTime,
+      windowEndsAt: lateWindowEndTime,
+      message: `Chưa đến giờ nhận sân. Vui lòng đợi thêm ${minutesUntilWindow} phút.`,
+    };
+  }
 
-    // Too early - before the window opens
-    if (now < windowStartTime) {
-      const minutesUntilWindow = Math.ceil(
-        (windowStartTime.getTime() - now.getTime()) / (60 * 1000),
-      );
-      return {
-        canGenerate: false,
-        canGenerateAt: windowStartTime,
-        windowEndsAt: startTimeDate,
-        message: `Chưa đến giờ nhận sân. Vui lòng đợi thêm ${minutesUntilWindow} phút.`,
-      };
-    }
+  // Too late - after the late window closed
+  if (now > lateWindowEndTime) {
+    return {
+      canGenerate: false,
+      message: 'Đã quá thời gian check-in cho trận đấu này',
+    };
+  }
 
-    // Too late - after the match has started
-    if (now > startTimeDate) {
-      return {
-        canGenerate: false,
-        message: 'Đã quá giờ bắt đầu trận đấu',
-      };
-    }
-
-    // Within the allowed window
+    // Within the allowed window (Start window -> Start Time -> Late window)
     return {
       canGenerate: true,
       canGenerateAt: windowStartTime,
-      windowEndsAt: startTimeDate,
+      windowEndsAt: lateWindowEndTime,
     };
   }
 
@@ -141,10 +153,10 @@ export class QrCheckinService {
    * @returns Object with window start and end times
    */
   getCheckInWindow(startTime: Date): {
-    windowStartsAt: Date;
-    windowEndsAt: Date;
-    windowDurationMinutes: number;
-  } {
+  windowStartsAt: Date;
+  windowEndsAt: Date;
+  windowDurationMinutes: number;
+} {
     const startTimeDate = new Date(startTime);
     const windowStartsAt = new Date(
       startTimeDate.getTime() - this.qrCheckinWindowMinutes * 60 * 1000,
@@ -165,7 +177,7 @@ export class QrCheckinService {
   getTimeUntilWindow(startTime: Date): number {
     const now = new Date();
     const windowInfo = this.getCheckInWindow(startTime);
-    
+
     if (now >= windowInfo.windowStartsAt) {
       return 0;
     }
