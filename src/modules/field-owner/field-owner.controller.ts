@@ -33,7 +33,7 @@ import { FilesInterceptor, FileInterceptor, FileFieldsInterceptor } from '@nestj
 import { FieldOwnerService } from './field-owner.service';
 import { FieldsService } from '../fields/fields.service';
 import { AwsS3Service } from '../../service/aws-s3.service';
-import { SubscriptionStatusGuard } from '../../common/guards/subscription-status.guard';
+
 import {
   CreateFieldDto,
   FieldsDto,
@@ -51,6 +51,7 @@ import {
   CreateFieldOwnerRegistrationDto,
   FieldOwnerRegistrationResponseDto,
   RejectFieldOwnerRegistrationDto,
+  RequestAdditionalInfoRegistrationDto,
 } from './dtos/field-owner-registration.dto';
 import {
   BankAccountResponseDto,
@@ -170,7 +171,7 @@ export class FieldOwnerController {
 
   @Post('fields')
   @UseInterceptors(FilesInterceptor('images', 10))
-  @UseGuards(AuthGuard('jwt'), SubscriptionStatusGuard)
+  @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiConsumes('application/json', 'multipart/form-data')
   @ApiOperation({ summary: 'Create new field (owner)' })
@@ -186,7 +187,7 @@ export class FieldOwnerController {
 
   @Post('fields/with-images')
   @UseInterceptors(FilesInterceptor('images', 10))
-  @UseGuards(AuthGuard('jwt'), SubscriptionStatusGuard)
+  @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Create new field with images (multipart/form-data)' })
@@ -238,7 +239,7 @@ export class FieldOwnerController {
     { name: 'avatar', maxCount: 1 },
     { name: 'gallery', maxCount: 10 }
   ]))
-  @UseGuards(AuthGuard('jwt'), SubscriptionStatusGuard)
+  @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiConsumes('application/json', 'multipart/form-data')
   @ApiOperation({ summary: 'Update field info' })
@@ -258,7 +259,7 @@ export class FieldOwnerController {
     { name: 'avatar', maxCount: 1 },
     { name: 'gallery', maxCount: 10 }
   ]))
-  @UseGuards(AuthGuard('jwt'), SubscriptionStatusGuard)
+  @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Update field with images (multipart/form-data)' })
@@ -842,6 +843,19 @@ export class FieldOwnerController {
   ): Promise<FieldOwnerRegistrationResponseDto> {
     const adminId = req.user.userId;
     return this.fieldOwnerService.rejectRegistrationRequest(requestId, adminId, dto);
+  }
+
+  @UseGuards(JwtAccessTokenGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Post('admin/registration-requests/:id/request-info')
+  @ApiOperation({ summary: 'Admin: request additional info for registration request' })
+  async requestAdditionalInfo(
+    @Request() req: any,
+    @Param('id') requestId: string,
+    @Body() dto: RequestAdditionalInfoRegistrationDto,
+  ): Promise<FieldOwnerRegistrationResponseDto> {
+    const adminId = req.user.userId;
+    return this.fieldOwnerService.requestAdditionalInfo(requestId, adminId, dto);
   }
 
   @UseGuards(JwtAccessTokenGuard, RolesGuard)

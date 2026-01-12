@@ -9,7 +9,7 @@ import { TransactionStatus } from '@common/enums/transaction.enum';
 import { Booking, BookingDocument } from '../bookings/entities/booking.entity';
 import { Field, FieldDocument } from '../fields/entities/field.entity';
 import { CoachProfile, CoachProfileDocument } from '../coaches/entities/coach-profile.entity';
-import { Tournament, TournamentDocument } from '../tournaments/entities/tournament.entity';
+
 import { UserRoleStatDto, UserMonthlyStatsDto } from './dto/user.dto';
 import { BookingMonthlyStatsDto } from './dto/booking.dto';
 import { ListTransactionsDto } from './dto/list-transactions.dto';
@@ -24,7 +24,8 @@ import {
     SportsDistributionDto,
     RevenueAnalysisDto,
     PopularityAnalysisDto,
-    UserBehaviorDto
+    UserBehaviorDto,
+    RevenueByTypeDto
 } from './dto/admin-stats.dto';
 import { AiService, DetailedFieldOwnerStats, DetailedCoachStats, PlatformAnalytics } from '../ai/ai.service';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
@@ -40,7 +41,7 @@ export class AdminService {
         @InjectModel('Booking') private bookingModel: Model<BookingDocument>,
         @InjectModel('Field') private fieldModel: Model<FieldDocument>,
         @InjectModel('CoachProfile') private coachProfileModel: Model<CoachProfileDocument>,
-        @InjectModel('Tournament') private tournamentModel: Model<any>,
+
         @InjectModel('Notification') private readonly notificationModel: Model<NotificationDocument>,
         private aiService: AiService,
     ) { }
@@ -589,7 +590,6 @@ export class AdminService {
             bookingStats,
             userStats,
             sportsFieldBookings,
-            sportsTournamentParticipation,
             topFieldsByFavorites,
             topCoachesByFavorites,
             bookingPatterns,
@@ -601,7 +601,6 @@ export class AdminService {
             this.getBookingStatistics(dateFilter, sportType),
             this.getUserStatistics(dateFilter),
             this.getSportsFieldBookings(dateFilter, sportType),
-            this.getSportsTournamentParticipation(dateFilter, sportType),
             this.getTopFieldsByFavorites(dateFilter, sportType),
             this.getTopCoachesByFavorites(dateFilter, sportType),
             this.getBookingPatterns(dateFilter),
@@ -617,7 +616,6 @@ export class AdminService {
                 bookingStats,
                 userStats,
                 sportsFieldBookings,
-                sportsTournamentParticipation,
                 topFieldsByFavorites,
                 topCoachesByFavorites,
                 bookingPatterns,
@@ -629,14 +627,14 @@ export class AdminService {
             revenueData: monthlyRevenueData || [],
             revenueBySport: revenueBySportData || [],
             revenueByType: revenueByTypeData || [],
-            bookingStats: bookingStats[0] || {},
-            userStats: userStats[0] || {},
+            bookingStats: bookingStats[0] || { total: 0, fieldBookings: 0, coachBookings: 0 },
+            userStats: userStats[0] || { total: 0, activeUsers: 0 },
             sportsFieldBookings: sportsFieldBookings || [],
-            sportsTournamentParticipation: sportsTournamentParticipation || [],
             topFieldsByFavorites: topFieldsByFavorites || [],
             topCoachesByFavorites: topCoachesByFavorites || [],
-            bookingPatterns: bookingPatterns || {},
-            retentionMetrics: retentionMetrics || {}
+            bookingPatterns: bookingPatterns,
+            retentionMetrics: retentionMetrics
+
         };
 
         const aiResult = await this.aiService.generatePlatformAnalytics(analyticsData);
@@ -648,11 +646,10 @@ export class AdminService {
     private getRawPlatformAnalyticsWithRealData(
         monthlyRevenueData: any[],
         revenueBySportData: any[],
-        revenueByTypeData: any[],
+        revenueByTypeData: RevenueByTypeDto[],
         bookingStats: any[],
         userStats: any[],
         sportsFieldBookings: any[],
-        sportsTournamentParticipation: any[],
         topFieldsByFavorites: any[],
         topCoachesByFavorites: any[],
         bookingPatterns: any,
@@ -664,8 +661,7 @@ export class AdminService {
         const activeUsers = userStats[0]?.activeUsers || 0;
 
         const sportsPopularity = this.calculateSportsPopularityFromData(
-            sportsFieldBookings,
-            sportsTournamentParticipation
+            sportsFieldBookings
         );
         // Calculate growth rate for monthly revenue
         const monthlyRevenueWithGrowth = monthlyRevenueData.map((month, index, array) => {
@@ -694,11 +690,7 @@ export class AdminService {
                     revenue: sport.revenue || 0,
                     percentage: totalRevenue > 0 ? (sport.revenue / totalRevenue) * 100 : 0
                 })),
-                revenueByType: revenueByTypeData.map(type => ({
-                    type: this.validateRevenueTypeDto(type.type || type._id),
-                    revenue: type.revenue || 0,
-                    percentage: totalRevenue > 0 ? (type.revenue / totalRevenue) * 100 : 0
-                })),
+                revenueByType: revenueByTypeData,
                 peakRevenuePeriods: ['Weekends', 'Evenings']
             },
             popularityAnalysis: {
@@ -732,30 +724,19 @@ export class AdminService {
     }
 
     private calculateSportsPopularityFromData(
-        sportsFieldBookings: any[],
-        sportsTournamentParticipation: any[]
-    ): Array<{ sport: string; bookings: number; tournaments: number; favorites: number; score: number }> {
+        sportsFieldBookings: any[]
+    ): Array<{ sport: string; bookings: number; favorites: number; score: number }> {
         const sportMap = new Map<string, {
             sport: string;
             bookings: number;
-            tournaments: number;
             favorites: number;
         }>();
 
         // Aggregate field bookings
         sportsFieldBookings?.forEach(item => {
             if (item._id) {
-                const existing = sportMap.get(item._id) || { sport: item._id, bookings: 0, tournaments: 0, favorites: 0 };
+                const existing = sportMap.get(item._id) || { sport: item._id, bookings: 0, favorites: 0 };
                 existing.bookings += item.count || 0;
-                sportMap.set(item._id, existing);
-            }
-        });
-
-        // Aggregate tournament participation
-        sportsTournamentParticipation?.forEach(item => {
-            if (item._id) {
-                const existing = sportMap.get(item._id) || { sport: item._id, bookings: 0, tournaments: 0, favorites: 0 };
-                existing.tournaments += item.count || 0;
                 sportMap.set(item._id, existing);
             }
         });
@@ -764,17 +745,16 @@ export class AdminService {
         return Array.from(sportMap.values())
             .map(sport => ({
                 ...sport,
-                score: this.calculatePopularityScore(sport.bookings, sport.tournaments, sport.favorites)
+                score: this.calculatePopularityScore(sport.bookings, sport.favorites)
             }))
             .sort((a, b) => b.score - a.score);
     }
 
     // Add this method to calculate score (same as ai.service.ts)
-    private calculatePopularityScore(bookings: number, tournaments: number, favorites: number): number {
+    private calculatePopularityScore(bookings: number, favorites: number): number {
         const bookingScore = Math.min(bookings * 0.5, 40); // Max 40 points
-        const tournamentScore = Math.min(tournaments * 2, 30); // Max 30 points
         const favoriteScore = Math.min(favorites * 0.1, 30); // Max 30 points
-        return Math.min(100, bookingScore + tournamentScore + favoriteScore);
+        return Math.min(100, bookingScore + favoriteScore);
     }
 
     private calculateGrowthRate(monthlyRevenue: any[]): number {
@@ -1813,20 +1793,7 @@ export class AdminService {
         ]);
     }
 
-    private async getSportsTournamentParticipation(dateFilter: any, sportType?: string): Promise<any[]> {
-        return this.tournamentModel.aggregate([
-            {
-                $match: sportType ? { sportType } : {}
-            },
-            {
-                $group: {
-                    _id: "$sportType",
-                    count: { $sum: { $size: "$participants" } }
-                }
-            },
-            { $sort: { count: -1 } }
-        ]);
-    }
+
 
     private async getTopFieldsByFavorites(dateFilter: any, sportType?: string, limit?: number): Promise<any[]> {
         const pipeline: any[] = [
@@ -2441,33 +2408,7 @@ export class AdminService {
         ]);
     }
 
-    private async getRevenueByType(dateFilter: any): Promise<any[]> {
-        // ACTUAL QUERY from Bookings
-        return this.bookingModel.aggregate([
-            {
-                $match: {
-                    status: { $in: ['confirmed', 'completed'] },
-                    paymentStatus: { $in: ['paid', 'succeeded', 'confirmed'] },
-                    ...dateFilter
-                }
-            },
-            {
-                $group: {
-                    _id: '$type',
-                    revenue: { $sum: '$totalPrice' },
-                    count: { $sum: 1 }
-                }
-            },
-            {
-                $project: {
-                    _id: 0,
-                    type: '$_id',
-                    revenue: 1,
-                    count: 1
-                }
-            }
-        ]);
-    }
+
 
     private async getPeakRevenuePeriods(dateFilter: any): Promise<string[]> {
         return ['Weekends', 'Evenings'];
@@ -2792,5 +2733,49 @@ export class AdminService {
         }));
 
         return this.notificationModel.insertMany(notifications);
+    }
+
+    private async getRevenueByType(dateFilter: any): Promise<RevenueByTypeDto[]> {
+        const result = await this.bookingModel.aggregate([
+            {
+                $match: {
+                    status: { $in: [BookingStatus.CONFIRMED, BookingStatus.COMPLETED] },
+                    ...dateFilter
+                }
+            },
+            {
+                $lookup: {
+                    from: "transactions",
+                    localField: "transaction",
+                    foreignField: "_id",
+                    as: "transactionData"
+                }
+            },
+            { $unwind: { path: "$transactionData", preserveNullAndEmptyArrays: true } },
+            {
+                $group: {
+                    _id: "$type",
+                    revenue: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ["$transactionData.status", "succeeded"] },
+                                "$transactionData.amount",
+                                0
+                            ]
+                        }
+                    }
+                }
+            }
+        ]);
+
+        const totalRevenue = result.reduce((acc, curr) => acc + curr.revenue, 0);
+
+        return result
+            .filter(item => item._id === BookingType.FIELD || item._id === BookingType.COACH)
+            .map(item => ({
+                type: item._id === BookingType.COACH ? 'coach' : 'field',
+                revenue: item.revenue,
+                percentage: totalRevenue > 0 ? (item.revenue / totalRevenue) * 100 : 0
+            }));
     }
 }

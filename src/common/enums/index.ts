@@ -29,8 +29,8 @@ export * from './report-category.enum';
 
 // Sports & Tournaments
 export * from './sport-type.enum';
-export * from './tournament.enum';
-export * from './tournament-field-reservation.enum';
+
+
 
 // AI & Recommendations
 export * from './recommendation.enum';
