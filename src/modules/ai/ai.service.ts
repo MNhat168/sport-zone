@@ -47,11 +47,11 @@ export interface PlatformAnalytics {
     revenueAnalysis: {
         monthlyRevenue: { month: string; revenue: number; growth: number }[];
         revenueBySport: { sport: string; revenue: number; percentage: number }[];
-        revenueByType: { type: 'field' | 'coach' | 'tournament'; revenue: number; percentage: number }[];
+        revenueByType: { type: 'field' | 'coach'; revenue: number; percentage: number }[];
         peakRevenuePeriods: string[];
     };
     popularityAnalysis: {
-        sportsPopularity: { sport: string; bookings: number; tournaments: number; favorites: number; score: number }[];
+        sportsPopularity: { sport: string; bookings: number; favorites: number; score: number }[];
         fieldPopularity: { fieldId: string; name: string; bookings: number; favorites: number; rating: number }[];
         coachPopularity: { coachId: string; name: string; bookings: number; favorites: number; rating: number }[];
         trendingSports: string[];
@@ -86,7 +86,6 @@ export interface PlatformAnalyticsData {
         activeUsers: number;
     };
     sportsFieldBookings: { _id: string; count: number }[];
-    sportsTournamentParticipation: { _id: string; count: number }[];
     topFieldsByFavorites: {
         fieldId: string;
         name: string;
@@ -288,7 +287,7 @@ export class AiService {
                 messages: [
                     {
                         role: "system",
-                        content: "You are a senior sports analytics expert. Provide data-driven insights with actionable recommendations. For revenue types, use ONLY 'field', 'coach', or 'tournament' exactly as written. Always base your analysis on the provided data, not assumptions."
+                        content: "You are a senior sports analytics expert. Provide data-driven insights with actionable recommendations. For revenue types, use ONLY 'field' or 'coach' exactly as written. Always base your analysis on the provided data, not assumptions."
                     },
                     {
                         role: "user",
@@ -359,8 +358,7 @@ export class AiService {
         ## SPORTS FIELD BOOKINGS (Real counts)
         ${JSON.stringify(data.sportsFieldBookings || [], null, 2)}
         
-        ## SPORTS TOURNAMENT PARTICIPATION
-        ${JSON.stringify(data.sportsTournamentParticipation || [], null, 2)}
+
         
         ## TOP FIELDS BY FAVORITES
         ${JSON.stringify(data.topFieldsByFavorites?.slice(0, 10) || [], null, 2)}
@@ -391,7 +389,7 @@ export class AiService {
             "revenueAnalysis": {
                 "monthlyRevenue": [Calculate from revenueData array with growth percentages],
                 "revenueBySport": [Use revenueBySport array with calculated percentages],
-                "revenueByType": [Use revenueByTypeWithPercentages array - type must be exactly "field", "coach", or "tournament"],
+                "revenueByType": [Use revenueByTypeWithPercentages array - type must be exactly "field" or "coach"],
                 "peakRevenuePeriods": [Infer from bookingPatterns and revenue trends]
             },
             "popularityAnalysis": {
@@ -409,7 +407,7 @@ export class AiService {
         
         IMPORTANT: 
         1. Use EXACT numbers provided above - do not invent data
-        2. For "type" field in "revenueByType": MUST be exactly "field", "coach", or "tournament"
+        2. For "type" field in "revenueByType": MUST be exactly "field" or "coach"
         3. For sportsPopularity: Use the calculated scores from ${JSON.stringify(sportsPopularity.slice(0, 5))}
         4. Recommendations should be specific to this platform's actual performance metrics
     `;
@@ -418,7 +416,7 @@ export class AiService {
     private calculateSportsPopularityFromData(data: PlatformAnalyticsData): Array<{
         sport: string;
         bookings: number;
-        tournaments: number;
+
         favorites: number;
         score: number;
     }> {
@@ -426,42 +424,34 @@ export class AiService {
         const sportMap = new Map<string, {
             sport: string;
             bookings: number;
-            tournaments: number;
+
             favorites: number;
         }>();
 
         // Aggregate field bookings
         data.sportsFieldBookings?.forEach(item => {
             if (item._id) {
-                const existing = sportMap.get(item._id) || { sport: item._id, bookings: 0, tournaments: 0, favorites: 0 };
+                const existing = sportMap.get(item._id) || { sport: item._id, bookings: 0, favorites: 0 };
                 existing.bookings += item.count || 0;
                 sportMap.set(item._id, existing);
             }
         });
 
-        // Aggregate tournament participation
-        data.sportsTournamentParticipation?.forEach(item => {
-            if (item._id) {
-                const existing = sportMap.get(item._id) || { sport: item._id, bookings: 0, tournaments: 0, favorites: 0 };
-                existing.tournaments += item.count || 0;
-                sportMap.set(item._id, existing);
-            }
-        });
+
 
         // Calculate scores and return sorted array
         return Array.from(sportMap.values())
             .map(sport => ({
                 ...sport,
-                score: this.calculatePopularityScore(sport.bookings, sport.tournaments, sport.favorites)
+                score: this.calculatePopularityScore(sport.bookings, sport.favorites)
             }))
             .sort((a, b) => b.score - a.score);
     }
 
-    private calculatePopularityScore(bookings: number, tournaments: number, favorites: number): number {
+    private calculatePopularityScore(bookings: number, favorites: number): number {
         const bookingScore = Math.min(bookings * 0.5, 40); // Max 40 points
-        const tournamentScore = Math.min(tournaments * 2, 30); // Max 30 points
         const favoriteScore = Math.min(favorites * 0.1, 30); // Max 30 points
-        return Math.min(100, bookingScore + tournamentScore + favoriteScore);
+        return Math.min(100, bookingScore + favoriteScore);
     }
 
     private calculateAverageRatingFromData(data: PlatformAnalyticsData): number {
@@ -764,15 +754,14 @@ export class AiService {
         })) || [];
 
         // Calculate revenue by type with fixed types
-        const revenueByType: { type: 'field' | 'coach' | 'tournament'; revenue: number; percentage: number }[] =
+        const revenueByType: { type: 'field' | 'coach'; revenue: number; percentage: number }[] =
             data.revenueByType?.map(item => ({
                 type: this.validateRevenueType(item.type),
                 revenue: item.revenue || 0,
                 percentage: totalRevenue > 0 ? (item.revenue / totalRevenue) * 100 : 0
             })) || [
-                { type: 'field', revenue: totalRevenue * 0.65, percentage: 65 },
-                { type: 'coach', revenue: totalRevenue * 0.23, percentage: 23 },
-                { type: 'tournament', revenue: totalRevenue * 0.12, percentage: 12 }
+                { type: 'field', revenue: totalRevenue * 0.70, percentage: 70 },
+                { type: 'coach', revenue: totalRevenue * 0.30, percentage: 30 }
             ];
 
         // Calculate sports popularity from actual data
@@ -1131,11 +1120,11 @@ export class AiService {
         return validated;
     }
 
-    private validateRevenueType(type: any): 'field' | 'coach' | 'tournament' {
+    private validateRevenueType(type: any): 'field' | 'coach' {
         if (typeof type === 'string') {
             const lowerType = type.toLowerCase();
-            if (lowerType === 'field' || lowerType === 'coach' || lowerType === 'tournament') {
-                return lowerType as 'field' | 'coach' | 'tournament';
+            if (lowerType === 'field' || lowerType === 'coach') {
+                return lowerType as 'field' | 'coach';
             }
         }
         return 'field'; // Default value

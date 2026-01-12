@@ -11,19 +11,19 @@ import { execSync } from 'child_process';
 
 async function bootstrap() {
   const logger = new Logger(bootstrap.name);
-  
+
   // Xử lý unhandled errors và rejections để tránh server crash
   process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
     logger.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
     // Không exit ngay, chỉ log để server tiếp tục chạy
   });
-  
+
   process.on('uncaughtException', (error: Error) => {
     logger.error('❌ Uncaught Exception:', error);
     // Exit process để tránh undefined state, nhưng có thể restart bằng PM2/systemd
     process.exit(1);
   });
-  
+
   const app = await NestFactory.create(AppModule);
 
   // Enable trust proxy để đọc x-forwarded-proto từ reverse proxy (Nginx)
@@ -35,15 +35,17 @@ async function bootstrap() {
   app.enableCors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
-      
+
       const allowedPatterns = [
         /^https:\/\/sport-zone-fe-deploy\.vercel\.app$/,  // Production
         /^https:\/\/.*\.vercel\.app$/,                     // All Vercel deployments
+        /^https:\/\/www\.sportzone\.io\.vn$/,              // Custom Domain (www)
+        /^https:\/\/sportzone\.io\.vn$/,                   // Custom Domain (root)
         /^http:\/\/localhost:\d+$/,                        // All localhost ports
       ];
-      
+
       const isAllowed = allowedPatterns.some(pattern => pattern.test(origin));
-      
+
       if (isAllowed) {
         callback(null, true);
       } else {

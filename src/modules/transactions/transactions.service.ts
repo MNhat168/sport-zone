@@ -61,6 +61,8 @@ export class TransactionsService {
         status: initialStatus,
         type: TransactionType.PAYMENT,
         notes: data.paymentNote || null,
+        // ✅ Linked Booking
+        ...(data.bookingId && Types.ObjectId.isValid(data.bookingId) && { booking: new Types.ObjectId(data.bookingId) }),
         // ✅ CRITICAL: Store externalTransactionId for PayOS lookup
         ...(data.externalTransactionId && { externalTransactionId: data.externalTransactionId }),
         // ✅ Store metadata (bookingId + custom metadata like recurringGroupId)

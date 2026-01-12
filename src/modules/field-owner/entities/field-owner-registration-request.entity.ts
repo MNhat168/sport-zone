@@ -84,6 +84,9 @@ export class FieldOwnerRegistrationRequest extends BaseEntity {
   @Prop({ type: String })
   rejectionReason?: string;
 
+  @Prop({ type: String })
+  adminMessage?: string;
+
   @Prop({ type: Date, default: () => getCurrentVietnamTimeForDB() })
   submittedAt: Date;
 

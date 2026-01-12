@@ -10,6 +10,7 @@ import {
   IsNumber,
   Min,
   Max,
+  IsNotEmpty,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { RegistrationStatus } from '@common/enums/field-owner-registration.enum';
@@ -86,6 +87,13 @@ class FacilityLocationCoordinatesDto {
   lng: number;
 }
 
+export class RequestAdditionalInfoRegistrationDto {
+  @ApiProperty({ description: 'Message from admin requesting additional info' })
+  @IsString()
+  @IsNotEmpty()
+  message: string;
+}
+
 export class CreateFieldOwnerRegistrationDto {
   @ApiProperty({ description: 'Thông tin cá nhân' })
   @ValidateNested()
@@ -98,16 +106,16 @@ export class CreateFieldOwnerRegistrationDto {
   @Type(() => DocumentsDto)
   documents?: DocumentsDto; // Business documents only; identity docs handled via eKYC
 
-  @ApiPropertyOptional({ 
-    example: 'ekyc-session-12345', 
-    description: 'didit eKYC session ID (required if not using deprecated documents)' 
+  @ApiPropertyOptional({
+    example: 'ekyc-session-12345',
+    description: 'didit eKYC session ID (required if not using deprecated documents)'
   })
   @IsOptional()
   @IsString()
   ekycSessionId?: string;
 
-  @ApiPropertyOptional({ 
-    description: 'Personal info extracted from eKYC (auto-filled from eKYC result)' 
+  @ApiPropertyOptional({
+    description: 'Personal info extracted from eKYC (auto-filled from eKYC result)'
   })
   @IsOptional()
   @ValidateNested()

@@ -98,16 +98,7 @@ export class UsersService {
     return this.userModel.findByIdAndDelete(id);
   }
 
-  @Cron(CronExpression.EVERY_WEEK)
-  async resetWeeklyLimits() {
-    // Reset weekly tournament creation count for all users on Monday at 00:00
-    // Note: CronExpression.EVERY_WEEK defaults to 0 0 * * 0 (Sunday).
-    // If we want Monday 00:00 specifically, we could use '0 0 * * 1'
-    // But EVERY_WEEK (Sunday midnight) is usually fine unless Monday is strictly required.
-    // I'll stick to '0 0 * * 1' to be safe for "start of week".
-    await this.userModel.updateMany({}, { weeklyTournamentCreationCount: 0 });
-    console.log('Weekly tournament creation limits have been reset.');
-  }
+
 
   async findByEmail(email: string) {
     return this.userModel.findOne({ email });

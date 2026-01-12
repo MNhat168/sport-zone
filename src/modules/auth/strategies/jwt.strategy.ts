@@ -8,7 +8,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(private configService: ConfigService) {
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
-        // Từ cookie
+        // Từ Authorization header (Ưu tiên cao nhất cho Admin FE/Mobile)
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        // Từ cookie (Fallback cho Web Client)
         (req) => {
           if (!req?.cookies) {
             return null;
@@ -26,8 +28,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
           return token || null;
         },
-        // Từ Authorization header (fallback cho Postman)
-        ExtractJwt.fromAuthHeaderAsBearerToken(),
       ]),
       secretOrKey: configService.get<string>('JWT_SECRET'),
       ignoreExpiration: false,

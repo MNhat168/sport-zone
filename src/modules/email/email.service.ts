@@ -530,6 +530,33 @@ export class EmailService {
 		});
 	}
 
+	/**
+	 * Send email when admin requests additional info for field owner registration
+	 */
+	async sendFieldOwnerRequestInfo(email: string, fullName: string, message: string) {
+		const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+		await this.sendMail({
+			to: email,
+			subject: 'Yêu cầu bổ sung thông tin đăng ký - SportZone',
+			// Reusing existing template logic for now or using inline HTML as backup
+			// If a specific template is needed, it should be created.
+			// For now, using inline HTML for simplicity as shown in other methods like sendBankAccountVerified
+			html: `
+				<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+					<h2>Yêu cầu bổ sung thông tin</h2>
+					<p>Xin chào ${fullName},</p>
+					<p>Chúng tôi cần bạn bổ sung thêm thông tin cho đơn đăng ký làm chủ sân của bạn:</p>
+					<blockquote style="background: #f9f9f9; border-left: 10px solid #ccc; margin: 1.5em 10px; padding: 0.5em 10px;">
+						${message}
+					</blockquote>
+					<p>Vui lòng cập nhật thông tin và gửi lại yêu cầu.</p>
+					<p>Truy cập: <a href="${frontendUrl || 'https://sportzone.vn'}">SportZone Field Owner Portal</a></p>
+					<p>Trân trọng,<br>Đội ngũ SportZone</p>
+				</div>
+			`,
+		});
+	}
+
 	// ==================== Coach Registration Emails ====================
 
 	/**
@@ -621,273 +648,7 @@ export class EmailService {
 			`,
 		});
 	}
-	async sendTournamentPaymentRequest(payload: {
-		to: string;
-		tournament: {
-			name: string;
-			sportType: string;
-			date: string;
-			time?: string;
-			location: string;
-			registrationFee: number;
-		};
-		customer: { fullName: string };
-		paymentLink: string;
-		paymentMethod?: PaymentMethod | string;
-		expiresAt?: string; // formatted datetime string
-		expiresInMinutes?: number; // minutes until expiration
-	}) {
-		let methodLabel = 'Thanh toán trực tuyến';
-		if (payload.paymentMethod !== undefined) {
-			if (typeof payload.paymentMethod === 'number') {
-				methodLabel = PaymentMethodLabels[payload.paymentMethod as PaymentMethod] || methodLabel;
-			} else if (typeof payload.paymentMethod === 'string') {
-				methodLabel = payload.paymentMethod;
-			}
-		}
 
-		const amountFormatted = payload.tournament.registrationFee.toLocaleString('vi-VN') + '₫';
 
-		await this.mailerService.sendMail({
-			to: payload.to,
-			subject: 'Yêu cầu thanh toán đăng ký giải đấu - SportZone',
-			template: 'tournament-payment-request.hbs', // You'll need to create this template
-			context: {
-				title: 'Yêu cầu thanh toán đăng ký giải đấu',
-				tournament: payload.tournament,
-				customer: payload.customer,
-				payment: {
-					methodLabel,
-					link: payload.paymentLink,
-					expiresAt: payload.expiresAt,
-					expiresInMinutes: payload.expiresInMinutes,
-					amountFormatted,
-				},
-			},
-		});
-	}
-
-	/**
-	 * Send tournament registration confirmation email
-	 */
-	async sendTournamentRegistrationConfirmation(payload: {
-		to: string;
-		tournament: {
-			name: string;
-			sportType: string;
-			date: string;
-			time?: string;
-			location: string;
-			registrationFee: number;
-			organizer?: any;
-		};
-		customer: {
-			fullName: string;
-		};
-		paymentUrl?: string; // ✅ Add this optional parameter
-		status?: 'pending' | 'confirmed' | 'failed'; // ✅ Add this optional parameter
-	}) {
-		const amountFormatted = payload.tournament.registrationFee.toLocaleString('vi-VN') + '₫';
-		const organizerName = payload.tournament.organizer?.fullName || 'Ban tổ chức';
-
-		await this.mailerService.sendMail({
-			to: payload.to,
-			subject: 'Xác nhận đăng ký giải đấu thành công - SportZone',
-			template: 'tournament-registration-confirmation.hbs', // Create this template
-			context: {
-				title: 'Xác nhận đăng ký giải đấu thành công',
-				tournament: payload.tournament,
-				customer: payload.customer,
-				organizerName,
-				amountFormatted,
-			},
-		});
-	}
-
-	/**
-	 * Send tournament payment failed notification
-	 */
-	async sendTournamentPaymentFailed(payload: {
-		to: string;
-		tournament: {
-			name: string;
-			date: string;
-			sportType: string;
-			location: string;
-		};
-		customer: { fullName: string };
-		reason: string;
-	}) {
-		await this.mailerService.sendMail({
-			to: payload.to,
-			subject: 'Thanh toán đăng ký giải đấu thất bại - SportZone',
-			template: 'tournament-payment-failed.hbs', // Create this template
-			context: {
-				title: 'Thanh toán đăng ký giải đấu thất bại',
-				tournament: payload.tournament,
-				customer: payload.customer,
-				reason: payload.reason,
-			},
-		});
-	}
-
-	/**
-	 * Send tournament accepted notification to organizer
-	 */
-	async sendTournamentAcceptedNotification(payload: {
-		to: string;
-		tournament: {
-			name: string;
-			date: string;
-			sportType: string;
-			location: string;
-		};
-		organizer: { fullName: string };
-	}) {
-		await this.mailerService.sendMail({
-			to: payload.to,
-			subject: 'Yêu cầu tổ chức giải đấu đã được chấp nhận - SportZone',
-			template: 'tournament-request-accepted.hbs',
-			context: {
-				tournament: payload.tournament,
-				organizer: payload.organizer,
-			},
-		});
-	}
-
-	/**
-	 * Send tournament rejected notification to organizer
-	 */
-	async sendTournamentRejectedNotification(payload: {
-		to: string;
-		tournament: {
-			name: string;
-			date: string;
-			location: string;
-		};
-		organizer: { fullName: string };
-	}) {
-		await this.mailerService.sendMail({
-			to: payload.to,
-			subject: 'Thông báo: Yêu cầu đặt sân cho giải đấu bị từ chối - SportZone',
-			template: 'tournament-request-rejected.hbs',
-			context: {
-				tournament: payload.tournament,
-				organizer: payload.organizer,
-			},
-		});
-	}
-
-	/**
-	 * Send tournament confirmed notification to all participants
-	 */
-	async sendTournamentConfirmedNotification(payload: {
-		to: string;
-		tournament: {
-			name: string;
-			date: string;
-			sportType: string;
-			location: string;
-		};
-		participant: { fullName: string };
-	}) {
-		await this.mailerService.sendMail({
-			to: payload.to,
-			subject: 'Thông báo: Giải đấu đã chính thức được XÁC NHẬN - SportZone',
-			template: 'tournament-auto-confirmed.hbs',
-			context: {
-				tournament: payload.tournament,
-				participant: payload.participant,
-			},
-		});
-	}
-
-	/**
-	 * Send monthly subscription invoice
-	 */
-	async sendInvoiceGenerated(email: string, fullName: string, invoice: { month: number, year: number, amount: number, dueDate: Date }) {
-		await this.sendMail({
-			to: email,
-			subject: `Hóa đơn phí duy trì tài khoản tháng ${invoice.month}/${invoice.year} - SportZone`,
-			html: `
-                <div>
-                     <h3>Xin chào ${fullName},</h3>
-                     <p>Hóa đơn phí duy trì tài khoản cho tháng ${invoice.month}/${invoice.year} đã được tạo.</p>
-                     <p><strong>Số tiền:</strong> ${invoice.amount.toLocaleString('vi-VN')} VND</p>
-                     <p><strong>Hạn thanh toán:</strong> ${invoice.dueDate.toLocaleDateString('vi-VN')}</p>
-                     <p>Vui lòng thanh toán trước hạn để tránh gián đoạn dịch vụ.</p>
-                     <p>Bạn có thể thanh toán tại trang <a href="${this.configService.get('FRONTEND_URL')}/billing">Quản lý thanh toán</a>.</p>
-                </div>
-            `
-		});
-	}
-
-	/**
-	 * Send subscription suspended notification
-	 */
-	async sendSubscriptionSuspended(email: string, fullName: string, reason: string) {
-		await this.sendMail({
-			to: email,
-			subject: 'Tài khoản của bạn đã bị tạm khóa - SportZone',
-			html: `
-                <div style="color: red;">
-                     <h3>Tài khoản bị tạm khóa</h3>
-                     <p>Xin chào ${fullName},</p>
-                     <p>Tài khoản của bạn đã bị tạm khóa do: ${reason}.</p>
-                     <p>Vui lòng thanh toán các hóa đơn quá hạn để mở khóa tài khoản.</p>
-                </div>
-            `
-		});
-	}
-
-	/**
-	 * Send subscription reactivated notification
-	 */
-	async sendSubscriptionReactivated(email: string, fullName: string) {
-		await this.sendMail({
-			to: email,
-			subject: 'Tài khoản đã được mở khóa - SportZone',
-			html: `
-                <div style="color: green;">
-                     <h3>Tài khoản đã được mở khóa</h3>
-                     <p>Xin chào ${fullName},</p>
-                     <p>Chúng tôi đã nhận được thanh toán của bạn. Tài khoản của bạn đã hoạt động trở lại bình thường.</p>
-                     <p>Cảm ơn bạn đã sử dụng dịch vụ của SportZone.</p>
-                </div>
-             `
-		});
-	}
-
-	/**
-	 * Send tournament cancellation notification to participants
-	 */
-	async sendTournamentCancellationNotification(payload: {
-		to: string;
-		participant: { fullName: string };
-		tournament: {
-			name: string;
-			sportType: string;
-			date: string;
-			time?: string;
-			location: string;
-		};
-		cancellationReason: string;
-		refundAmount: number;
-	}) {
-		const amountFormatted = payload.refundAmount.toLocaleString('vi-VN') + '₫';
-
-		await this.mailerService.sendMail({
-			to: payload.to,
-			subject: `Thông báo hủy giải đấu: ${payload.tournament.name} - SportZone`,
-			template: 'tournament-cancellation-notification.hbs',
-			context: {
-				title: 'Thông báo hủy giải đấu',
-				participant: payload.participant,
-				tournament: payload.tournament,
-				cancellationReason: payload.cancellationReason,
-				refundAmount: amountFormatted,
-			},
-		});
-	}
 }
 

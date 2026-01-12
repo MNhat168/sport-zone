@@ -8,7 +8,7 @@ import { Transaction, TransactionSchema } from '../transactions/entities/transac
 import { Booking, BookingSchema } from '../bookings/entities/booking.entity';
 import { Field, FieldSchema } from '../fields/entities/field.entity';
 import { CoachProfile, CoachProfileSchema } from '../coaches/entities/coach-profile.entity';
-import { Tournament, TournamentSchema } from '../tournaments/entities/tournament.entity';
+
 import { AiModule } from '../ai/ai.module';
 import { FieldOwnerProfile } from '@modules/field-owner/entities/field-owner-profile.entity';
 import { Notification, NotificationSchema } from '../notifications/entities/notification.entity';
@@ -22,7 +22,7 @@ import { Notification, NotificationSchema } from '../notifications/entities/noti
       { name: Field.name, schema: FieldSchema },
       { name: CoachProfile.name, schema: CoachProfileSchema },
       { name: FieldOwnerProfile.name, schema: CoachProfileSchema },
-      { name: Tournament.name, schema: TournamentSchema },
+
       { name: Notification.name, schema: NotificationSchema },
     ]),
     AiModule,

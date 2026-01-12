@@ -37,6 +37,7 @@ import {
   FieldOwnerRegistrationResponseDto,
   ApproveFieldOwnerRegistrationDto,
   RejectFieldOwnerRegistrationDto,
+  RequestAdditionalInfoRegistrationDto,
 } from './dtos/field-owner-registration.dto';
 import {
   CreateBankAccountDto,
@@ -1996,6 +1997,45 @@ export class FieldOwnerService {
       }
       this.logger.error('Error rejecting registration request', error);
       throw new InternalServerErrorException('Failed to reject registration request');
+    }
+  }
+
+  async requestAdditionalInfo(
+    requestId: string,
+    adminId: string,
+    dto: RequestAdditionalInfoRegistrationDto,
+  ): Promise<FieldOwnerRegistrationResponseDto> {
+    try {
+      const request = await this.registrationRequestModel.findById(requestId).exec();
+
+      if (!request) {
+        throw new NotFoundException('Registration request not found');
+      }
+
+      if (request.status !== RegistrationStatus.PENDING) {
+        throw new BadRequestException('Registration request is not pending');
+      }
+
+      request.status = RegistrationStatus.CLARIFICATION_REQUESTED;
+      request.processedAt = new Date();
+      request.processedBy = new Types.ObjectId(adminId);
+      request.adminMessage = dto.message;
+      await request.save();
+
+      if (request.userId) {
+        const user = await this.userModel.findById(request.userId).exec();
+        if (user) {
+          await this.emailService.sendFieldOwnerRequestInfo(user.email, user.fullName, dto.message);
+        }
+      }
+
+      return this.mapToRegistrationDto(request);
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      this.logger.error('Error requesting additional info for registration request', error);
+      throw new InternalServerErrorException('Failed to request additional info');
     }
   }
 

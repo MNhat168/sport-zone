@@ -8,7 +8,7 @@ export class FieldOwnerStatsDto {
     bookingRate: number;
     totalFavorites: number;
     aiInsight: string;
-    
+
     // Enhanced fields
     monthlyBookings: MonthlyBookingDto[];
     sportsDistribution: SportsDistributionDto[];
@@ -32,7 +32,7 @@ export class CoachStatsDto {
     totalBookings: number;
     totalFavorites: number;
     aiInsight: string;
-    
+
     // Enhanced fields
     sports: string;
     hourlyRate: number;
@@ -99,7 +99,7 @@ export class RevenueBySportDto {
 }
 
 export class RevenueByTypeDto {
-    type: 'field' | 'coach' | 'tournament';
+    type: 'field' | 'coach';
     revenue: number;
     percentage: number;
 }
@@ -114,7 +114,7 @@ export class PopularityAnalysisDto {
 export class SportsPopularityDto {
     sport: string;
     bookings: number;
-    tournaments: number;
+
     favorites: number;
     score: number;
 }

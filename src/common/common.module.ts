@@ -2,7 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { RolesGuard } from './guards/roles.guard';
 import { RateLimitGuard } from './guards/rate-limit.guard';
-import { SubscriptionStatusGuard } from './guards/subscription-status.guard';
+
 import { TimezoneService } from './services/timezone.service';
 import { GlobalTimezoneInterceptor } from './interceptors/global-timezone.interceptor';
 import { User, UserSchema } from '../modules/users/entities/user.entity';
@@ -21,14 +21,14 @@ import { User, UserSchema } from '../modules/users/entities/user.entity';
     GlobalTimezoneInterceptor,
     RolesGuard,
     RateLimitGuard,
-    SubscriptionStatusGuard,
+    RateLimitGuard,
   ],
   exports: [
     TimezoneService,
     GlobalTimezoneInterceptor,
     RolesGuard,
     RateLimitGuard,
-    SubscriptionStatusGuard,
+    RateLimitGuard,
   ],
 })
-export class CommonModule {}
+export class CommonModule { }

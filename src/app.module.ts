@@ -10,7 +10,6 @@ import { FieldsModule } from './modules/fields/fields.module';
 import { FieldOwnerModule } from './modules/field-owner/field-owner.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
-import { TournamentModule } from './modules/tournaments/tournaments.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { AiModule } from './modules/ai/ai.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -28,7 +27,6 @@ import { Logger } from '@nestjs/common';
 
 import { ChatModule } from '@modules/chat/chat.module';
 import { CourtsModule } from './modules/courts/courts.module';
-import { BillingModule } from './modules/billing/billing.module';
 import { QrCheckinModule } from './modules/qr-checkin/qr-checkin.module';
 @Module({
   imports: [
@@ -103,7 +101,6 @@ import { QrCheckinModule } from './modules/qr-checkin/qr-checkin.module';
     FieldOwnerModule,
     BookingsModule,
     TransactionsModule,
-    TournamentModule,
     ReviewsModule,
     AiModule,
     NotificationsModule,
@@ -114,8 +111,6 @@ import { QrCheckinModule } from './modules/qr-checkin/qr-checkin.module';
     AmenitiesModule,
     NotificationsModule,
     ChatModule,
-    CourtsModule,
-    BillingModule,
     QrCheckinModule
   ],
   controllers: [AppController],

@@ -12,9 +12,7 @@ import { TransactionStatus, TransactionType } from '@common/enums/transaction.en
 export class Transaction extends BaseEntity {
 
 
-  // Link to Invoice (for Host subscription)
-  @Prop({ type: Types.ObjectId, ref: 'Invoice' })
-  invoice?: Types.ObjectId;
+
 
   // Số tiền (dương = vào hệ thống, âm = ra hệ thống)
   @Prop({ required: true })
@@ -43,6 +41,10 @@ export class Transaction extends BaseEntity {
   // Liên kết giao dịch gốc (refund → payment, payout → payment)
   @Prop({ type: Types.ObjectId, ref: 'Transaction' })
   relatedTransaction?: Types.ObjectId;
+
+  // Booking reference (Source of truth for booking-transaction link)
+  @Prop({ type: Types.ObjectId, ref: 'Booking' })
+  booking?: Types.ObjectId;
 
   // External ID từ gateway
   @Prop({ type: String, unique: true, sparse: true })
@@ -101,4 +103,5 @@ TransactionSchema.index({ user: 1 });
 TransactionSchema.index({ type: 1, status: 1 });
 TransactionSchema.index({ direction: 1 });
 TransactionSchema.index({ relatedTransaction: 1 });
+TransactionSchema.index({ booking: 1 });
 TransactionSchema.index({ createdAt: -1 });

@@ -43,40 +43,12 @@ export class User extends BaseEntity {
   @Prop({ type: Boolean, default: true })
   isActive: boolean;
 
+
   @Prop({ type: String })
   idNumber?: string; // Số CMND/CCCD từ EKYC
 
   @Prop({ type: String })
   address?: string; // Địa chỉ từ EKYC
-
-  // Billing / Subscription Fields
-  @Prop({ type: String, enum: ['active', 'grace_period', 'suspended'], default: 'active' })
-  subscriptionStatus: 'active' | 'grace_period' | 'suspended';
-
-  @Prop({ type: Date })
-  nextPaymentDate?: Date;
-
-  @Prop({ type: Date })
-  lastPaymentDate?: Date;
-
-  @Prop({ type: Date })
-  gracePeriodEndDate?: Date;
-
-  // Abuse Prevention Fields
-  @Prop({ type: Number, default: 0 })
-  activeTournamentsCount: number;
-
-  @Prop({ type: Number, default: 0 })
-  weeklyTournamentCreationCount: number;
-
-  @Prop({ type: String, enum: ['FREE', 'PREMIUM'], default: 'FREE' })
-  tournamentTier: 'FREE' | 'PREMIUM';
-
-  @Prop({ type: Date })
-  lastCancellationDate?: Date;
-
-  @Prop({ type: Date })
-  demeritUntil?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
