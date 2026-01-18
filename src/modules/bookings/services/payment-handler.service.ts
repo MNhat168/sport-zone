@@ -231,6 +231,7 @@ export class PaymentHandlerService implements OnModuleInit {
 
       // ✅ 3. Process Bookings & Calculate Owner Revenue
       const ownerRevenueMap = new Map<string, number>(); // OwnerID -> Revenue
+      const recurringGroupsProcessed = new Set<string>(); // Track recurring groups for email
 
       for (const booking of bookings) {
         // Idempotency check
@@ -261,8 +262,24 @@ export class PaymentHandlerService implements OnModuleInit {
           date: booking.date,
         });
 
-        // Send Email (async, non-blocking)
-        this.bookingEmailService.sendConfirmationEmails(booking.id.toString(), event.method).catch(e => this.logger.error(e));
+        // ✅ NEW: Send email only once per recurring group (or per single booking)
+        const recurringGroupId = booking.recurringGroupId?.toString();
+        if (recurringGroupId) {
+          // This is a recurring booking - only send email for the first booking in the group
+          if (!recurringGroupsProcessed.has(recurringGroupId)) {
+            recurringGroupsProcessed.add(recurringGroupId);
+            // Send consolidated email for the entire recurring group
+            this.bookingEmailService.sendRecurringConfirmationEmail(
+              recurringGroupId,
+              event.method
+            ).catch(e => this.logger.error('[Payment Success] Failed to send recurring email:', e));
+            this.logger.log(`[Payment Success] Sent consolidated email for recurring group ${recurringGroupId}`);
+          }
+        } else {
+          // Single booking - send individual email as before
+          this.bookingEmailService.sendConfirmationEmails(booking.id.toString(), event.method)
+            .catch(e => this.logger.error('[Payment Success] Failed to send confirmation email:', e));
+        }
 
         // Calculate Revenue for Owner
         if (booking.field) {

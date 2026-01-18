@@ -1,0 +1,65 @@
+\u003c!-- QR Check-in Section for Email Template --\u003e
+{{#if qrCodeDataUrl}}
+\u003c!-- Divider --\u003e
+\u003ctr style=\"border-collapse:collapse\"\u003e
+  \u003ctd align=\"left\" style=\"Margin:0;padding-right:20px;padding-left:20px;padding-top:10px;padding-bottom:10px\"\u003e
+    \u003ctable width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"\u003e
+      \u003ctr\u003e
+        \u003ctd align=\"center\" style=\"padding:0;Margin:0;font-size:0\"\u003e
+          \u003ctable border=\"0\" width=\"100%\" height=\"100%\" cellspacing=\"0\" cellpadding=\"0\"\u003e
+            \u003ctr\u003e
+              \u003ctd style=\"padding:0;Margin:0;border-bottom:1px solid #EFEFEF;height:0px;width:100%\"\u003e\u003c/td\u003e
+            \u003c/tr\u003e
+          \u003c/table\u003e
+        \u003c/td\u003e
+      \u003c/tr\u003e
+    \u003c/table\u003e
+  \u003c/td\u003e
+\u003c/tr\u003e
+
+\u003c!-- QR Code Section --\u003e
+\u003ctr style=\"border-collapse:collapse\"\u003e
+  \u003ctd bgcolor=\"#ffffff\" align=\"left\" style=\"Margin:0;padding:20px;background-color:#FFFFFF\"\u003e
+    \u003ctable cellspacing=\"0\" cellpadding=\"0\" align=\"center\" style=\"width:560px\"\u003e
+      \u003ctr\u003e
+        \u003ctd align=\"center\" style=\"padding:0;Margin:0\"\u003e
+          \u003c!-- Title--\u003e
+          \u003ch3 style=\"Margin:0 0 15px 0;font-family:tahoma, verdana, segoe, sans-serif;font-size:20px;font-weight:normal;line-height:24px;color:#333333\"\u003e
+            \u003cstrong\u003eMã QR Check-in\u003c/strong\u003e
+          \u003c/h3\u003e
+          
+          \u003c!-- Description --\u003e
+          \u003cp style=\"Margin:0 0 15px 0;font-family:arial, 'helvetica neue', helvetica, sans-serif;line-height:21px;color:#666666;font-size:14px\"\u003e
+            Quét mã QR bên dưới khi đến sân để check-in nhanh chóng
+          \u003c/p\u003e
+          
+          \u003c!-- QR Code Image --\u003e
+          \u003cdiv style=\"padding:15px 0\"\u003e
+            \u003cimg src=\"{{qrCodeDataUrl}}\" alt=\"QR Check-in Code\" width=\"250\" height=\"250\" 
+                 style=\"display:block;margin:0 auto;border:2px solid #4CAF50;border-radius:8px\"\u003e
+          \u003c/div\u003e
+          
+          \u003c!-- Instructions Box --\u003e
+          \u003cdiv style=\"background-color:#F6F9FC;border-radius:6px;padding:15px;margin-top:15px;text-align:left\"\u003e
+            \u003cp style=\"Margin:0 0 5px 0;font-family:arial, 'helvetica neue', helvetica, sans-serif;line-height:18px;color:#4CAF50;font-size:13px\"\u003e
+              \u003cstrong\u003e\u0026#9432; Lưu ý quan trọng:\u003c/strong\u003e
+            \u003c/p\u003e
+            \u003cp style=\"Margin:5px 0;font-family:arial, 'helvetica neue', helvetica, sans-serif;line-height:18px;color:#666666;font-size:12px\"\u003e
+              \u0026bull; Mã QR chỉ có hiệu lực vào ngày \u003cstrong\u003e{{booking.date}}\u003c/strong\u003e
+            \u003c/p\u003e
+            \u003cp style=\"Margin:5px 0;font-family:arial, 'helvetica neue', helvetica, sans-serif;line-height:18px;color:#666666;font-size:12px\"\u003e
+              \u0026bull; Xuất trình mã QR này tại quầy check-in khi đến sân
+            \u003c/p\u003e
+            \u003cp style=\"Margin:5px 0;font-family:arial, 'helvetica neue', helvetica, sans-serif;line-height:18px;color:#666666;font-size:12px\"\u003e
+              \u0026bull; Không chia sẻ mã QR cho người khác
+            \u003c/p\u003e
+            \u003cp style=\"Margin:5px 0 0 0;font-family:arial, 'helvetica neue', helvetica, sans-serif;line-height:18px;color:#666666;font-size:12px\"\u003e
+              \u0026bull; Nếu mất email, vui lòng liên hệ hỗ trợ
+            \u003c/p\u003e
+          \u003c/div\u003e
+        \u003c/td\u003e
+      \u003c/tr\u003e
+    \u003c/table\u003e
+  \u003c/td\u003e
+\u003c/tr\u003e
+{{/if}}

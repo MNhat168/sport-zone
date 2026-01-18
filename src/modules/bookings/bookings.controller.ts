@@ -1281,13 +1281,19 @@ export class BookingsController {
 
     const booking = await this.bookingModel
       .findById(id)
-      .populate('field', 'name address')
+      .select('+status') // Explicitly select status field
+      .populate('field', 'name address images')
       .populate('court', 'name')
       .populate('user', 'email fullName')
       .exec();
 
     if (!booking) {
       throw new NotFoundException(`Booking ${id} not found`);
+    }
+
+    // Ensure status is never null/undefined (defensive programming)
+    if (!booking.status) {
+      booking.status = BookingStatus.PENDING;
     }
 
     return booking;
