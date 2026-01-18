@@ -3,8 +3,11 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 
 export interface CheckInTokenPayload {
-  bookingId: string;
+  bookingId?: string; // Optional - for single bookings
+  recurringGroupId?: string; // Optional - for recurring/batch bookings
   timestamp: number;
+  bookingDate?: string; // ISO date string for email-based tokens
+  type?: 'dynamic' | 'email'; // Token type
   iat?: number;
   exp?: number;
 }
@@ -13,6 +16,11 @@ export interface TimeWindowResult {
   canGenerate: boolean;
   canGenerateAt?: Date;
   windowEndsAt?: Date;
+  message?: string;
+}
+
+export interface DateValidationResult {
+  canCheckIn: boolean;
   message?: string;
 }
 
@@ -83,6 +91,69 @@ export class QrCheckinService {
   }
 
   /**
+   * Generate a static JWT token for email-based QR check-in
+   * This token has long expiry (30 days) but includes booking date for validation
+   * @param bookingId - The booking ID
+   * @param bookingDate - The booking date (Date object)
+   * @returns JWT token string
+   */
+  async generateStaticCheckInToken(
+    bookingId: string,
+    bookingDate: Date,
+  ): Promise<string> {
+    // Convert date to ISO date string (date-only, no time)
+    const dateOnly = new Date(bookingDate);
+    dateOnly.setHours(0, 0, 0, 0);
+    const bookingDateStr = dateOnly.toISOString().split('T')[0];
+
+    const payload: CheckInTokenPayload = {
+      bookingId,
+      bookingDate: bookingDateStr,
+      type: 'email',
+      timestamp: Date.now(),
+    };
+
+    // Long expiry for email tokens (30 days)
+    const token = await this.jwtService.signAsync(payload, {
+      expiresIn: '30d',
+    });
+
+    return token;
+  }
+
+  /**
+   * Generate a recurring group QR token for batch bookings
+   * This token contains the recurringGroupId instead of individual bookingId
+   * Used when user books multiple dates and receives a single QR code
+   * @param recurringGroupId - The recurring group ID
+   * @param startDate - The first booking date in the group
+   * @returns JWT token string
+   */
+  async generateRecurringGroupToken(
+    recurringGroupId: string,
+    startDate: Date,
+  ): Promise<string> {
+    // Convert date to ISO date string (date-only, no time)
+    const dateOnly = new Date(startDate);
+    dateOnly.setHours(0, 0, 0, 0);
+    const startDateStr = dateOnly.toISOString().split('T')[0];
+
+    const payload: CheckInTokenPayload = {
+      recurringGroupId, // Use recurringGroupId instead of bookingId
+      bookingDate: startDateStr, // Store start date for reference
+      type: 'email',
+      timestamp: Date.now(),
+    };
+
+    // Long expiry for email tokens (30 days)
+    const token = await this.jwtService.signAsync(payload, {
+      expiresIn: '30d',
+    });
+
+    return token;
+  }
+
+  /**
    * Validate a QR check-in token
    * @param token - The JWT token to validate
    * @returns Decoded token payload
@@ -90,8 +161,25 @@ export class QrCheckinService {
   async validateCheckInToken(token: string): Promise<CheckInTokenPayload> {
     try {
       const decoded = await this.jwtService.verifyAsync<CheckInTokenPayload>(token);
+
+      // If this is an email-based token, validate the date
+      if (decoded.type === 'email' && decoded.bookingDate) {
+        const dateValidation = this.canCheckInOnDate(decoded.bookingDate);
+        if (!dateValidation.canCheckIn) {
+          throw new HttpException(
+            dateValidation.message || 'Không thể check-in vào thời điểm này',
+            HttpStatus.FORBIDDEN,
+          );
+        }
+      }
+
       return decoded;
     } catch (error) {
+      // Re-throw HttpException as-is
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
       if (error.name === 'TokenExpiredError') {
         throw new HttpException('Mã QR đã hết hạn', HttpStatus.BAD_REQUEST);
       }
@@ -100,44 +188,88 @@ export class QrCheckinService {
   }
 
   /**
+   * Check if check-in is allowed based on booking date
+   * Same-day only validation (no grace period)
+   * @param bookingDateStr - ISO date string from token (YYYY-MM-DD)
+   * @param currentDate - Current date (defaults to now, for testing)
+   * @returns DateValidationResult
+   */
+  canCheckInOnDate(
+    bookingDateStr: string,
+    currentDate: Date = new Date(),
+  ): DateValidationResult {
+    // Parse booking date and current date to date-only (ignore time)
+    const bookingDate = new Date(bookingDateStr);
+    bookingDate.setHours(0, 0, 0, 0);
+
+    const today = new Date(currentDate);
+    today.setHours(0, 0, 0, 0);
+
+    const bookingTime = bookingDate.getTime();
+    const todayTime = today.getTime();
+
+    // Check if today is before booking date
+    if (todayTime < bookingTime) {
+      const daysUntil = Math.ceil((bookingTime - todayTime) / (24 * 60 * 60 * 1000));
+      return {
+        canCheckIn: false,
+        message: `Chưa đến ngày check-in. Vui lòng check-in vào ngày ${bookingDateStr} (còn ${daysUntil} ngày).`,
+      };
+    }
+
+    // Check if today is after booking date (no grace period)
+    if (todayTime > bookingTime) {
+      return {
+        canCheckIn: false,
+        message: `Đã quá ngày check-in. Mã QR chỉ có hiệu lực vào ngày ${bookingDateStr}.`,
+      };
+    }
+
+    // Same day - allow check-in
+    return {
+      canCheckIn: true,
+    };
+  }
+
+  /**
    * Check if current time is within the allowed window to generate QR
    * @param startTime - The booking start time
    * @returns TimeWindowResult with canGenerate status and related times
    */
   canGenerateQR(startTime: Date): TimeWindowResult {
-  const now = new Date();
-  const startTimeDate = new Date(startTime);
+    const now = new Date();
+    const startTimeDate = new Date(startTime);
 
-  // Calculate the window start time (e.g., 15 minutes before start)
-  const windowStartTime = new Date(
-    startTimeDate.getTime() - this.qrCheckinWindowMinutes * 60 * 1000,
-  );
-
-  // Calculate late window end time (e.g., 60 minutes after start)
-  const lateWindowEndTime = new Date(
-    startTimeDate.getTime() + this.qrCheckinLateWindowMinutes * 60 * 1000,
-  );
-
-  // Too early - before the window opens
-  if (now < windowStartTime) {
-    const minutesUntilWindow = Math.ceil(
-      (windowStartTime.getTime() - now.getTime()) / (60 * 1000),
+    // Calculate the window start time (e.g., 15 minutes before start)
+    const windowStartTime = new Date(
+      startTimeDate.getTime() - this.qrCheckinWindowMinutes * 60 * 1000,
     );
-    return {
-      canGenerate: false,
-      canGenerateAt: windowStartTime,
-      windowEndsAt: lateWindowEndTime,
-      message: `Chưa đến giờ nhận sân. Vui lòng đợi thêm ${minutesUntilWindow} phút.`,
-    };
-  }
 
-  // Too late - after the late window closed
-  if (now > lateWindowEndTime) {
-    return {
-      canGenerate: false,
-      message: 'Đã quá thời gian check-in cho trận đấu này',
-    };
-  }
+    // Calculate late window end time (e.g., 60 minutes after start)
+    const lateWindowEndTime = new Date(
+      startTimeDate.getTime() + this.qrCheckinLateWindowMinutes * 60 * 1000,
+    );
+
+    // Too early - before the window opens
+    if (now < windowStartTime) {
+      const minutesUntilWindow = Math.ceil(
+        (windowStartTime.getTime() - now.getTime()) / (60 * 1000),
+      );
+      return {
+        canGenerate: false,
+        canGenerateAt: windowStartTime,
+        windowEndsAt: lateWindowEndTime,
+        message: `Chưa đến giờ nhận sân. Vui lòng đợi thêm ${minutesUntilWindow} phút.`,
+      };
+    }
+
+    // Too late - after the late window closed
+    if (now > lateWindowEndTime) {
+      return {
+        canGenerate: false,
+        message: 'Đã quá thời gian check-in cho trận đấu này',
+      };
+    }
 
     // Within the allowed window (Start window -> Start Time -> Late window)
     return {
@@ -153,10 +285,10 @@ export class QrCheckinService {
    * @returns Object with window start and end times
    */
   getCheckInWindow(startTime: Date): {
-  windowStartsAt: Date;
-  windowEndsAt: Date;
-  windowDurationMinutes: number;
-} {
+    windowStartsAt: Date;
+    windowEndsAt: Date;
+    windowDurationMinutes: number;
+  } {
     const startTimeDate = new Date(startTime);
     const windowStartsAt = new Date(
       startTimeDate.getTime() - this.qrCheckinWindowMinutes * 60 * 1000,

@@ -721,6 +721,7 @@ export class BookingsService {
             selectedAmenities: dto.selectedAmenities?.map(id => new Types.ObjectId(id)) || [],
             note: dto.note,
             recurringGroupId, // Link to group
+            recurringType: 'WEEKLY', // Mark as weekly recurring booking
             pricingSnapshot: {
               basePrice: field.basePrice,
               appliedMultiplier: pricingInfo.multiplier,
@@ -2788,20 +2789,66 @@ export class BookingsService {
     // 1. Validate token
     const tokenPayload = await this.qrCheckinService.validateCheckInToken(token);
 
-    // 2. Verify token matches booking
-    if (tokenPayload.bookingId !== bookingId) {
-      throw new BadRequestException('Token does not match booking ID');
-    }
+    // 2. Handle recurring group QR code vs single booking QR code
+    let booking: any;
 
-    // 3. Find booking with all relations
-    const booking = await this.bookingModel
-      .findById(bookingId)
-      .populate('field')
-      .populate('transaction')
-      .populate('user');
+    if (tokenPayload.recurringGroupId) {
+      // This is a recurring group QR - find booking for TODAY's date
+      this.logger.log(`[QR Check-in] Recurring group QR detected: ${tokenPayload.recurringGroupId}`);
 
-    if (!booking) {
-      throw new NotFoundException('Booking not found');
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      // Find booking in this recurring group that matches today's date
+      booking = await this.bookingModel
+        .findOne({
+          recurringGroupId: new Types.ObjectId(tokenPayload.recurringGroupId),
+          date: {
+            $gte: today,
+            $lt: tomorrow
+          }
+        })
+        .populate('field')
+        .populate('transaction')
+        .populate('user');
+
+      if (!booking) {
+        // Check if there are any bookings in this group for other dates
+        const anyBookingInGroup = await this.bookingModel.findOne({
+          recurringGroupId: new Types.ObjectId(tokenPayload.recurringGroupId)
+        }).lean();
+
+        if (anyBookingInGroup) {
+          throw new BadRequestException(
+            `Không tìm thấy booking cho ngày hôm nay (${today.toLocaleDateString('vi-VN')}). ` +
+            `QR code này dùng cho nhóm booking hàng loạt - vui lòng quét vào đúng ngày đã đặt.`
+          );
+        } else {
+          throw new NotFoundException('Không tìm thấy nhóm booking này');
+        }
+      }
+
+      this.logger.log(`[QR Check-in] Found booking ${booking._id} for today in recurring group`);
+
+    } else {
+      // Single booking QR - verify token matches booking ID
+      if (tokenPayload.bookingId !== bookingId) {
+        throw new BadRequestException('Token does not match booking ID');
+      }
+
+      // 3. Find booking with all relations
+      booking = await this.bookingModel
+        .findById(bookingId)
+        .populate('field')
+        .populate('transaction')
+        .populate('user');
+
+      if (!booking) {
+        throw new NotFoundException('Booking not found');
+      }
     }
 
     // 4. Check if already checked in
