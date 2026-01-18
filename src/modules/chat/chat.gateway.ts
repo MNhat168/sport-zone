@@ -7,6 +7,7 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
+import { OnEvent } from '@nestjs/event-emitter';
 import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
 import { Types } from 'mongoose';
@@ -235,18 +236,50 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         chatRoom,
       });
 
-      // Also notify the other participant directly if we can (user socket mapping)
-      // If sender is field owner user, notify customer by their user socket id
+      // Also notify other participants directly if we can (user socket mapping)
+      const otherParticipants: string[] = [];
+
+      // Traditional 1:1 chat (User <-> FieldOwner/Coach)
       const customerUserId = (chatRoom.user as any)?._id?.toString?.() || (chatRoom.user as any)?.toString?.();
-      if (customerUserId) {
-        const socketId = this.userSocketMap.get(customerUserId);
+      if (customerUserId && customerUserId !== userId) {
+        otherParticipants.push(customerUserId);
+      }
+
+      // New style: Check participants array (Matches, Group Sessions)
+      if (chatRoom.participants && chatRoom.participants.length > 0) {
+        chatRoom.participants.forEach((p: any) => {
+          const pId = p?._id?.toString?.() || p?.toString?.();
+          if (pId && pId !== userId && !otherParticipants.includes(pId)) {
+            otherParticipants.push(pId);
+          }
+        });
+      }
+
+      // If it's a field owner/coach chat and sender is a user, notify the business
+      if (chatRoom.fieldOwner && userId === customerUserId) {
+        const bizUserId = await this.chatService.getFieldOwnerUserId(chatRoom.fieldOwner.toString());
+        if (bizUserId && !otherParticipants.includes(bizUserId)) {
+          otherParticipants.push(bizUserId);
+        }
+      }
+
+      if (chatRoom.coach && userId === customerUserId) {
+        const bizUserId = await this.chatService.getCoachUserId(chatRoom.coach.toString());
+        if (bizUserId && !otherParticipants.includes(bizUserId)) {
+          otherParticipants.push(bizUserId);
+        }
+      }
+
+      // Send notifications to all identified participants
+      otherParticipants.forEach(targetUserId => {
+        const socketId = this.userSocketMap.get(targetUserId);
         if (socketId) {
           this.server.to(socketId).emit('message_notification', {
             chatRoomId: data.chatRoomId,
             message,
             sender: userId,
           });
-          // Push full event only if customer's socket is not already in the chat room
+
           const roomName = `chat:${data.chatRoomId}`;
           const alreadyInRoom = this.isSocketInRoom(socketId, roomName);
           if (!alreadyInRoom) {
@@ -257,7 +290,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             });
           }
         }
-      }
+      });
     } catch (error) {
       console.error('❌ [send_message_to_room] Error:', error);
       client.emit('message_error', {
@@ -294,5 +327,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (socketId) {
       this.server.to(socketId).emit(event, data);
     }
+  }
+
+  @OnEvent('chat.system_message')
+  async handleSystemMessage(payload: { chatRoomId: string, message: any, chatRoom: any }) {
+    // Broadcast to room
+    this.server.to(`chat:${payload.chatRoomId}`).emit('new_message', {
+      chatRoomId: payload.chatRoomId,
+      message: payload.message,
+      chatRoom: payload.chatRoom, // Now available via event payload
+    });
+  }
+
+  @OnEvent('chat.proposal_updated')
+  handleProposalUpdated(payload: { chatRoomId: string, bookingId: string, status: string }) {
+    this.server.to(`chat:${payload.chatRoomId}`).emit('proposal_updated', payload);
   }
 }

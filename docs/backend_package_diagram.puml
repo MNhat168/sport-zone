@@ -1,0 +1,86 @@
+@startuml
+skinparam packageStyle rectangle
+
+package "Presentation" {
+    package "Controllers" {
+        [Auth Controller]
+        [User Controller]
+        [Matching Controller]
+        [Tournament Controller]
+        [Field Controller]
+        [Booking Controller]
+        note right: Handles HTTP requests\n(src/modules/*/controllers)
+    }
+}
+
+package "Application" {
+    package "Services" {
+        [Auth Service]
+        [User Service]
+        [Matching Service]
+        [Tournament Service]
+        [Field Service]
+        [Booking Service]
+        note right: Business Logic\n(src/modules/*/services)
+    }
+    
+    package "DTOs" {
+        [Request DTOs]
+        [Response DTOs]
+        note right: Data Transfer Objects\n(src/modules/*/dto)
+    }
+
+    package "Middleware" {
+        [Auth Middleware]
+        [Logging Middleware]
+        note right: Request Processing\n(src/middleware)
+    }
+}
+
+package "Infrastructure" {
+    package "Configuration" {
+        [App Config]
+        [DB Config]
+        note right: Environment Config\n(src/config)
+    }
+
+    package "Helpers" {
+        [Utils]
+        [Constants]
+        note right: Shared Utilities\n(src/utils)
+    }
+}
+
+package "Core" {
+    package "Models" {
+        [User Schema]
+        [Match Schema]
+        [Tournament Schema]
+        [Field Schema]
+        note right: Mongoose Models/Entities\n(src/modules/*/entities)
+    }
+
+    package "Common" {
+        [Guards]
+        [Interceptors]
+        [Decorators]
+        [Interfaces]
+        note right: Shared Core Logic\n(src/common)
+    }
+}
+
+' Relationships
+[Controllers] ..> [Services] : <<uses>>
+[Controllers] ..> [DTOs] : <<uses>>
+[Middleware] ..> [DTOs] : <<uses>>
+
+' Service interactions (Directly to Models now)
+[Services] ..> [Models] : <<injects/uses>>
+[Services] ..> [DTOs] : <<uses>>
+
+[Models] ..> [Common] : <<uses>>
+[Helpers] ..> [Common] : <<uses>>
+
+[Services] ..> [Helpers] : <<calls>>
+
+@enduml

@@ -46,6 +46,16 @@ export class ChatRoom extends BaseEntity {
   @Prop({ type: String })
   bookingId?: string; // Related booking (optional)
 
+  // Matching system support
+  @Prop({ type: Types.ObjectId, ref: 'Match' })
+  matchId?: Types.ObjectId; // For 1:1 match chats
+
+  @Prop({ type: Types.ObjectId, ref: 'GroupSession' })
+  groupSessionId?: Types.ObjectId; // For group session chats
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
+  participants: Types.ObjectId[]; // For group chats
+
   @Prop({ type: [MessageSchema], default: [] })
   messages: Message[];
 
@@ -66,14 +76,25 @@ export const ChatRoomSchema = SchemaFactory.createForClass(ChatRoom);
 // Unique constraints per chat type with partial filters
 ChatRoomSchema.index(
   { user: 1, fieldOwner: 1, field: 1 },
-  { unique: true, partialFilterExpression: { fieldOwner: { $exists: true } } }
+  { unique: true, partialFilterExpression: { fieldOwner: { $type: "objectId" } } }
 );
 ChatRoomSchema.index(
   { user: 1, coach: 1 },
-  { unique: true, partialFilterExpression: { coach: { $exists: true } } }
+  { unique: true, partialFilterExpression: { coach: { $type: "objectId" } } }
+);
+// Match chat index
+ChatRoomSchema.index(
+  { matchId: 1 },
+  { unique: true, partialFilterExpression: { matchId: { $exists: true } } }
+);
+// Group session chat index
+ChatRoomSchema.index(
+  { groupSessionId: 1 },
+  { unique: true, partialFilterExpression: { groupSessionId: { $exists: true } } }
 );
 // Common indices
 ChatRoomSchema.index({ lastMessageAt: -1 });
 ChatRoomSchema.index({ user: 1, status: 1 });
+ChatRoomSchema.index({ participants: 1 }); // For group chats
 ChatRoomSchema.index({ fieldOwner: 1, status: 1 }, { partialFilterExpression: { fieldOwner: { $exists: true } } });
 ChatRoomSchema.index({ coach: 1, status: 1 }, { partialFilterExpression: { coach: { $exists: true } } });

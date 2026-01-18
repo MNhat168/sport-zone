@@ -131,7 +131,7 @@ export class CleanupService {
   async cancelHoldBooking(
     bookingId: string,
     cancellationReason: string = 'Thời gian giữ chỗ đã hết (5 phút)',
-    maxAgeMinutes: number = 10
+    maxAgeMinutes: number | null = 10
   ): Promise<void> {
     if (!Types.ObjectId.isValid(bookingId)) {
       throw new Error(`Invalid booking ID: ${bookingId}`);
@@ -140,6 +140,12 @@ export class CleanupService {
     const booking = await this.bookingModel.findById(bookingId);
     if (!booking) {
       throw new Error(`Booking ${bookingId} not found`);
+    }
+
+    // Skip if already cancelled
+    if (booking.status === BookingStatus.CANCELLED) {
+      this.logger.debug(`[Cleanup] Booking ${bookingId} already cancelled, skipping hold cancellation`);
+      return;
     }
 
     // Identify payment method from metadata
@@ -160,7 +166,7 @@ export class CleanupService {
   private async cancelBankTransferHold(
     booking: any,
     cancellationReason: string,
-    maxAgeMinutes: number
+    maxAgeMinutes: number | null
   ): Promise<void> {
     const bookingId = booking._id.toString();
 
@@ -182,11 +188,13 @@ export class CleanupService {
       );
     }
 
-    // Verify booking is not too old (prevent abuse)
-    const bookingAge = Date.now() - new Date(booking.createdAt).getTime();
-    const maxAge = maxAgeMinutes * 60 * 1000;
-    if (bookingAge > maxAge) {
-      throw new Error(`Booking is too old to cancel via this endpoint (max ${maxAgeMinutes} minutes)`);
+    // Verify booking is not too old (prevent abuse) if check is enabled
+    if (maxAgeMinutes !== null) {
+      const bookingAge = Date.now() - new Date(booking.createdAt).getTime();
+      const maxAge = maxAgeMinutes * 60 * 1000;
+      if (bookingAge > maxAge) {
+        throw new Error(`Booking is too old to cancel via this endpoint (max ${maxAgeMinutes} minutes)`);
+      }
     }
 
     // Cancel booking and release slots
@@ -200,15 +208,17 @@ export class CleanupService {
   private async cancelPayOSHold(
     booking: any,
     cancellationReason: string,
-    maxAgeMinutes: number
+    maxAgeMinutes: number | null
   ): Promise<void> {
     const bookingId = booking._id.toString();
 
-    // Verify booking is not too old (prevent abuse)
-    const bookingAge = Date.now() - new Date(booking.createdAt).getTime();
-    const maxAge = maxAgeMinutes * 60 * 1000;
-    if (bookingAge > maxAge) {
-      throw new Error(`Booking is too old to cancel via this endpoint (max ${maxAgeMinutes} minutes)`);
+    // Verify booking is not too old (prevent abuse) if check is enabled
+    if (maxAgeMinutes !== null) {
+      const bookingAge = Date.now() - new Date(booking.createdAt).getTime();
+      const maxAge = maxAgeMinutes * 60 * 1000;
+      if (bookingAge > maxAge) {
+        throw new Error(`Booking is too old to cancel via this endpoint (max ${maxAgeMinutes} minutes)`);
+      }
     }
 
     // 1. Cancel any PENDING transactions for this booking

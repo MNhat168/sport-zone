@@ -7,6 +7,8 @@ import { User } from '../users/entities/user.entity';
 import { FieldOwnerProfile } from '../field-owner/entities/field-owner-profile.entity';
 import { Field } from '../fields/entities/field.entity';
 import { CoachProfile } from '../coaches/entities/coach-profile.entity';
+import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
+
 
 @Injectable()
 export class ChatService {
@@ -290,8 +292,13 @@ export class ChatService {
 
     console.log('📝 [ChatService.sendMessage] Room found, current messages count:', chatRoom.messages.length);
 
-    // Verify sender is a participant: customer, field owner, or coach
+    // Verify sender is a participant: customer, field owner, coach, or in participants array
     let isParticipant = chatRoom.user.toString() === senderId;
+
+    if (!isParticipant && chatRoom.participants && chatRoom.participants.length > 0) {
+      isParticipant = chatRoom.participants.some(p => p.toString() === senderId);
+    }
+
     if (!isParticipant && chatRoom.fieldOwner) {
       const ownerProfileId = await this.getFieldOwnerProfileIdByUser(senderId);
       if (ownerProfileId && chatRoom.fieldOwner.toString() === ownerProfileId) {
@@ -305,7 +312,7 @@ export class ChatService {
       }
     }
     if (!isParticipant) {
-      console.error('❌ [ChatService.sendMessage] User not participant');
+      console.error('❌ [ChatService.sendMessage] User not participant:', { senderId, roomId: chatRoomId });
       throw new ForbiddenException('You are not a participant in this chat');
     }
 
@@ -321,8 +328,8 @@ export class ChatService {
     chatRoom.messages.push(newMessage);
     chatRoom.lastMessageAt = new Date();
     chatRoom.lastMessageBy = new Types.ObjectId(senderId);
-    // Mark as unread for receiver: if sender is user, mark unread for owner/coach; if sender is owner/coach, mark unread for user
-    chatRoom.hasUnread = chatRoom.user.toString() !== senderId;
+    // Mark as unread for others
+    chatRoom.hasUnread = true;
 
     console.log('💾 [ChatService.sendMessage] About to save, messages count:', chatRoom.messages.length);
 
@@ -339,6 +346,7 @@ export class ChatService {
         $or: [
           { user: new Types.ObjectId(userId) },
           { fieldOwner: new Types.ObjectId(userId) },
+          { participants: new Types.ObjectId(userId) },
         ],
         status: ChatStatus.ACTIVE,
       })
@@ -448,10 +456,16 @@ export class ChatService {
     const chatCoachId = chatRoom.coach
       ? ((chatRoom.coach as any)?._id ? (chatRoom.coach as any)._id.toString() : (chatRoom.coach as any).toString())
       : null;
-    const isParticipant =
+    let isParticipant =
       chatRoom.user._id.toString() === userId ||
       (!!ownerProfileId && !!chatOwnerId && chatOwnerId === ownerProfileId) ||
       (!!coachProfileId && !!chatCoachId && chatCoachId === coachProfileId);
+
+    // Add check for participants array (Matches, Group Sessions)
+    if (!isParticipant && chatRoom.participants && chatRoom.participants.length > 0) {
+      isParticipant = chatRoom.participants.some(p => p.toString() === userId);
+    }
+
     if (!isParticipant) {
       throw new ForbiddenException('Access denied');
     }
@@ -511,20 +525,25 @@ export class ChatService {
     const chatRoom = await this.chatModel.findById(chatRoomId);
     if (!chatRoom) throw new NotFoundException('Chat room not found');
 
-    // Verify user is part of the chat (either room user or owning field owner)
+    // Verify user is part of the chat (either room user, field owner, coach, or participant)
     const ownerProfileId = await this.getFieldOwnerProfileIdByUser(userId);
     const coachProfileId = await this.getCoachProfileIdByUser(userId);
-    const isParticipant =
-      chatRoom.user.toString() === userId ||
+
+    let isParticipant =
+      chatRoom.user?.toString() === userId ||
       (!!ownerProfileId && chatRoom.fieldOwner?.toString() === ownerProfileId) ||
       (!!coachProfileId && chatRoom.coach?.toString() === coachProfileId);
+
+    // Add check for participants array (Matches, Group Sessions)
+    if (!isParticipant && chatRoom.participants && chatRoom.participants.length > 0) {
+      isParticipant = chatRoom.participants.some(p => p.toString() === userId);
+    }
+
     if (!isParticipant) {
       throw new ForbiddenException('Access denied');
     }
 
     // Update messages to isRead: true for messages NOT from the current user
-    // We use a more atomic approach to avoid fetching and saving the whole array if possible,
-    // but for subdocument arrays, we often need to map or use $[]
     let hasUnreadFromOthers = false;
     const updatedMessages = chatRoom.messages.map(message => {
       if (!message.isRead && message.sender.toString() !== userId) {
@@ -565,13 +584,20 @@ export class ChatService {
     const chatRoom = await this.chatModel.findById(chatRoomId);
     if (!chatRoom) throw new NotFoundException('Chat room not found');
 
-    // Verify user is part of the chat (customer, field owner, or coach)
+    // Verify user is part of the chat (customer, field owner, coach, or participant)
     const ownerProfileId = await this.getFieldOwnerProfileIdByUser(userId);
     const coachProfileId = await this.getCoachProfileIdByUser(userId);
-    const isParticipant =
-      chatRoom.user.toString() === userId ||
+
+    let isParticipant =
+      chatRoom.user?.toString() === userId ||
       (!!ownerProfileId && chatRoom.fieldOwner?.toString() === ownerProfileId) ||
       (!!coachProfileId && chatRoom.coach?.toString() === coachProfileId);
+
+    // Add check for participants array (Matches, Group Sessions)
+    if (!isParticipant && chatRoom.participants && chatRoom.participants.length > 0) {
+      isParticipant = chatRoom.participants.some(p => p.toString() === userId);
+    }
+
     if (!isParticipant) {
       throw new ForbiddenException('Access denied');
     }
@@ -588,11 +614,19 @@ export class ChatService {
     if (!chatRoom) return false;
     const ownerProfileId = await this.getFieldOwnerProfileIdByUser(userId);
     const coachProfileId = await this.getCoachProfileIdByUser(userId);
-    return (
-      chatRoom.user.toString() === userId ||
+    const isParticipant =
+      chatRoom.user?.toString() === userId ||
       (!!ownerProfileId && chatRoom.fieldOwner?.toString() === ownerProfileId) ||
-      (!!coachProfileId && chatRoom.coach?.toString() === coachProfileId)
-    );
+      (!!coachProfileId && chatRoom.coach?.toString() === coachProfileId);
+
+    if (isParticipant) return true;
+
+    // Add check for participants array (Matches, Group Sessions)
+    if (chatRoom.participants && chatRoom.participants.length > 0) {
+      return chatRoom.participants.some(p => p.toString() === userId);
+    }
+
+    return false;
   }
 
   // Get recent chats with pagination
@@ -602,6 +636,7 @@ export class ChatService {
         $or: [
           { user: new Types.ObjectId(userId) },
           { fieldOwner: new Types.ObjectId(userId) },
+          { participants: new Types.ObjectId(userId) },
         ],
         status: ChatStatus.ACTIVE,
       })
@@ -623,6 +658,7 @@ export class ChatService {
             $or: [
               { user: new Types.ObjectId(userId) },
               { fieldOwner: new Types.ObjectId(userId) },
+              { participants: new Types.ObjectId(userId) },
             ],
           },
           { status: ChatStatus.ACTIVE },
@@ -661,5 +697,206 @@ export class ChatService {
       { _id: chatRoomId },
       { $set: { status: ChatStatus.ARCHIVED } },
     );
+  }
+
+  // ==================== MATCHING SYSTEM CHAT METHODS ====================
+
+  /**
+   * Create chat room for 1:1 match
+   */
+  async createMatchChatRoom(matchId: string, user1Id: string, user2Id: string): Promise<ChatRoom> {
+    // Check if chat room already exists
+    const existingRoom = await this.chatModel.findOne({
+      matchId: new Types.ObjectId(matchId),
+    });
+
+    if (existingRoom) {
+      return existingRoom;
+    }
+
+    // Create new chat room for match
+    const chatRoom = new this.chatModel({
+      user: new Types.ObjectId(user1Id), // Primary user
+      matchId: new Types.ObjectId(matchId),
+      participants: [new Types.ObjectId(user1Id), new Types.ObjectId(user2Id)],
+      status: ChatStatus.ACTIVE,
+      lastMessageAt: getCurrentVietnamTimeForDB(),
+    });
+
+    await chatRoom.save();
+
+    return chatRoom;
+  }
+
+  /**
+   * Create chat room for group session
+   */
+  async createGroupSessionChatRoom(sessionId: string, creatorId: string): Promise<ChatRoom> {
+    // Check if chat room already exists
+    const existingRoom = await this.chatModel.findOne({
+      groupSessionId: new Types.ObjectId(sessionId),
+    });
+
+    if (existingRoom) {
+      return existingRoom;
+    }
+
+    // Create new chat room for group session
+    const chatRoom = new this.chatModel({
+      user: new Types.ObjectId(creatorId), // Creator as primary user
+      groupSessionId: new Types.ObjectId(sessionId),
+      participants: [new Types.ObjectId(creatorId)],
+      status: ChatStatus.ACTIVE,
+      lastMessageAt: getCurrentVietnamTimeForDB(),
+    });
+
+    await chatRoom.save();
+
+    return chatRoom;
+  }
+
+  /**
+   * Add user to group chat
+   */
+  async addUserToGroupChat(chatRoomId: string, userId: string): Promise<void> {
+    const chatRoom = await this.chatModel.findById(chatRoomId);
+
+    if (!chatRoom) {
+      throw new NotFoundException('Chat room not found');
+    }
+
+    if (!chatRoom.groupSessionId) {
+      throw new BadRequestException('This is not a group session chat');
+    }
+
+    const userObjectId = new Types.ObjectId(userId);
+
+    // Check if user is already in participants
+    const isAlreadyParticipant = chatRoom.participants.some(
+      (id) => id.toString() === userId
+    );
+
+    if (!isAlreadyParticipant) {
+      chatRoom.participants.push(userObjectId);
+      await chatRoom.save();
+    }
+  }
+
+  /**
+   * Remove user from group chat
+   */
+  async removeUserFromGroupChat(chatRoomId: string, userId: string): Promise<void> {
+    const chatRoom = await this.chatModel.findById(chatRoomId);
+
+    if (!chatRoom) {
+      throw new NotFoundException('Chat room not found');
+    }
+
+    if (!chatRoom.groupSessionId) {
+      throw new BadRequestException('This is not a group session chat');
+    }
+
+    chatRoom.participants = chatRoom.participants.filter(
+      (id) => id.toString() !== userId
+    );
+
+    await chatRoom.save();
+  }
+
+  /**
+   * Send message in match or group chat
+   */
+  async sendMatchOrGroupMessage(
+    chatRoomId: string,
+    senderId: string,
+    content: string,
+    type: MessageType = MessageType.TEXT,
+    attachments?: string[],
+  ): Promise<Message> {
+    const chatRoom = await this.chatModel.findById(chatRoomId);
+
+    if (!chatRoom) {
+      throw new NotFoundException('Chat room not found');
+    }
+
+    // Verify sender is a participant
+    const isParticipant = chatRoom.participants.some(
+      (id) => id.toString() === senderId
+    );
+
+    if (!isParticipant) {
+      throw new ForbiddenException('You are not a participant in this chat');
+    }
+
+    const message: Message = {
+      sender: new Types.ObjectId(senderId),
+      type,
+      content,
+      attachments,
+      isRead: false,
+      sentAt: getCurrentVietnamTimeForDB(),
+    };
+
+    chatRoom.messages.push(message);
+    chatRoom.lastMessageAt = getCurrentVietnamTimeForDB();
+    chatRoom.lastMessageBy = new Types.ObjectId(senderId);
+    chatRoom.hasUnread = true;
+
+    await chatRoom.save();
+
+    return message;
+  }
+
+  /**
+   * Get chat room by match ID
+   */
+  async getChatRoomByMatchId(matchId: string): Promise<ChatRoom> {
+    const chatRoom = await this.chatModel
+      .findOne({ matchId: new Types.ObjectId(matchId) })
+      .populate('participants', 'fullName email avatarUrl');
+
+    if (!chatRoom) {
+      throw new NotFoundException('Chat room not found for this match');
+    }
+
+    return chatRoom;
+  }
+
+  /**
+   * Get chat room by group session ID
+   */
+  async getChatRoomByGroupSessionId(sessionId: string): Promise<ChatRoom> {
+    const chatRoom = await this.chatModel
+      .findOne({ groupSessionId: new Types.ObjectId(sessionId) })
+      .populate('participants', 'fullName email avatarUrl');
+
+    if (!chatRoom) {
+      throw new NotFoundException('Chat room not found for this group session');
+    }
+
+    return chatRoom;
+  }
+
+  /**
+   * Send a system message to a chat room
+   */
+  async sendSystemMessage(chatRoomId: string, content: string, type: MessageType = MessageType.SYSTEM): Promise<{ message: Message; chatRoom: ChatRoom }> {
+    const chatRoom = await this.chatModel.findById(chatRoomId);
+    if (!chatRoom) throw new NotFoundException('Chat room not found');
+
+    const newMessage: Message = {
+      sender: new Types.ObjectId('000000000000000000000000'), // System sender ID
+      type,
+      content,
+      isRead: false,
+      sentAt: getCurrentVietnamTimeForDB(),
+    };
+
+    chatRoom.messages.push(newMessage);
+    chatRoom.lastMessageAt = getCurrentVietnamTimeForDB();
+    chatRoom.hasUnread = true;
+
+    await chatRoom.save();
+    return { message: newMessage, chatRoom };
   }
 }

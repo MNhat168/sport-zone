@@ -8,6 +8,7 @@ import { Field } from '../fields/entities/field.entity';
 import { Court } from '../courts/entities/court.entity';
 import { FieldOwnerProfile } from '../field-owner/entities/field-owner-profile.entity';
 import { User } from '../users/entities/user.entity';
+import { Match } from '../matching/entities/match.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { TransactionsService } from '../transactions/transactions.service';
 import { Transaction } from '../transactions/entities/transaction.entity';
@@ -83,6 +84,7 @@ export class BookingsService {
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Transaction.name) private readonly transactionModel: Model<Transaction>,
     @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
+    @InjectModel(Match.name) private readonly matchModel: Model<Match>,
     @InjectConnection() private readonly connection: Connection,
     private eventEmitter: EventEmitter2,
     private readonly transactionsService: TransactionsService,
@@ -243,6 +245,13 @@ export class BookingsService {
   }
 
 
+
+  /**
+   * Cancel hold booking via CleanupService
+   */
+  async cancelHoldBooking(bookingId: string, reason: string, maxAgeMinutes: number | null = 10) {
+    return this.cleanupService.cancelHoldBooking(bookingId, reason, maxAgeMinutes);
+  }
 
   // ============================================================================
   // PURE LAZY CREATION METHODS (NEW)
@@ -2469,6 +2478,9 @@ export class BookingsService {
     userId: string | null,
     bookingId: string
   ): Promise<{ checkoutUrl: string; paymentLinkId: string; orderCode: number }> {
+    if (!userId) {
+      throw new BadRequestException('User ID is required for payment');
+    }
     // 1. Find booking with transaction populated
     const booking = await this.bookingModel
       .findById(bookingId)
@@ -2486,17 +2498,54 @@ export class BookingsService {
       throw new BadRequestException(`Booking is ${booking.status}, cannot proceed with payment`);
     }
 
+    const isSplit = booking.metadata?.splitPayment === true;
+
     // Check if already paid
-    if (booking.paymentStatus === 'paid') {
+    if (!isSplit && booking.paymentStatus === 'paid') {
       throw new BadRequestException('Booking is already paid');
     }
 
-    const totalPrice = booking.totalPrice || booking.bookingAmount || 0;
+    if (isSplit) {
+      // Find user status in payments map
+      // Note: metadata.payments is a Map or Object.
+      // Mongoose Map: use .get() if it's a Map, or [] if it's POJO.
+      // Assuming POJO from previous inspection or .toJSON()
+      // If booking is a Mongoose document, metadata is likely just an object if defined as Mixed or Object
+      const userPayment = booking.metadata?.payments?.[userId];
+      if (userPayment?.status === 'paid') {
+        throw new BadRequestException('You have already paid your share for this booking');
+      }
+    }
+
+    let totalPrice = booking.totalPrice || booking.bookingAmount || 0;
+
+    // Handle Split Payment Amount
+    if (isSplit) {
+      const share = booking.metadata?.payments?.[userId];
+      if (share && share.amount) {
+        totalPrice = share.amount;
+        this.logger.log(`[PayOS Single] Split payment detected for user ${userId}. Amount: ${totalPrice}`);
+      } else {
+        this.logger.warn(`[PayOS Single] Split payment metadata missing for user ${userId}. Using full price.`);
+      }
+    }
 
     // 3. Check if transaction already exists (created during booking creation)
     // FIXED: Reuse existing transaction instead of creating duplicate
-    let transaction = booking.transaction as any;
+    // For Split Payment: We must find/create a transaction specifically for THIS user
+    let transaction: any;
     let orderCode: number;
+
+    if (isSplit) {
+      // Find transaction for this user and booking
+      transaction = await this.transactionModel.findOne({
+        bookingId: new Types.ObjectId(bookingId),
+        userId: new Types.ObjectId(userId),
+        status: { $ne: TransactionStatus.FAILED }
+      });
+    } else {
+      transaction = booking.transaction as any;
+    }
 
     if (transaction && transaction._id) {
       // Transaction already exists, check if it has externalTransactionId (PayOS orderCode)
@@ -2512,8 +2561,13 @@ export class BookingsService {
           orderCode.toString()
         );
       }
+
+      // Update amount if changed (only update if pending)
+      if (transaction.status === TransactionStatus.PENDING && transaction.amount !== totalPrice) {
+        await this.transactionsService.updateTransactionAmount(transaction._id.toString(), totalPrice);
+      }
     } else {
-      // No transaction exists, create new one (for bookings created without transaction)
+      // No transaction exists, create new one (for bookings created without transaction or new split payer)
       this.logger.log(`[PayOS Single] No existing transaction found, creating new one`);
       orderCode = Number(String(Date.now()).slice(-6) + Math.floor(Math.random() * 1000));
 
@@ -2522,34 +2576,60 @@ export class BookingsService {
         userId: userId || booking.user?.toString() || new Types.ObjectId().toString(),
         amount: totalPrice,
         method: PaymentMethod.PAYOS,
-        paymentNote: `Payment for booking ${bookingId}`,
+        paymentNote: isSplit ? `Split Payment for booking ${bookingId}` : `Payment for booking ${bookingId}`,
         externalTransactionId: orderCode.toString(),
       });
 
-      // ✅ Link transaction to booking (for single booking)
-      booking.transaction = transaction._id as Types.ObjectId;
-      await booking.save();
+      // Link transaction to booking (ONLY if not split)
+      if (!isSplit) {
+        booking.transaction = transaction._id as Types.ObjectId;
+        await booking.save();
+      }
+    }
+
+    // Determine Return/Cancel URLs
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    let returnUrl: string | undefined;
+    let cancelUrl: string | undefined;
+
+    if (isSplit && booking.metadata?.matchId) {
+      try {
+        const match = await this.matchModel.findById(booking.metadata.matchId);
+        if (match) {
+          // Redirect back to specific matching match detail page
+          returnUrl = `${clientUrl}/matching/matches/${match._id}`;
+          cancelUrl = `${clientUrl}/matching/matches/${match._id}`;
+          this.logger.log(`[PayOS Single] Setting returnUrl/cancelUrl to match detail: ${returnUrl}`);
+        }
+      } catch (matchErr) {
+        this.logger.error(`[PayOS Single] Failed to fetch match for redirect URL: ${matchErr}`);
+      }
     }
 
     // 4. Create PayOS Link
     const fieldName = (booking.field as any)?.name || 'Field';
+    // Description must be short (<25 chars) and clean
+    const description = isSplit ? `Split ${bookingId.slice(-6)}` : `Book ${bookingId.slice(-6)}`;
+
     const paymentLinkRes = await this.payOSService.createPaymentUrl({
       orderId: bookingId, // DTO requires orderId string
       orderCode: orderCode,
       amount: totalPrice,
-      description: `Book ${bookingId.slice(-6)}`,
+      description: description,
       items: [
         {
-          name: `Booking ${fieldName} - ${new Date(booking.date).toLocaleDateString()}`,
+          name: `Booking ${fieldName} - ${new Date(booking.date).toLocaleDateString()} ${isSplit ? '(Share)' : ''}`,
           quantity: 1,
           price: totalPrice,
         }
       ],
-      // Use defaults from PayOSService config
+      returnUrl,
+      cancelUrl
+      // Use defaults from PayOSService config if these are undefined
     });
 
     // 5. Booking transaction link already set above (if new transaction was created)
-    await booking.save();
+    if (!isSplit) await booking.save();
 
     return {
       checkoutUrl: paymentLinkRes.checkoutUrl,
@@ -2920,7 +3000,7 @@ export class BookingsService {
 
     // 9. Emit event for real-time updates
     this.eventEmitter.emit('booking.checkedIn', {
-      bookingId: booking._id.toString(),
+      bookingId: (booking._id as Types.ObjectId).toString(),
       userId: booking.user.toString(),
       fieldId: booking.field?.toString() || '',
       checkedInAt: booking.checkedInAt,

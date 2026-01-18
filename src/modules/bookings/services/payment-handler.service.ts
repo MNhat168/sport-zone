@@ -241,10 +241,53 @@ export class PaymentHandlerService implements OnModuleInit {
         }
 
         const isCoach = booking.type === BookingType.COACH;
+        const isSplitPayment = booking.metadata?.splitPayment === true;
 
-        // Update Status
-        booking.paymentStatus = 'paid';
-        if (!isCoach) booking.status = BookingStatus.CONFIRMED;
+        if (isSplitPayment) {
+          // Update individual payment status
+          const payments = booking.metadata?.payments || {};
+          if (payments[event.userId]) {
+            payments[event.userId].status = 'paid';
+            payments[event.userId].paidAt = new Date();
+            payments[event.userId].transactionId = event.paymentId;
+          }
+          booking.markModified('metadata');
+
+          // Check if all parties paid
+          const allPaid = Object.values(payments).every((p: any) => p.status === 'paid');
+
+          if (allPaid) {
+            booking.paymentStatus = 'paid';
+            if (!isCoach) booking.status = BookingStatus.CONFIRMED;
+            this.logger.log(`[Payment Success] ✅ Split payment complete. Booking ${booking._id} CONFIRMED.`);
+
+            // Notify MatchingService to send success message
+            if (booking.metadata?.matchId) {
+              this.eventEmitter.emit('match.split_payment_complete', {
+                matchId: booking.metadata.matchId,
+                bookingId: (booking._id as Types.ObjectId).toString()
+              });
+            }
+          } else {
+            this.logger.log(`[Payment Success] ⏳ Split payment partial. Booking ${booking._id} waiting for others.`);
+
+            // Notify MatchingService of partial payment for real-time UI update
+            if (booking.metadata?.matchId) {
+              this.eventEmitter.emit('match.split_payment_partial', {
+                matchId: booking.metadata.matchId,
+                bookingId: (booking._id as Types.ObjectId).toString(),
+                userId: event.userId
+              });
+            }
+
+            await booking.save({ session });
+            continue; // Skip the rest of confirmation logic (email, revenue, etc) until fully paid
+          }
+        } else {
+          // Standard flow
+          booking.paymentStatus = 'paid';
+          if (!isCoach) booking.status = BookingStatus.CONFIRMED;
+        }
 
         try {
           await booking.save({ session });

@@ -1,0 +1,52 @@
+@startuml
+' SportZone - Package Diagram
+skinparam packageStyle rectangle
+title SportZone - Architecture Package Diagram
+
+package "Presentation" as Presentation {
+  [Controllers]
+}
+
+package "Application" as Application {
+  [Services]
+  [DTOs]
+  [Middleware]
+}
+
+package "Infrastructure" as Infrastructure {
+  [Repositories]
+  [DAO]
+  [Migrations]
+  [Configuration]
+  [Helpers]
+}
+
+package "Core" as Core {
+  [Models]
+  [Common]
+}
+
+' Relationships (uses / calls)
+Presentation.Controllers ..> Application.Services : <<uses>>
+Presentation.Controllers ..> Application.DTOs : <<uses>>
+Application.Services ..> Infrastructure.Repositories : <<uses>>
+Application.Services ..> Application.DTOs : <<uses>>
+Infrastructure.Repositories ..> Infrastructure.DAO : <<uses>>
+Infrastructure.DAO ..> Core.Models : <<uses>>
+Infrastructure.Helpers ..> Core.Common : <<uses>>
+Infrastructure.Configuration ..> Core.Common : <<uses>>
+Infrastructure.Migrations ..> Infrastructure.Repositories : <<uses>>
+Presentation.Controllers ..> Infrastructure.Configuration : <<calls>>
+
+legend left
+|= Element |= Description |
+| Controllers | HTTP layer: NestJS controllers |
+| Services | Business logic, uses Repositories |
+| DTOs | Request/response shapes |
+| Repositories | Data access wrappers (module-level) |
+| DAO | Low-level DB access / drivers |
+| Models | Domain & Mongoose schemas |
+| Common | Shared utilities, enums, constants |
+endlegend
+
+@enduml

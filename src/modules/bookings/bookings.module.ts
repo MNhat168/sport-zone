@@ -12,6 +12,7 @@ import { CoachProfile, CoachProfileSchema } from '../coaches/entities/coach-prof
 import { Transaction, TransactionSchema } from '../transactions/entities/transaction.entity';
 import { Court, CourtSchema } from '../courts/entities/court.entity';
 import { CheckInLog, CheckInLogSchema } from '../qr-checkin/entities/check-in-log.entity';
+import { Match, MatchSchema } from '../matching/entities/match.entity';
 
 // Services and Controllers
 import { BookingsService } from './bookings.service';
@@ -61,6 +62,7 @@ import { CheckInRateLimitGuard } from '../qr-checkin/guards/check-in-rate-limit.
       { name: CoachProfile.name, schema: CoachProfileSchema },
       { name: Transaction.name, schema: TransactionSchema },
       { name: CheckInLog.name, schema: CheckInLogSchema },
+      { name: Match.name, schema: MatchSchema },
     ]),
     EventEmitterModule,
     forwardRef(() => TransactionsModule),

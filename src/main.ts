@@ -82,6 +82,9 @@ async function bootstrap() {
       // Bật whitelist: Tự động loại bỏ các thuộc tính không khai báo trong DTO
       whitelist: true,
 
+      // Bật transform: Tự động chuyển đổi kiểu dữ liệu dựa trên DTO
+      transform: true,
+
       // Tùy chỉnh cách format lỗi trả về khi validation thất bại
       exceptionFactory: (errors: ValidationError[]) =>
         new BadRequestException({

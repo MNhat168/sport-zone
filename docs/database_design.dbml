@@ -1,0 +1,390 @@
+// SportZone Database Design (DBML)
+// Generated from NestJS Mongoose Entities
+
+Table users {
+  id ObjectId [primary key]
+  fullName varchar
+  email varchar [unique]
+  phone varchar
+  date_of_birth timestamp
+  password varchar
+  role varchar
+  avatarUrl varchar
+  isVerified boolean
+  googleId varchar
+  isActive boolean
+  idNumber varchar
+  address varchar
+  subscriptionStatus varchar
+  nextPaymentDate timestamp
+  lastPaymentDate timestamp
+  gracePeriodEndDate timestamp
+  activeMatchesCount number
+  weeklyGroupSessionsCount number
+  matchingTier varchar
+  lastCancellationDate timestamp
+  demeritUntil timestamp
+  matchProfileId ObjectId
+  superLikesRemaining number
+  lastSuperLikeReset timestamp
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table coach_profiles {
+  id ObjectId [primary key]
+  user ObjectId [ref: - users.id]
+  sports varchar
+  certification varchar
+  hourlyRate number
+  bio text
+  completedSessions number
+  experience varchar
+  rating number
+  totalReviews number
+  rank varchar
+  location json
+  galleryImages varchar[]
+  profileImage varchar
+  bankVerified boolean
+  bankVerifiedAt timestamp
+  isCoachActive boolean
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table field_owner_profiles {
+  id ObjectId [primary key]
+  user ObjectId [ref: - users.id]
+  facility json
+  rating number
+  totalReviews number
+  isVerified boolean
+  verifiedAt timestamp
+  verifiedBy ObjectId [ref: > users.id]
+  verificationDocument varchar
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table fields {
+  id ObjectId [primary key]
+  owner ObjectId [ref: > field_owner_profiles.id]
+  name varchar
+  sportType varchar
+  description text
+  images varchar[]
+  operatingHours json
+  slotDuration number
+  minSlots number
+  maxSlots number
+  priceRanges json
+  basePrice number
+  isActive boolean
+  isAdminVerify boolean
+  maintenanceNote text
+  maintenanceUntil timestamp
+  rating number
+  totalReviews number
+  location json
+  amenities json[]
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table courts {
+  id ObjectId [primary key]
+  field ObjectId [ref: > fields.id]
+  name varchar
+  courtNumber number
+  isActive boolean
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table bookings {
+  id ObjectId [primary key]
+  user ObjectId [ref: > users.id]
+  field ObjectId [ref: > fields.id]
+  court ObjectId [ref: > courts.id]
+  date timestamp
+  type varchar
+  requestedCoach ObjectId [ref: > coach_profiles.id]
+  coachStatus varchar
+  retryAttempts number
+  startTime varchar
+  endTime varchar
+  numSlots number
+  status varchar
+  paymentStatus varchar
+  approvalStatus varchar
+  bookingAmount number
+  platformFee number
+  totalPrice number
+  cancellationReason text
+  selectedAmenities ObjectId[]
+  amenitiesFee number
+  note text
+  noteStatus varchar
+  pricingSnapshot json
+  metadata json
+  recurringGroupId ObjectId
+  checkedInAt timestamp
+  checkedInBy ObjectId [ref: > users.id]
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table tournaments {
+  id ObjectId [primary key]
+  name varchar
+  sportType varchar
+  category varchar
+  competitionFormat varchar
+  location varchar
+  tournamentDate timestamp
+  registrationStart timestamp
+  registrationEnd timestamp
+  startTime varchar
+  endTime varchar
+  numberOfTeams number
+  teamSize number
+  maxParticipants number
+  registrationFee number
+  description text
+  organizer ObjectId [ref: > users.id]
+  status varchar
+  courtsNeeded number
+  totalCourtCost number
+  confirmationDeadline timestamp
+  totalRegistrationFeesCollected number
+  commissionRate number
+  commissionAmount number
+  prizePool number
+  rules text
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table schedules {
+  id ObjectId [primary key]
+  field ObjectId [ref: > fields.id]
+  court ObjectId [ref: > courts.id]
+  coach ObjectId [ref: > coach_profiles.id]
+  date timestamp
+  bookedSlots json[]
+  isHoliday boolean
+  holidayReason varchar
+  version number
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table match_profiles {
+  id ObjectId [primary key]
+  userId ObjectId [ref: - users.id]
+  sportPreferences varchar[]
+  skillLevel varchar
+  location json
+  gender varchar
+  preferredGender varchar
+  bio text
+  photos varchar[]
+  availability json[]
+  isActive boolean
+  age number
+  lastActiveAt timestamp
+  skillLevelRange number
+  minAge number
+  maxAge number
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table matches {
+  id ObjectId [primary key]
+  user1Id ObjectId [ref: > users.id]
+  user2Id ObjectId [ref: > users.id]
+  sportType varchar
+  status varchar
+  chatRoomId ObjectId
+  scheduledDate timestamp
+  scheduledStartTime varchar
+  scheduledEndTime varchar
+  fieldId ObjectId [ref: > fields.id]
+  courtId ObjectId [ref: > courts.id]
+  bookingId ObjectId [ref: > bookings.id]
+  matchedAt timestamp
+  lastInteractionAt timestamp
+  isUnmatchedByUser1 boolean
+  isUnmatchedByUser2 boolean
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table swipes {
+  id ObjectId [primary key]
+  userId ObjectId [ref: > users.id]
+  targetUserId ObjectId [ref: > users.id]
+  action varchar
+  sportType varchar
+  timestamp timestamp
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table group_sessions {
+  id ObjectId [primary key]
+  creatorId ObjectId [ref: > users.id]
+  sportType varchar
+  title varchar
+  description text
+  location json
+  fieldId ObjectId [ref: > fields.id]
+  courtId ObjectId [ref: > courts.id]
+  scheduledDate timestamp
+  startTime varchar
+  endTime varchar
+  requiredPlayers number
+  currentPlayers ObjectId[]
+  maxPlayers number
+  skillLevel varchar
+  status varchar
+  chatRoomId ObjectId
+  bookingId ObjectId [ref: > bookings.id]
+  costPerPerson number
+  paymentStatus json
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table transactions {
+  id ObjectId [primary key]
+  invoice ObjectId [ref: > invoices.id]
+  amount number
+  direction varchar
+  method varchar
+  type varchar
+  status varchar
+  user ObjectId [ref: > users.id]
+  relatedTransaction ObjectId [ref: > transactions.id]
+  externalTransactionId varchar
+  refundReason text
+  refundedBy ObjectId [ref: > users.id]
+  payoutTo ObjectId [ref: > users.id]
+  notes text
+  metadata json
+  processedAt timestamp
+  completedAt timestamp
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table invoices {
+  id ObjectId [primary key]
+  user ObjectId [ref: > users.id]
+  amount number
+  status varchar
+  month number
+  year number
+  dueDate timestamp
+  paidAt timestamp
+  payosOrderCode number
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table wallets {
+  id ObjectId [primary key]
+  user ObjectId [ref: - users.id]
+  role varchar
+  systemBalance number
+  pendingBalance number
+  availableBalance number
+  refundBalance number
+  currency varchar
+  status varchar
+  lastTransactionAt timestamp
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table notifications {
+  id ObjectId [primary key]
+  recipient ObjectId [ref: > users.id]
+  type varchar
+  title varchar
+  message text
+  isRead boolean
+  metadata json
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table chat_rooms {
+  id ObjectId [primary key]
+  user ObjectId [ref: > users.id]
+  fieldOwner ObjectId [ref: > field_owner_profiles.id]
+  coach ObjectId [ref: > coach_profiles.id]
+  field ObjectId [ref: > fields.id]
+  bookingId varchar
+  matchId ObjectId [ref: > matches.id]
+  groupSessionId ObjectId [ref: > group_sessions.id]
+  participants ObjectId[]
+  status varchar
+  lastMessageAt timestamp
+  hasUnread boolean
+  lastMessageBy ObjectId [ref: > users.id]
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table amenities {
+  id ObjectId [primary key]
+  name varchar
+  description text
+  sportType varchar
+  isActive boolean
+  imageUrl varchar
+  type varchar
+}
+
+Table reviews {
+  id ObjectId [primary key]
+  user ObjectId [ref: > users.id]
+  booking ObjectId [ref: > bookings.id]
+  field ObjectId [ref: > fields.id]
+  coach ObjectId [ref: > coach_profiles.id]
+  title varchar
+  type varchar
+  rating number
+  comment text
+  response text
+  isModerated boolean
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table check_in_logs {
+  id ObjectId [primary key]
+  booking ObjectId [ref: > bookings.id]
+  checkedInBy ObjectId [ref: > users.id]
+  checkedInAt timestamp
+  status varchar
+  failureReason text
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table reports {
+  id ObjectId [primary key]
+  reporter ObjectId [ref: > users.id]
+  field ObjectId [ref: > fields.id]
+  category varchar
+  subject varchar
+  description text
+  status varchar
+  lastActivityAt timestamp
+  createdAt timestamp
+  updatedAt timestamp
+}
