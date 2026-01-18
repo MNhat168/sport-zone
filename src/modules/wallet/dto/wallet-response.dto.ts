@@ -15,13 +15,13 @@ export class FieldOwnerWalletDto {
     const pendingBalance = wallet.pendingBalance || 0;
     const availableBalance = wallet.availableBalance || 0;
 
-    let message = 'Chua co doanh thu';
+    let message = 'Chưa có doanh thu';
     if (availableBalance > 0 && pendingBalance > 0) {
-      message = 'Co the rut tien va dang cho check-in';
+      message = 'Có thể rút tiền và đang chờ check-in';
     } else if (availableBalance > 0) {
-      message = 'Co the rut tien ve tai khoan ngan hang';
+      message = 'Có thể rút tiền về tài khoản ngân hàng';
     } else if (pendingBalance > 0) {
-      message = 'Se duoc mo khoa sau khi khach check-in';
+      message = 'Sẽ được mở khóa sau khi khách check-in';
     }
 
     return {
