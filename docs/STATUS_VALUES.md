@@ -8,6 +8,7 @@
 
 ## Table of Contents
 - [Booking Status](#booking-status)
+  - [Owner-Reserved Booking](#owner-reserved-booking)
 - [Transaction Status](#transaction-status)
 - [Payment Methods](#payment-methods)
 - [Tournament Status](#tournament-status)
@@ -50,6 +51,43 @@
 
 > ⚠️ **CRITICAL FOR FE**: Backend sets `paymentStatus: 'paid'`, NOT `'completed'`!
 
+### Owner-Reserved Booking
+
+**File**: `BE/src/modules/bookings/entities/booking.entity.ts` (metadata field)
+
+Owner-reserved bookings are special bookings created by field owners to reserve their own slots. These bookings are identified via the `metadata` field:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `metadata.isOwnerReserved` | `boolean` | `true` if this is an owner-reserved booking |
+| `metadata.originalPrice` | `number` | Original listed price of the slot at booking time |
+| `metadata.systemFeeAmount` | `number` | System fee amount deducted from owner's pendingBalance |
+
+**Characteristics of Owner-Reserved Bookings:**
+- `bookingAmount = 0` (no court rental fee)
+- `platformFee = 0` (no platform fee on booking amount)
+- `totalPrice = 0` (no total price)
+- `status = 'confirmed'` (immediately confirmed)
+- `paymentStatus = 'paid'` (marked as paid)
+- System fee (`metadata.systemFeeAmount`) is deducted from owner's `pendingBalance` (money on hold)
+
+**How to Identify:**
+```typescript
+// Check if booking is owner-reserved
+const isOwnerReserved = booking.metadata?.isOwnerReserved === true;
+
+// Get system fee amount
+const systemFee = booking.metadata?.systemFeeAmount || 0;
+
+// Get original price
+const originalPrice = booking.metadata?.originalPrice || 0;
+```
+
+**API Endpoint:**
+- `POST /bookings/owner-reserved` - Create owner-reserved booking
+- Requires: `AuthGuard('jwt')` + `FieldAccessGuard`
+- Only field owners or staff can create these bookings
+
 ---
 
 ## Transaction Status
@@ -77,7 +115,7 @@
 | `reversal` | Chargeback/reversal |
 | `adjustment` | Manual adjustment (±) |
 | `payout` | System → Field Owner/Coach payout |
-| `fee` | Platform fee collection |
+| `fee` | Platform fee collection (includes owner-reserved booking system fee) |
 
 ---
 
@@ -347,6 +385,10 @@ const label = paymentMethodLabels[booking.paymentMethod];
 
 ## Changelog
 
+- **2025-01-XX**: Added Owner-Reserved Booking documentation
+  - Documented `metadata.isOwnerReserved` flag
+  - Added system fee calculation and deduction logic
+  - Documented API endpoint for owner-reserved bookings
 - **2025-12-28**: Initial documentation created
   - Added all core status enums
   - Documented payment status mismatch issue

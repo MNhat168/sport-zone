@@ -7,6 +7,7 @@ import { Field, FieldSchema } from '../fields/entities/field.entity';
 import { FieldOwnerProfile, FieldOwnerProfileSchema } from './entities/field-owner-profile.entity';
 import { FieldOwnerRegistrationRequest, FieldOwnerRegistrationRequestSchema } from './entities/field-owner-registration-request.entity';
 import { BankAccount, BankAccountSchema } from './entities/bank-account.entity';
+import { FieldQrCode, FieldQrCodeSchema } from './entities/field-qr-code.entity';
 import { Booking, BookingSchema } from '../bookings/entities/booking.entity';
 import { Schedule, ScheduleSchema } from '../schedules/entities/schedule.entity';
 import { User, UserSchema } from '../users/entities/user.entity';
@@ -31,6 +32,7 @@ import { FieldAccessGuard } from '../../common/guards/field-access.guard';
       { name: FieldOwnerProfile.name, schema: FieldOwnerProfileSchema },
       { name: FieldOwnerRegistrationRequest.name, schema: FieldOwnerRegistrationRequestSchema },
       { name: BankAccount.name, schema: BankAccountSchema },
+      { name: FieldQrCode.name, schema: FieldQrCodeSchema },
       { name: Booking.name, schema: BookingSchema },
       { name: Schedule.name, schema: ScheduleSchema },
       { name: User.name, schema: UserSchema },
@@ -41,6 +43,7 @@ import { FieldAccessGuard } from '../../common/guards/field-access.guard';
     forwardRef(() => FieldsModule),
     forwardRef(() => TransactionsModule),
     forwardRef(() => ServiceModule),
+    forwardRef(() => import('../qr-checkin/qr-checkin.module').then(m => m.QrCheckinModule)),
     EmailModule,
     EkycModule,
     CourtsModule,

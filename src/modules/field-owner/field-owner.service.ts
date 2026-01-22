@@ -21,6 +21,7 @@ import {
 import { RegistrationStatus } from '@common/enums/field-owner-registration.enum';
 import { BankAccount } from './entities/bank-account.entity';
 import { BankAccountStatus } from '@common/enums/bank-account.enum';
+import { FieldQrCode } from './entities/field-qr-code.entity';
 import {
   FieldsDto,
   CreateFieldDto,
@@ -61,6 +62,7 @@ import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 import { Court } from '../courts/entities/court.entity';
 import { BookingStatus } from '@common/enums/booking.enum';
 import { SportType } from '@common/enums/sport-type.enum';
+import { QrCheckinService } from '../qr-checkin/qr-checkin.service';
 
 @Injectable()
 export class FieldOwnerService {
@@ -72,6 +74,7 @@ export class FieldOwnerService {
     @InjectModel(FieldOwnerRegistrationRequest.name)
     private readonly registrationRequestModel: Model<FieldOwnerRegistrationRequest>,
     @InjectModel(BankAccount.name) private readonly bankAccountModel: Model<BankAccount>,
+    @InjectModel(FieldQrCode.name) private readonly fieldQrCodeModel: Model<FieldQrCode>,
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Transaction.name) private readonly transactionModel: Model<Transaction>,
@@ -83,6 +86,8 @@ export class FieldOwnerService {
     private readonly configService: ConfigService,
     @Inject(forwardRef(() => FieldsService))
     private readonly fieldsService: FieldsService,
+    @Inject(forwardRef(() => QrCheckinService))
+    private readonly qrCheckinService: QrCheckinService,
     private readonly eventEmitter: EventEmitter2,
   ) { }
 
@@ -609,6 +614,10 @@ export class FieldOwnerService {
       transactionStatus?: string;
       startDate?: string;
       endDate?: string;
+      recurringFilter?: 'none' | 'only' | 'all';
+      recurringType?: 'CONSECUTIVE' | 'WEEKLY';
+      sortBy?: 'createdAt' | 'date' | 'totalPrice';
+      sortOrder?: 'asc' | 'desc';
       page?: number;
       limit?: number;
     },
@@ -679,6 +688,23 @@ export class FieldOwnerService {
       // Add type filter if provided
       if (filters.type) {
         bookingFilter.type = filters.type;
+      }
+
+      // Add recurringFilter logic
+      if (filters.recurringFilter) {
+        if (filters.recurringFilter === 'none') {
+          // Only bookings WITHOUT recurringGroupId (single bookings)
+          bookingFilter.recurringGroupId = { $exists: false };
+        } else if (filters.recurringFilter === 'only') {
+          // Only bookings WITH recurringGroupId (recurring bookings)
+          bookingFilter.recurringGroupId = { $exists: true };
+        }
+        // 'all' means no filter on recurringGroupId
+      }
+
+      // Add recurringType filter (CONSECUTIVE vs WEEKLY)
+      if (filters.recurringType) {
+        bookingFilter.recurringType = filters.recurringType;
       }
 
       if (filters.status) {
@@ -783,6 +809,23 @@ export class FieldOwnerService {
 
       const total = await this.bookingModel.countDocuments(bookingFilter);
 
+      // Build sort object
+      const sortField = filters.sortBy || 'createdAt';
+      const sortDirection = filters.sortOrder === 'asc' ? 1 : -1;
+      const sortObject: any = {};
+
+      if (sortField === 'date') {
+        sortObject.date = sortDirection;
+        sortObject.startTime = sortDirection;  // Secondary sort by startTime
+      } else if (sortField === 'totalPrice') {
+        sortObject.totalPrice = sortDirection;
+        sortObject.date = -1;  // Secondary sort by date (newest first)
+      } else {
+        // Default: sort by createdAt
+        sortObject.createdAt = sortDirection;
+        sortObject._id = sortDirection;  // For consistent pagination
+      }
+
       const bookings = await this.bookingModel
         .find(bookingFilter)
         .populate({
@@ -806,7 +849,7 @@ export class FieldOwnerService {
           path: 'requestedCoach',
           select: 'fullName phoneNumber',
         })
-        .sort({ date: -1, startTime: -1 })
+        .sort(sortObject)
         .skip(skip)
         .limit(limit)
         .exec();
@@ -2986,6 +3029,202 @@ export class FieldOwnerService {
       verificationUrl: account.verificationUrl,
       verificationQrCode: account.verificationQrCode,
     };
+  }
+
+  // ============================================================================
+  // FIELD QR CODE MANAGEMENT
+  // ============================================================================
+
+  /**
+   * Generate or get existing QR code for a field
+   * @param fieldId - The field ID
+   * @param ownerId - The owner user ID
+   * @returns QR code information
+   */
+  async generateFieldQrCode(fieldId: string, ownerId: string) {
+    try {
+      // 1. Verify field existence and ownership
+      const field = await this.verifyFieldOwnership(fieldId, ownerId);
+
+      // 2. Check if QR code already exists
+      let existingQrCode = await this.fieldQrCodeModel.findOne({
+        field: new Types.ObjectId(fieldId),
+        isActive: true
+      });
+
+      if (existingQrCode) {
+        this.logger.log(`[Field QR] QR code already exists for field ${fieldId}, returning existing`);
+        return {
+          fieldId: (field._id as Types.ObjectId).toString(),
+          fieldName: field.name,
+          qrToken: existingQrCode.qrToken,
+          qrCodeUrl: this.generateQrCodeUrl(existingQrCode.qrToken),
+          generatedAt: existingQrCode.generatedAt,
+          isActive: existingQrCode.isActive,
+        };
+      }
+
+      // 3. Generate new QR token
+      const qrToken = await this.qrCheckinService.generateFieldQrToken(fieldId);
+
+      // 4. Save to database
+      const qrCode = new this.fieldQrCodeModel({
+        field: new Types.ObjectId(fieldId),
+        qrToken,
+        generatedAt: new Date(),
+        isActive: true,
+        generatedBy: new Types.ObjectId(ownerId),
+      });
+
+      await qrCode.save();
+
+      this.logger.log(`[Field QR] Generated new QR code for field ${fieldId}`);
+
+      return {
+        fieldId: (field._id as Types.ObjectId).toString(),
+        fieldName: field.name,
+        qrToken,
+        qrCodeUrl: this.generateQrCodeUrl(qrToken),
+        generatedAt: qrCode.generatedAt,
+        isActive: qrCode.isActive,
+      };
+    } catch (error) {
+      this.logger.error(`[Field QR] Error generating QR code for field ${fieldId}:`, error);
+      if (error instanceof BadRequestException || error instanceof ForbiddenException || error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to generate field QR code');
+    }
+  }
+
+  /**
+   * Get existing QR code for a field
+   * @param fieldId - The field ID
+   * @param ownerId - The owner user ID
+   * @returns QR code information or null
+   */
+  async getFieldQrCode(fieldId: string, ownerId: string) {
+    try {
+      // 1. Verify field ownership
+      const field = await this.verifyFieldOwnership(fieldId, ownerId);
+
+      // 2. Find QR code
+      const qrCode = await this.fieldQrCodeModel.findOne({
+        field: new Types.ObjectId(fieldId),
+        isActive: true,
+      });
+
+      if (!qrCode) {
+        return null;
+      }
+
+      return {
+        fieldId: (field._id as Types.ObjectId).toString(),
+        fieldName: field.name,
+        qrToken: qrCode.qrToken,
+        qrCodeUrl: this.generateQrCodeUrl(qrCode.qrToken),
+        generatedAt: qrCode.generatedAt,
+        isActive: qrCode.isActive,
+      };
+    } catch (error) {
+      this.logger.error(`[Field QR] Error getting QR code for field ${fieldId}:`, error);
+      if (error instanceof BadRequestException || error instanceof ForbiddenException || error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to get field QR code');
+    }
+  }
+
+  /**
+   * Regenerate QR code for a field (invalidate old, create new)
+   * @param fieldId - The field ID
+   * @param ownerId - The owner user ID
+   * @returns New QR code information
+   */
+  async regenerateFieldQrCode(fieldId: string, ownerId: string) {
+    try {
+      // 1. Verify field ownership
+      const field = await this.verifyFieldOwnership(fieldId, ownerId);
+
+      // 2. Mark old QR codes as inactive
+      await this.fieldQrCodeModel.updateMany(
+        { field: new Types.ObjectId(fieldId) },
+        { isActive: false }
+      );
+
+      this.logger.log(`[Field QR] Marked old QR codes as inactive for field ${fieldId}`);
+
+      // 3. Generate new QR token
+      const qrToken = await this.qrCheckinService.generateFieldQrToken(fieldId);
+
+      // 4. Save new QR code
+      const qrCode = new this.fieldQrCodeModel({
+        field: new Types.ObjectId(fieldId),
+        qrToken,
+        generatedAt: new Date(),
+        isActive: true,
+        generatedBy: new Types.ObjectId(ownerId),
+      });
+
+      await qrCode.save();
+
+      this.logger.log(`[Field QR] Regenerated QR code for field ${fieldId}`);
+
+      return {
+        fieldId: (field._id as Types.ObjectId).toString(),
+        fieldName: field.name,
+        qrToken,
+        qrCodeUrl: this.generateQrCodeUrl(qrToken),
+        generatedAt: qrCode.generatedAt,
+        isActive: qrCode.isActive,
+      };
+    } catch (error) {
+      this.logger.error(`[Field QR] Error regenerating QR code for field ${fieldId}:`, error);
+      if (error instanceof BadRequestException || error instanceof ForbiddenException || error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to regenerate field QR code');
+    }
+  }
+
+  /**
+   * Helper: Verify field exists and user owns it
+   */
+  private async verifyFieldOwnership(fieldId: string, ownerId: string) {
+    if (!Types.ObjectId.isValid(fieldId)) {
+      throw new BadRequestException('Invalid field ID format');
+    }
+
+    const field = await this.fieldModel.findById(fieldId).exec();
+    if (!field) {
+      throw new NotFoundException('Field not found');
+    }
+
+    // Get field owner profile
+    const ownerProfile = await this.fieldOwnerProfileModel.findOne({
+      user: new Types.ObjectId(ownerId)
+    }).exec();
+
+    if (!ownerProfile) {
+      throw new ForbiddenException('You are not a field owner');
+    }
+
+    // Check if user owns this field
+    if (field.owner.toString() !== (ownerProfile._id as Types.ObjectId).toString()) {
+      throw new ForbiddenException('You do not own this field');
+    }
+
+    return field;
+  }
+
+  /**
+   * Helper: Generate QR code URL from token
+   */
+  private generateQrCodeUrl(token: string): string {
+    // You can integrate with a QR code generation service here
+    // For now, return a URL that can be used to generate QR code on frontend
+    const clientUrl = this.configService.get('CLIENT_URL') || 'http://localhost:5173';
+    return `${clientUrl}/qr-checkin?token=${encodeURIComponent(token)}`;
   }
 }
 

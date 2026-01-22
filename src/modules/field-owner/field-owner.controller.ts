@@ -376,6 +376,10 @@ export class FieldOwnerController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get bookings for owner filtered by type (field or field_coach)' })
   @ApiQuery({ name: 'type', required: false, description: 'Booking type: field or field_coach' })
+  @ApiQuery({ name: 'recurringFilter', required: false, description: 'Filter recurring bookings: none (single only), only (recurring only), all (both)' })
+  @ApiQuery({ name: 'recurringType', required: false, description: 'Filter by recurring type: CONSECUTIVE or WEEKLY' })
+  @ApiQuery({ name: 'sortBy', required: false, description: 'Sort by field: createdAt, date, or totalPrice' })
+  @ApiQuery({ name: 'sortOrder', required: false, description: 'Sort order: asc or desc' })
   async getAllBookingsByType(
     @Request() req: any,
     @Query('type') type?: string,
@@ -384,6 +388,10 @@ export class FieldOwnerController {
     @Query('transactionStatus') transactionStatus?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @Query('recurringFilter') recurringFilter?: 'none' | 'only' | 'all',
+    @Query('recurringType') recurringType?: 'CONSECUTIVE' | 'WEEKLY',
+    @Query('sortBy') sortBy?: 'createdAt' | 'date' | 'totalPrice',
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
   ) {
@@ -395,6 +403,10 @@ export class FieldOwnerController {
       transactionStatus,
       startDate,
       endDate,
+      recurringFilter,
+      recurringType,
+      sortBy,
+      sortOrder,
       page: Number(page),
       limit: Number(limit),
     });
@@ -906,6 +918,53 @@ export class FieldOwnerController {
     @Body() dto: UpdateFieldVerificationDto,
   ): Promise<FieldsDto> {
     return this.fieldsService.updateFieldVerification(fieldId, dto.isAdminVerify);
+  }
+
+  // ============================================================================
+  // FIELD QR CODE MANAGEMENT
+  // ============================================================================
+
+  @Get('fields/:fieldId/qr-code')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get field QR code' })
+  @ApiParam({ name: 'fieldId', description: 'Field ID' })
+  @ApiResponse({ status: 200, description: 'Field QR code retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'QR code not found' })
+  async getFieldQrCode(
+    @Param('fieldId') fieldId: string,
+    @Request() req: any,
+  ) {
+    const userId = req.user.userId;
+    return this.fieldOwnerService.getFieldQrCode(fieldId, userId);
+  }
+
+  @Post('fields/:fieldId/qr-code/generate')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Generate or get field QR code' })
+  @ApiParam({ name: 'fieldId', description: 'Field ID' })
+  @ApiResponse({ status: 200, description: 'Field QR code generated successfully' })
+  async generateFieldQrCode(
+    @Param('fieldId') fieldId: string,
+    @Request() req: any,
+  ) {
+    const userId = req.user.userId;
+    return this.fieldOwnerService.generateFieldQrCode(fieldId, userId);
+  }
+
+  @Post('fields/:fieldId/qr-code/regenerate')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Regenerate field QR code (invalidate old, create new)' })
+  @ApiParam({ name: 'fieldId', description: 'Field ID' })
+  @ApiResponse({ status: 200, description: 'Field QR code regenerated successfully' })
+  async regenerateFieldQrCode(
+    @Param('fieldId') fieldId: string,
+    @Request() req: any,
+  ) {
+    const userId = req.user.userId;
+    return this.fieldOwnerService.regenerateFieldQrCode(fieldId, userId);
   }
 }
 

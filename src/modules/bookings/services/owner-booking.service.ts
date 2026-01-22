@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, InternalServerErrorException, ForbiddenException } from '@nestjs/common';
 import { InjectModel, InjectConnection } from '@nestjs/mongoose';
 import { Model, Types, Connection, ClientSession } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -8,12 +8,18 @@ import { Field } from '../../fields/entities/field.entity';
 import { FieldOwnerProfile } from '../../field-owner/entities/field-owner-profile.entity';
 import { Transaction } from '../../transactions/entities/transaction.entity';
 import { CoachProfile } from '../../coaches/entities/coach-profile.entity';
-import { TransactionStatus } from '@common/enums/transaction.enum';
+import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 import { EmailService } from '../../email/email.service';
 import { PayOSService } from '../../transactions/payos.service';
 import { BookingEmailService } from './booking-email.service';
 import { TransactionsService } from '../../transactions/transactions.service';
+import { WalletService } from '../../wallet/wallet.service';
+import { AvailabilityService } from './availability.service';
+import { Court } from '../../courts/entities/court.entity';
+import { Schedule } from '../../schedules/entities/schedule.entity';
+import { CreateOwnerReservedBookingDto } from '../dto/create-owner-reserved-booking.dto';
+import { WalletRole } from '@common/enums/wallet.enum';
 
 /**
  * Owner Booking Service
@@ -30,12 +36,16 @@ export class OwnerBookingService {
         @InjectModel(FieldOwnerProfile.name) private readonly fieldOwnerProfileModel: Model<FieldOwnerProfile>,
         @InjectModel(Transaction.name) private readonly transactionModel: Model<Transaction>,
         @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
+        @InjectModel(Court.name) private readonly courtModel: Model<Court>,
+        @InjectModel(Schedule.name) private readonly scheduleModel: Model<Schedule>,
         @InjectConnection() private readonly connection: Connection,
         private readonly eventEmitter: EventEmitter2,
         private readonly emailService: EmailService,
         private readonly payOSService: PayOSService,
         private readonly bookingEmailService: BookingEmailService,
         private readonly transactionsService: TransactionsService,
+        private readonly walletService: WalletService,
+        private readonly availabilityService: AvailabilityService,
     ) { }
 
     /**
@@ -682,6 +692,204 @@ export class OwnerBookingService {
         } catch (error) {
             this.logger.error('Error getting pending payment proofs for coach', error);
             throw new InternalServerErrorException('Failed to get pending payment proofs. Please try again.');
+        }
+    }
+
+    /**
+     * Create owner-reserved booking
+     * Allows field owner to reserve their own slots with system fee deducted from pendingBalance
+     */
+    async createOwnerReservedBooking(
+        ownerUserId: string,
+        bookingData: CreateOwnerReservedBookingDto
+    ): Promise<Booking> {
+        const session: ClientSession = await this.connection.startSession();
+
+        try {
+            return await session.withTransaction(async () => {
+                // 1. Verify field ownership
+                const field = await this.fieldModel.findById(bookingData.fieldId).session(session).exec();
+                if (!field || !field.isActive) {
+                    throw new NotFoundException('Field not found or inactive');
+                }
+
+                const ownerProfile = await this.fieldOwnerProfileModel
+                    .findOne({ user: new Types.ObjectId(ownerUserId) })
+                    .session(session)
+                    .exec();
+
+                if (!ownerProfile) {
+                    throw new ForbiddenException('You are not a field owner');
+                }
+
+                if (field.owner.toString() !== (ownerProfile._id as Types.ObjectId).toString()) {
+                    throw new ForbiddenException('You do not own this field');
+                }
+
+                // 2. Validate court
+                const court = await this.courtModel.findById(bookingData.courtId).session(session).exec();
+                if (!court || !court.isActive) {
+                    throw new NotFoundException('Court not found or inactive');
+                }
+
+                if (court.field.toString() !== bookingData.fieldId) {
+                    throw new BadRequestException('Court does not belong to the specified field');
+                }
+
+                // 3. Parse booking date
+                const bookingDate = new Date(bookingData.date);
+                bookingDate.setHours(0, 0, 0, 0);
+
+                // 4. Validate time slots
+                this.availabilityService.validateTimeSlots(
+                    bookingData.startTime,
+                    bookingData.endTime,
+                    field,
+                    bookingDate
+                );
+
+                // 5. Check slot availability
+                const existingBookings = await this.availabilityService.getExistingBookingsForDate(
+                    bookingData.fieldId,
+                    bookingDate,
+                    bookingData.courtId,
+                    session
+                );
+
+                const hasConflict = this.availabilityService.checkSlotConflict(
+                    bookingData.startTime,
+                    bookingData.endTime,
+                    existingBookings.map(b => ({ startTime: b.startTime, endTime: b.endTime }))
+                );
+
+                if (hasConflict) {
+                    throw new BadRequestException('Time slot is already booked');
+                }
+
+                // 6. Calculate pricing
+                const pricingInfo = this.availabilityService.calculatePricing(
+                    bookingData.startTime,
+                    bookingData.endTime,
+                    field,
+                    bookingDate
+                );
+
+                const originalPrice = pricingInfo.totalPrice;
+                const systemFeeRate = 0.05; // 5% system fee
+                const systemFeeAmount = Math.round(originalPrice * systemFeeRate);
+
+                // 7. Check pendingBalance
+                const ownerWallet = await this.walletService.getOrCreateWallet(
+                    ownerUserId,
+                    WalletRole.FIELD_OWNER,
+                    session
+                );
+
+                const pendingBalance = ownerWallet.pendingBalance || 0;
+                if (pendingBalance < systemFeeAmount) {
+                    throw new BadRequestException(
+                        `Số dư chờ xử lý không đủ. Cần: ${systemFeeAmount.toLocaleString('vi-VN')}₫, Hiện có: ${pendingBalance.toLocaleString('vi-VN')}₫`
+                    );
+                }
+
+                // 8. Calculate numSlots
+                const numSlots = this.availabilityService.calculateNumSlots(
+                    bookingData.startTime,
+                    bookingData.endTime,
+                    field.slotDuration
+                );
+
+                // 9. Create Schedule entry (Pure Lazy Creation)
+                await this.scheduleModel.findOneAndUpdate(
+                    {
+                        field: new Types.ObjectId(bookingData.fieldId),
+                        court: court._id,
+                        date: bookingDate
+                    },
+                    {
+                        $setOnInsert: {
+                            field: new Types.ObjectId(bookingData.fieldId),
+                            court: court._id,
+                            date: bookingDate,
+                            version: 0
+                        }
+                    },
+                    { upsert: true, session, new: true }
+                );
+
+                // 10. Create Booking
+                const booking = new this.bookingModel({
+                    user: new Types.ObjectId(ownerUserId),
+                    field: new Types.ObjectId(bookingData.fieldId),
+                    court: court._id,
+                    date: bookingDate,
+                    type: BookingType.FIELD,
+                    startTime: bookingData.startTime,
+                    endTime: bookingData.endTime,
+                    numSlots,
+                    status: BookingStatus.CONFIRMED,
+                    paymentStatus: 'paid',
+                    bookingAmount: 0,
+                    platformFee: 0,
+                    totalPrice: 0,
+                    amenitiesFee: 0,
+                    selectedAmenities: [],
+                    metadata: {
+                        isOwnerReserved: true,
+                        originalPrice: originalPrice,
+                        systemFeeAmount: systemFeeAmount
+                    },
+                    note: bookingData.note,
+                    pricingSnapshot: {
+                        basePrice: field.basePrice,
+                        appliedMultiplier: pricingInfo.multiplier,
+                        priceBreakdown: pricingInfo.breakdown
+                    }
+                });
+
+                await booking.save({ session });
+
+                // 11. Deduct system fee from pendingBalance
+                ownerWallet.pendingBalance = pendingBalance - systemFeeAmount;
+                ownerWallet.lastTransactionAt = new Date();
+                await ownerWallet.save({ session });
+
+                // 12. Create FEE transaction
+                const feeTransaction = new this.transactionModel({
+                    user: new Types.ObjectId(ownerUserId),
+                    amount: systemFeeAmount,
+                    direction: 'out',
+                    type: TransactionType.FEE,
+                    method: PaymentMethod.INTERNAL,
+                    status: TransactionStatus.SUCCEEDED,
+                    booking: booking._id,
+                    notes: `Phí hệ thống cho owner-reserved booking`,
+                    completedAt: new Date()
+                });
+
+                await feeTransaction.save({ session });
+
+                this.logger.log(
+                    `[Owner Reserved] Created booking ${booking._id} for owner ${ownerUserId}. ` +
+                    `Original price: ${originalPrice}₫, System fee: ${systemFeeAmount}₫`
+                );
+
+                return booking;
+            });
+        } catch (error) {
+            this.logger.error('Error creating owner-reserved booking', error);
+
+            if (
+                error instanceof NotFoundException ||
+                error instanceof BadRequestException ||
+                error instanceof ForbiddenException
+            ) {
+                throw error;
+            }
+
+            throw new InternalServerErrorException('Failed to create owner-reserved booking. Please try again.');
+        } finally {
+            await session.endSession();
         }
     }
 }
