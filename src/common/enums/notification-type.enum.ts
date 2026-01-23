@@ -17,5 +17,6 @@ export enum NotificationType {
   BOOKMARKED_FIELD_PRICE_CHANGED = 'bookmarked_field_price_changed',
   BOOKMARKED_FIELD_STATUS_CHANGED = 'bookmarked_field_status_changed',
   BOOKMARKED_COACH_PRICE_CHANGED = 'bookmarked_coach_price_changed',
-  BOOKMARKED_COACH_STATUS_CHANGED = 'bookmarked_coach_status_changed'
+  BOOKMARKED_COACH_STATUS_CHANGED = 'bookmarked_coach_status_changed',
+  MATCH_UNMATCHED = 'match_unmatched'
 }

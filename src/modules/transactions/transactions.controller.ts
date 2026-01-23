@@ -1031,33 +1031,67 @@ export class TransactionsController {
                     setTimeout(async () => {
                         try {
                             const booking = await this.bookingModel.findById(bookingIdStr).exec();
-                            if (booking && (booking.status !== BookingStatus.CONFIRMED || booking.paymentStatus !== 'paid')) {
-                                console.warn(`[PayOS Webhook] ⚠️ Booking ${bookingIdStr} not updated after 200ms, attempting direct update`);
+                            if (booking) {
+                                // ✅ CRITICAL: Support split payment updates even if booking is already CONFIRMED/PAID globally.
+                                // Standard bookings only updated if NOT confirmed.
+                                const isSplit = booking.metadata?.splitPayment === true;
+                                const shouldUpdate = !isSplit
+                                    ? (booking.status !== BookingStatus.CONFIRMED || booking.paymentStatus !== 'paid')
+                                    : (userIdStr && booking.metadata?.payments?.[userIdStr]?.status !== 'paid');
 
-                                // Direct update as last resort
-                                booking.paymentStatus = 'paid';
-                                if (booking.type !== 'coach') {
-                                    booking.status = BookingStatus.CONFIRMED;
+                                if (shouldUpdate) {
+                                    console.warn(`[PayOS Webhook] ⚠️ Booking ${bookingIdStr} needs update (Split: ${isSplit}), attempting direct update`);
+
+                                    // Direct update as last resort
+                                    // ✅ CRITICAL: Respect split payment logic
+                                    if (isSplit) {
+                                        // Update individual payment status in fallback as well
+                                        const payments = booking.metadata?.payments || {};
+                                        if (userIdStr && payments[userIdStr]) {
+                                            payments[userIdStr].status = 'paid';
+                                            payments[userIdStr].paidAt = new Date();
+                                            payments[userIdStr].transactionId = String(updated._id);
+                                        }
+                                        booking.markModified('metadata');
+
+                                        const allPaid = Object.values(payments).every((p: any) => p.status === 'paid');
+
+                                        if (allPaid) {
+                                            booking.paymentStatus = 'paid';
+                                            if (booking.type !== 'coach') booking.status = BookingStatus.CONFIRMED;
+                                            await booking.save();
+                                            console.log(`[PayOS Webhook] ✅ Directly updated Split booking ${bookingIdStr} as all parties paid`);
+                                        } else {
+                                            await booking.save();
+                                            console.log(`[PayOS Webhook] ⏳ Split booking ${bookingIdStr} remains pending - waiting for others`);
+                                        }
+                                    } else {
+                                        booking.paymentStatus = 'paid';
+                                        if (booking.type !== 'coach') {
+                                            booking.status = BookingStatus.CONFIRMED;
+                                        }
+                                        await booking.save();
+                                        console.log(`[PayOS Webhook] ✅ Directly updated Standard booking ${bookingIdStr} as fallback`);
+                                    }
+
+                                    console.log(`[PayOS Webhook] ✅ Directly updated booking ${bookingIdStr} as fallback`);
+
+                                    // Emit booking.confirmed event
+                                    this.eventEmitter.emit('booking.confirmed', {
+                                        bookingId: bookingIdStr,
+                                        userId: userIdStr,
+                                        fieldId: booking.field?.toString() || null,
+                                        courtId: booking.court?.toString() || null,
+                                        date: booking.date,
+                                    });
+                                } else {
+                                    console.log(`[PayOS Webhook] ✅ Booking ${bookingIdStr} already updated or no update needed`);
                                 }
-                                await booking.save();
-
-                                console.log(`[PayOS Webhook] ✅ Directly updated booking ${bookingIdStr} as fallback`);
-
-                                // Emit booking.confirmed event
-                                this.eventEmitter.emit('booking.confirmed', {
-                                    bookingId: bookingIdStr,
-                                    userId: userIdStr,
-                                    fieldId: booking.field?.toString() || null,
-                                    courtId: booking.court?.toString() || null,
-                                    date: booking.date,
-                                });
-                            } else if (booking) {
-                                console.log(`[PayOS Webhook] ✅ Booking ${bookingIdStr} already updated by event handler`);
                             }
                         } catch (fallbackError) {
                             console.error(`[PayOS Webhook] ❌ Error in fallback booking update: ${fallbackError.message}`);
                         }
-                    }, 200); // Wait 200ms for event handler
+                    }, 200);
                 }
             }
 
@@ -1272,8 +1306,7 @@ export class TransactionsController {
                 // This handles cases where webhook processed the transaction but the booking handler failed or missed the event
                 if (transaction.status === TransactionStatus.SUCCEEDED && shouldEmitSuccessEvent) {
                     console.log(`[PayOS Return] ℹ️ Force emitting payment.success for already succeeded transaction ${transaction._id}`);
-                    const bookingDoc = await this.bookingModel.findOne({ transaction: updated._id }).select('_id');
-                    const bookingIdStr = bookingDoc?._id?.toString();
+                    const bookingIdStr = await this.transactionsService.extractBookingIdFromTransaction(transaction);
 
                     const userIdStr = updated.user
                         ? (typeof updated.user === 'string'
@@ -1295,17 +1328,21 @@ export class TransactionsController {
                 }
             }
 
-            const bookingDoc = await this.bookingModel.findOne({ transaction: updated._id }).select('_id');
-            const bookingId = bookingDoc?._id?.toString() || '';
+            // ✅ FIX: Use extractBookingIdFromTransaction instead of broken findOne
+            const bookingId = await this.transactionsService.extractBookingIdFromTransaction(updated) || '';
+            const bookingDoc = bookingId ? await this.bookingModel.findById(bookingId).select('metadata') : null;
+            const matchId = (bookingDoc?.metadata as any)?.matchId;
 
             return {
                 success: paymentStatus === 'succeeded',
                 paymentStatus,
                 bookingId,
+                matchId, // Pass matchId for redirection
                 message: paymentStatus === 'succeeded' ? 'Payment successful' : 'Payment failed',
                 orderCode: payosTransaction.orderCode,
                 reference: payosTransaction.reference,
                 amount: payosTransaction.amount,
+                metadata: bookingDoc?.metadata, // Pass full metadata as fallback
             };
         } catch (error) {
             console.error('[PayOS Return] Error:', error);

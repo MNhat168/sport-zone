@@ -10,6 +10,11 @@ import { MatchingGateway } from './matching.gateway';
 import { UsersModule } from '../users/users.module';
 import { ChatModule } from '../chat/chat.module';
 import { BookingsModule } from '../bookings/bookings.module';
+import { TransactionsModule } from '../transactions/transactions.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { Booking, BookingSchema } from '../bookings/entities/booking.entity';
+import { Field, FieldSchema } from '../fields/entities/field.entity';
+import { Court, CourtSchema } from '../courts/entities/court.entity';
 
 @Module({
     imports: [
@@ -17,6 +22,9 @@ import { BookingsModule } from '../bookings/bookings.module';
             { name: MatchProfile.name, schema: MatchProfileSchema },
             { name: Swipe.name, schema: SwipeSchema },
             { name: Match.name, schema: MatchSchema },
+            { name: Booking.name, schema: BookingSchema },
+            { name: Field.name, schema: FieldSchema },
+            { name: Court.name, schema: CourtSchema },
         ]),
         JwtModule.register({
             secret: process.env.JWT_SECRET || 'your-secret-key',
@@ -24,7 +32,10 @@ import { BookingsModule } from '../bookings/bookings.module';
         }),
         forwardRef(() => UsersModule),
         forwardRef(() => ChatModule),
+        forwardRef(() => ChatModule),
         BookingsModule,
+        TransactionsModule,
+        NotificationsModule,
     ],
     controllers: [MatchingController],
     providers: [MatchingService, MatchingGateway],

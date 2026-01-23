@@ -16,6 +16,12 @@ import { BookingsService } from '../bookings/bookings.service';
 import { Booking } from '../bookings/entities/booking.entity';
 import { CreateFieldBookingLazyDto } from '../bookings/dto/create-field-booking-lazy.dto';
 import { MessageType } from '@common/enums/chat.enum';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from 'src/common/enums/notification-type.enum';
+import { Field } from '../fields/entities/field.entity';
+import { Court } from '../courts/entities/court.entity';
+import { TransactionsService } from '../transactions/transactions.service';
+import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 
 @Injectable()
 export class MatchingService {
@@ -27,11 +33,16 @@ export class MatchingService {
         @InjectModel(Match.name) private matchModel: Model<Match>,
         @InjectModel(User.name) private userModel: Model<User>,
         @InjectModel(Booking.name) private bookingModel: Model<Booking>,
+        @InjectModel(Field.name) private fieldModel: Model<Field>,
+        @InjectModel(Court.name) private courtModel: Model<Court>,
         private readonly matchingGateway: MatchingGateway,
         private readonly chatService: ChatService,
         private readonly bookingsService: BookingsService,
+        private readonly transactionsService: TransactionsService,
         private readonly eventEmitter: EventEmitter2,
+        private readonly notificationsService: NotificationsService,
     ) { }
+
 
     @OnEvent('match.split_payment_complete')
     async handleSplitPaymentComplete(payload: { matchId: string, bookingId: string }) {
@@ -39,10 +50,40 @@ export class MatchingService {
             const match = await this.matchModel.findById(payload.matchId);
             if (!match || !match.chatRoomId) return;
 
+            // Update Match document with booking details
+            const booking = await this.bookingModel.findById(payload.bookingId).lean();
+            if (booking) {
+                match.bookingId = new Types.ObjectId(payload.bookingId);
+                match.status = MatchStatus.SCHEDULED;
+                match.fieldId = booking.field as any;
+                match.courtId = booking.court as any;
+                match.scheduledDate = booking.date;
+                match.scheduledStartTime = booking.startTime;
+                match.scheduledEndTime = booking.endTime;
+                match.lastInteractionAt = getCurrentVietnamTimeForDB();
+                await match.save();
+
+                // Notify both users via MatchingGateway (for Matches list refresh)
+                const u1Id = match.user1Id.toString();
+                const u2Id = match.user2Id.toString();
+
+                const confirmedData = {
+                    matchId: (match._id as any).toString(),
+                    bookingId: payload.bookingId,
+                    status: match.status,
+                    scheduledDate: match.scheduledDate,
+                    startTime: match.scheduledStartTime,
+                    endTime: match.scheduledEndTime,
+                };
+
+                this.matchingGateway.notifyMatchConfirmed(u1Id, confirmedData);
+                this.matchingGateway.notifyMatchConfirmed(u2Id, confirmedData);
+            }
+
             // Send Success Message
             const { message, chatRoom } = await this.chatService.sendSystemMessage(
                 match.chatRoomId.toString(),
-                'Thanh toán hoàn tất! Sân đã được đặt thành công. Chúc hai bạn chơi vui vẻ!',
+                'Thanh toán hoàn tất! Sân đã được đặt thành công. Chúc hai Bạn Chơi vui vẻ!',
                 MessageType.SYSTEM
             );
 
@@ -83,6 +124,56 @@ export class MatchingService {
             this.logger.log(`[Split Payment] Sent partial payment update to chat room ${match.chatRoomId}`);
         } catch (error) {
             this.logger.error(`[Split Payment] Failed to handle partial payment event: ${error.message}`);
+        }
+    }
+
+    @OnEvent('match.split_payment_failed')
+    async handleSplitPaymentFailed(payload: { matchId: string, bookingId: string, paidUserIds: string[], reason: string }) {
+        try {
+            const match = await this.matchModel.findById(payload.matchId);
+            if (!match || !match.chatRoomId) return;
+
+            // 1. Send failure message to chat room
+            const { message, chatRoom } = await this.chatService.sendSystemMessage(
+                match.chatRoomId.toString(),
+                'Đặt sân đã bị hủy do đối phương không hoàn tất thanh toán. Người chơi đã thanh toán sẽ nhận được thông báo chi tiết.',
+                MessageType.SYSTEM
+            );
+
+            // Broadcast real-time message
+            this.eventEmitter.emit('chat.system_message', {
+                chatRoomId: match.chatRoomId.toString(),
+                message,
+                chatRoom
+            });
+
+            // 2. Notify the users who PAID
+            for (const userId of payload.paidUserIds) {
+                await this.notificationsService.create({
+                    recipient: userId as any,
+                    title: 'Đặt sân bị hủy',
+                    message: 'Lịch đặt sân của bạn đã bị hủy do đối phương không thanh toán. Chúng tôi sẽ xử lý hoàn tiền cho bạn sớm nhất có thể. Bạn có thể báo cáo người dùng này trong phòng chat.',
+                    type: NotificationType.BOOKING_CANCELLED,
+                    metadata: {
+                        matchId: payload.matchId,
+                        bookingId: payload.bookingId,
+                        action: 'report_unpaid_user'
+                    }
+                });
+            }
+
+            // 3. Update Proposal Card in UI
+            this.eventEmitter.emit('chat.proposal_updated', {
+                chatRoomId: match.chatRoomId.toString(),
+                bookingId: payload.bookingId,
+                status: 'cancelled',
+                reason: 'opponent_unpaid'
+            });
+
+            this.logger.log(`[Split Payment] Handled failure for match ${payload.matchId}. Notified ${payload.paidUserIds.length} users.`);
+
+        } catch (error) {
+            this.logger.error(`[Split Payment] Failed to handle failure event: ${error.message}`);
         }
     }
 
@@ -166,6 +257,24 @@ export class MatchingService {
         }).select('targetUserId');
 
         const swipedUserIds = swipedUsers.map(s => s.targetUserId.toString());
+
+        // GLOBAL BLOCK: Exclude users who have been unmatched (in any sport)
+        // If either party unmatched, the relationship is severed globally
+        const unmatchedMatches = await this.matchModel.find({
+            $or: [
+                { user1Id: new Types.ObjectId(userId), $or: [{ isUnmatchedByUser1: true }, { isUnmatchedByUser2: true }] },
+                { user2Id: new Types.ObjectId(userId), $or: [{ isUnmatchedByUser1: true }, { isUnmatchedByUser2: true }] }
+            ]
+        }).select('user1Id user2Id');
+
+        unmatchedMatches.forEach(match => {
+            const otherId = match.user1Id.toString() === userId
+                ? match.user2Id.toString()
+                : match.user1Id.toString();
+            if (!swipedUserIds.includes(otherId)) {
+                swipedUserIds.push(otherId);
+            }
+        });
 
         // Build query
         const query: any = {
@@ -455,9 +564,31 @@ export class MatchingService {
 
         await match.save();
 
-        // Notify the other user
+        // Notify the other user via real-time socket
         const otherUserId = match.getOtherUserId(userId).toString();
         this.matchingGateway.notifyUnmatch(otherUserId, matchId);
+
+        // CREATE NOTIFICATIONS FOR BOTH USERS
+        // 1. Notify the one who performed unmatch
+        await this.notificationsService.create({
+            recipient: new Types.ObjectId(userId),
+            title: 'Hủy kết nối thành công',
+            message: 'Bạn đã hủy kết nối với người chơi này.',
+            type: NotificationType.MATCH_UNMATCHED,
+            metadata: { matchId: matchId, type: 'unmatch' }
+        });
+
+        // 2. Notify the other user
+        const actor = await this.userModel.findById(userId);
+        const name = actor?.fullName || 'Người dùng'; // Safe access
+
+        await this.notificationsService.create({
+            recipient: new Types.ObjectId(otherUserId),
+            title: 'Hủy kết nối',
+            message: `${name} đã hủy kết nối với bạn.`,
+            type: NotificationType.MATCH_UNMATCHED,
+            metadata: { matchId: matchId, type: 'unmatch' }
+        });
 
         this.logger.log(`User ${userId} unmatched from match ${matchId}`);
 
@@ -661,7 +792,7 @@ export class MatchingService {
         // Ensure payment method is PayOS for split payment flow
         const { PaymentMethod } = await import('../../common/enums/payment-method.enum');
         const bookingDto = { ...dto, paymentMethod: PaymentMethod.PAYOS };
-        const booking = await this.bookingsService.createFieldBookingLazy(userId, bookingDto);
+        const booking = await this.bookingsService.createFieldBookingLazy(userId, bookingDto) as any;
 
         // Calculate split amount (50/50)
         const totalAmount = booking.bookingAmount + booking.platformFee;
@@ -670,6 +801,15 @@ export class MatchingService {
         // Let's use Math.ceil(totalAmount / 2) to ensure we cover the cost.
         // If total is 2100, share is 1050.
         const shareAmount = Math.ceil(totalAmount / 2);
+
+        // ✅ FIX: Update proposer's transaction amount to shareAmount
+        if (booking.transaction) {
+            await this.transactionsService.updateTransactionAmount(
+                booking.transaction.toString(),
+                shareAmount
+            );
+            this.logger.log(`Updated proposer transaction amount to shareAmount: ${shareAmount}`);
+        }
 
         // 2. Update booking metadata for split payment proposal
         const updateData = {
@@ -683,7 +823,7 @@ export class MatchingService {
             'metadata.paymentMethod': PaymentMethod.PAYOS,
             'metadata.isSlotHold': true,
             'metadata.payments': {
-                [userId]: { status: 'unpaid', amount: shareAmount },
+                [userId]: { status: 'unpaid', amount: shareAmount, transactionId: booking.transaction?.toString() },
                 [otherUserId]: { status: 'unpaid', amount: shareAmount }
             }
         };
@@ -697,15 +837,9 @@ export class MatchingService {
         // 3. Send PROPOSAL message to chat room
         if (match.chatRoomId) {
             try {
-                const user = await this.userModel.findById(userId);
-
-                // Construct message content with structured data for frontend to parse
-                // OR send as a special message type with metadata (ChatService might need update to support metadata in messages, 
-                // but for now we can serialize into content or just rely on the type and fetching booking separately)
-                // Let's us a simple string for notification and let frontend use getChatRoom to verify or fetch booking details.
-                // Better: The message content can be a JSON string or a specialized format.
-                // For simplicity/compatibility, we'll send a descriptive text but mark type as MATCH_PROPOSAL.
-                // The frontend will treat MATCH_PROPOSAL messages specially.
+                const proposer = await this.userModel.findById(userId);
+                const field = await this.fieldModel.findById(dto.fieldId);
+                const court = await this.courtModel.findById(dto.courtId);
 
                 const { message, chatRoom } = await this.chatService.sendSystemMessage(
                     match.chatRoomId.toString(),
@@ -713,7 +847,11 @@ export class MatchingService {
                         bookingId: booking._id,
                         matchId: matchId,
                         proposerId: userId,
+                        proposerName: proposer?.fullName || 'Người chơi',
                         fieldId: dto.fieldId,
+                        fieldName: field?.name || 'Sân thể thao',
+                        courtId: dto.courtId,
+                        courtName: court?.name || 'Sân',
                         date: dto.date,
                         startTime: dto.startTime,
                         endTime: dto.endTime,
@@ -761,6 +899,25 @@ export class MatchingService {
 
         // Update proposal status
         booking.metadata.proposalStatus = 'accepted';
+
+        // ✅ NEW: Create a second transaction for the receiver (acceptor)
+        const shareAmount = booking.metadata.shareAmount;
+        const receiverTransaction = await this.transactionsService.createPayment({
+            bookingId: (booking._id as any).toString(),
+            userId: userId,
+            amount: shareAmount,
+            method: booking.metadata.paymentMethod || PaymentMethod.PAYOS,
+            paymentNote: `Thanh toán đối ứng cho booking ${booking._id}`,
+        }) as any;
+
+        // Update booking metadata with receiver's transactionId
+        if (!booking.metadata.payments) booking.metadata.payments = {};
+        booking.metadata.payments[userId] = {
+            status: 'unpaid',
+            amount: shareAmount,
+            transactionId: (receiverTransaction._id as any).toString()
+        };
+
         booking.markModified('metadata');
         await booking.save();
 
@@ -773,7 +930,7 @@ export class MatchingService {
             });
         }
 
-        return { success: true, booking };
+        return { success: true, booking, receiverTransactionId: (receiverTransaction._id as any) };
     }
 
     /**
@@ -791,7 +948,7 @@ export class MatchingService {
         }
 
         if (booking.metadata?.receiverId !== userId && booking.metadata?.proposerId !== userId) {
-            throw new BadRequestException('You cannot reject this proposal'); // Proposer can cancel too?
+            throw new BadRequestException('You cannot reject this proposal');
         }
 
         // Cancel the booking hold (bypass age check for manual rejection)
@@ -801,28 +958,11 @@ export class MatchingService {
         if (booking.metadata) {
             booking.metadata.proposalStatus = 'rejected';
             booking.markModified('metadata');
-            await booking.save(); // Might fail if cancel deleted it, but cancelBookingAndReleaseSlots usually sets status=CANCELLED
+            await booking.save();
         }
 
-        // Notify via chat
+        // Emit WebSocket event to update the proposal card in UI (no new message)
         if (match.chatRoomId) {
-            const { message, chatRoom } = await this.chatService.sendSystemMessage(
-                match.chatRoomId.toString(),
-                JSON.stringify({
-                    action: 'rejected',
-                    bookingId: bookingId,
-                    userId: userId
-                }),
-                MessageType.MATCH_PROPOSAL
-            );
-
-            this.eventEmitter.emit('chat.system_message', {
-                chatRoomId: match.chatRoomId.toString(),
-                message,
-                chatRoom
-            });
-
-            // Update Proposal Card in UI (Force refresh)
             this.eventEmitter.emit('chat.proposal_updated', {
                 chatRoomId: match.chatRoomId.toString(),
                 bookingId: bookingId,

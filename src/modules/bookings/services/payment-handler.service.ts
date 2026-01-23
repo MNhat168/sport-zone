@@ -235,6 +235,8 @@ export class PaymentHandlerService implements OnModuleInit {
       const emailsToSend = new Set<string>(); // Track which emails need to be sent (bookingId or recurringGroupId)
 
       for (const booking of bookings) {
+        const isSplitPayment = booking.metadata?.splitPayment === true;
+        const userIdStr = String(event.userId);
         // ✅ CRITICAL FIX: Collect emails to send BEFORE idempotency check
         // This ensures emails are sent even if booking was already updated by fallback mechanism
         const recurringGroupId = booking.recurringGroupId?.toString();
@@ -245,22 +247,37 @@ export class PaymentHandlerService implements OnModuleInit {
         }
 
         // Idempotency check
-        if (booking.status === BookingStatus.CONFIRMED && booking.paymentStatus === 'paid') {
-          this.logger.debug(`[Payment Success] Booking ${booking._id} already confirmed and paid, skipping update but will send email`);
-          continue; // Already processed - skip update but continue to send email
+        // For split payments, we check if THIS specific user has already paid
+        if (isSplitPayment) {
+          const payments = booking.metadata?.payments || {};
+          if (payments[userIdStr]?.status === 'paid') {
+            this.logger.debug(`[Payment Success] User ${userIdStr} already paid for booking ${booking._id}, skipping`);
+            continue;
+          }
+        } else if (booking.status === BookingStatus.CONFIRMED && booking.paymentStatus === 'paid') {
+          // Standard booking idempotency
+          this.logger.debug(`[Payment Success] Booking ${booking._id} already confirmed and paid, skipping`);
+          continue;
         }
 
         const isCoach = booking.type === BookingType.COACH;
-        const isSplitPayment = booking.metadata?.splitPayment === true;
 
         if (isSplitPayment) {
           // Update individual payment status
+          // ✅ FIX: Ensure we use string key and mark modified correctly
           const payments = booking.metadata?.payments || {};
-          if (payments[event.userId]) {
-            payments[event.userId].status = 'paid';
-            payments[event.userId].paidAt = new Date();
-            payments[event.userId].transactionId = event.paymentId;
+
+
+          if (payments[userIdStr]) {
+            payments[userIdStr].status = 'paid';
+            payments[userIdStr].paidAt = new Date();
+            payments[userIdStr].transactionId = event.paymentId;
+
+            this.logger.log(`[Payment Success] ✅ Updated payment status for user ${userIdStr} in booking ${booking._id}`);
+          } else {
+            this.logger.warn(`[Payment Success] ⚠️ User ${userIdStr} not found in payments metadata for booking ${booking._id}`);
           }
+
           booking.markModified('metadata');
 
           // Check if all parties paid

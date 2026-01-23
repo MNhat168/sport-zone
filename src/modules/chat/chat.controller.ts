@@ -104,4 +104,20 @@ export class ChatController {
     await this.chatService.updateChatStatus(id, req.user.userId, body.status);
     return { success: true };
   }
+
+  @UseGuards(JwtAccessTokenGuard)
+  @Get('matching/unread-count')
+  @ApiOperation({ summary: 'Get unread message count for matching chats' })
+  async getMatchingUnreadCount(@Request() req) {
+    const count = await this.chatService.getMatchingUnreadCount(req.user.userId);
+    return { count };
+  }
+
+  @UseGuards(JwtAccessTokenGuard)
+  @Get('matching/unread-per-match')
+  @ApiOperation({ summary: 'Get unread count per match' })
+  async getUnreadPerMatch(@Request() req) {
+    const unreadMap = await this.chatService.getUnreadCountPerMatch(req.user.userId);
+    return { unreadCounts: Object.fromEntries(unreadMap) };
+  }
 }
