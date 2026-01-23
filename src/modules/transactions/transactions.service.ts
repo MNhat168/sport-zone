@@ -265,6 +265,18 @@ export class TransactionsService {
    * Lấy transaction theo booking ID
    */
   async getPaymentByBookingId(bookingId: string): Promise<Transaction | null> {
+    // Priority: Try to find by direct booking field in Transaction entity (modern way)
+    const transaction = await this.transactionModel
+      .findOne({
+        booking: new Types.ObjectId(bookingId),
+        type: TransactionType.PAYMENT
+      })
+      .populate('user', 'fullName email')
+      .exec();
+
+    if (transaction) return transaction;
+
+    // Fallback: Try the deprecated booking.transaction link (legacy/compatibility)
     const booking = await this.bookingModel.findById(bookingId).select('transaction').exec();
     if (!booking?.transaction) return null;
 
@@ -282,13 +294,25 @@ export class TransactionsService {
    * Replaces direct access to booking.transaction field
    */
   async getLatestSuccessfulTransaction(bookingId: string): Promise<Transaction | null> {
+    // Modern way: search via booking field in transaction
+    const transaction = await this.transactionModel
+      .findOne({
+        booking: new Types.ObjectId(bookingId),
+        status: TransactionStatus.SUCCEEDED
+      })
+      .sort({ createdAt: -1 })
+      .populate('user', 'fullName email')
+      .exec();
+
+    if (transaction) return transaction;
+
+    // Legacy fallback
     const booking = await this.bookingModel.findById(bookingId).select('transaction').exec();
     if (!booking?.transaction) return null;
 
     return this.transactionModel
       .findOne({
         _id: booking.transaction,
-        type: TransactionType.PAYMENT,
         status: TransactionStatus.SUCCEEDED
       })
       .populate('user', 'fullName email')
@@ -300,6 +324,16 @@ export class TransactionsService {
    * Useful for getting complete transaction history
    */
   async getBookingTransactions(bookingId: string): Promise<Transaction[]> {
+    // Modern way: Find all transactions where transaction.booking points to this bookingId
+    const transactions = await this.transactionModel
+      .find({ booking: new Types.ObjectId(bookingId) })
+      .sort({ createdAt: -1 })
+      .populate('user', 'fullName email')
+      .exec();
+
+    if (transactions.length > 0) return transactions;
+
+    // Legacy fallback: Use booking.transaction and its relatives
     const booking = await this.bookingModel.findById(bookingId).select('transaction').exec();
     if (!booking?.transaction) return [];
 

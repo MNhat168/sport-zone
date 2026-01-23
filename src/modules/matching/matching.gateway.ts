@@ -114,6 +114,13 @@ export class MatchingGateway implements OnGatewayConnection, OnGatewayDisconnect
         this.server.to(`user:${userId}`).emit('match:unmatched', { matchId });
     }
 
+    /**
+     * Notify user when match is confirmed (all parties paid)
+     */
+    notifyMatchConfirmed(userId: string, data: any) {
+        this.server.to(`user:${userId}`).emit('match:confirmed', data);
+    }
+
 
 
     // ==================== CHAT EVENTS ====================

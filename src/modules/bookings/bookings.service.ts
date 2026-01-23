@@ -1316,7 +1316,16 @@ export class BookingsService {
         tx = transaction;
       }
 
-      // ✅ Priority 1: Direct link via booking.transaction (fastest - single query)
+      // ✅ Priority 0: Direct link via transaction.booking (New source of truth)
+      if (tx.booking) {
+        const directBooking = await this.bookingModel.findById(tx.booking);
+        if (directBooking) {
+          this.logger.log(`[findBookingsByTransaction] 🚀 Found booking ${directBooking._id} via transaction.booking`);
+          return [directBooking];
+        }
+      }
+
+      // ✅ Priority 1: Direct link via booking.transaction (Legacy)
       const queryBuilder = this.bookingModel.find({ transaction: tx._id });
       if (session) {
         queryBuilder.session(session);
@@ -2539,7 +2548,10 @@ export class BookingsService {
     if (isSplit) {
       // Find transaction for this user and booking
       transaction = await this.transactionModel.findOne({
-        bookingId: new Types.ObjectId(bookingId),
+        $or: [
+          { booking: new Types.ObjectId(bookingId) },
+          { bookingId: bookingId }
+        ],
         userId: new Types.ObjectId(userId),
         status: { $ne: TransactionStatus.FAILED }
       });

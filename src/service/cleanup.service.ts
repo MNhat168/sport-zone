@@ -302,6 +302,23 @@ export class CleanupService {
         reason: cancellationReason,
       });
 
+      // ✅ NEW: Handle Split Payment failure notification
+      const isSplitPayment = booking.metadata?.splitPayment === true;
+      if (isSplitPayment && booking.metadata?.matchId) {
+        const payments = booking.metadata?.payments || {};
+        const paidUserIds = Object.keys(payments).filter(uid => payments[uid].status === 'paid');
+
+        if (paidUserIds.length > 0) {
+          this.logger.log(`[Cancel Booking] 💰 Partially paid split payment cancelled. Notifying payers: ${paidUserIds.join(', ')}`);
+          this.eventEmitter.emit('match.split_payment_failed', {
+            matchId: booking.metadata.matchId,
+            bookingId: bookingId,
+            paidUserIds,
+            reason: cancellationReason
+          });
+        }
+      }
+
     } catch (error) {
       this.logger.error(`[Cancel Booking] Error cancelling booking ${bookingId}:`, error);
       throw error;

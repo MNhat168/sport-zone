@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ChatRoom, Message } from './entities/chat.entity';
@@ -11,7 +11,9 @@ import { getCurrentVietnamTimeForDB } from 'src/utils/timezone.utils';
 
 
 @Injectable()
-export class ChatService {
+export class ChatService implements OnModuleInit {
+  private readonly logger = new Logger(ChatService.name);
+
   constructor(
     @InjectModel(ChatRoom.name) private chatModel: Model<ChatRoom>,
     @InjectModel(User.name) private userModel: Model<User>,
@@ -19,6 +21,19 @@ export class ChatService {
     @InjectModel(Field.name) private fieldModel: Model<Field>,
     @InjectModel(CoachProfile.name) private coachProfileModel: Model<CoachProfile>,
   ) { }
+
+  async onModuleInit() {
+    try {
+      // Drop the specific index that is causing issues (likely created without partial filter previously)
+      const indexExists = await this.chatModel.collection.indexExists('user_1_fieldOwner_1_field_1');
+      if (indexExists) {
+        await this.chatModel.collection.dropIndex('user_1_fieldOwner_1_field_1');
+        this.logger.log('Dropped stale chat room index: user_1_fieldOwner_1_field_1');
+      }
+    } catch (error) {
+      this.logger.warn('Failed to drop index or index does not exist', error);
+    }
+  }
 
   async createOrGetChatRoom(
     userId: string,
@@ -578,6 +593,48 @@ export class ChatService {
       orFilters.push({ coach: new Types.ObjectId(coachProfileId), hasUnread: true });
     }
     return this.chatModel.countDocuments({ $or: orFilters, status: ChatStatus.ACTIVE });
+  }
+
+  /**
+   * Get unread count for matching chat rooms only
+   */
+  async getMatchingUnreadCount(userId: string): Promise<number> {
+    const count = await this.chatModel.countDocuments({
+      matchId: { $exists: true },
+      participants: new Types.ObjectId(userId),
+      hasUnread: true,
+      status: ChatStatus.ACTIVE
+    });
+    return count;
+  }
+
+  /**
+   * Get unread message count per match for a user
+   * Returns a map of matchId -> unread count
+   */
+  async getUnreadCountPerMatch(userId: string): Promise<Map<string, number>> {
+    const chatRooms = await this.chatModel.find({
+      matchId: { $exists: true },
+      participants: new Types.ObjectId(userId),
+      status: ChatStatus.ACTIVE
+    }).select('matchId messages');
+
+    const unreadMap = new Map<string, number>();
+
+    for (const room of chatRooms) {
+      if (!room.matchId) continue;
+
+      // Count unread messages (messages not from current user that are unread)
+      const unreadCount = room.messages.filter(
+        msg => msg.sender.toString() !== userId && !msg.isRead
+      ).length;
+
+      if (unreadCount > 0) {
+        unreadMap.set(room.matchId.toString(), unreadCount);
+      }
+    }
+
+    return unreadMap;
   }
 
   async updateChatStatus(chatRoomId: string, userId: string, status: ChatStatus): Promise<void> {
