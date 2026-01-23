@@ -3346,12 +3346,44 @@ export class FieldOwnerService {
     }).exec();
 
     if (!ownerProfile) {
-      throw new ForbiddenException('You are not a field owner');
+      this.logger.warn(`[verifyFieldOwnership] Field owner profile not found for user ${ownerId}`);
+      throw new ForbiddenException('You are not a field owner. Please ensure your field owner profile is set up correctly.');
     }
 
+    const fieldOwnerId = field.owner.toString();
+    const ownerProfileId = (ownerProfile._id as Types.ObjectId).toString();
+
+    // Log detailed information for debugging
+    this.logger.debug(`[verifyFieldOwnership] Checking ownership:`, {
+      fieldId,
+      fieldName: field.name,
+      userId: ownerId,
+      fieldOwnerId,
+      ownerProfileId,
+      match: fieldOwnerId === ownerProfileId,
+    });
+
     // Check if user owns this field
-    if (field.owner.toString() !== (ownerProfile._id as Types.ObjectId).toString()) {
-      throw new ForbiddenException('You do not own this field');
+    if (fieldOwnerId !== ownerProfileId) {
+      // Additional check: maybe field.owner is User ID instead of FieldOwnerProfile ID
+      // This can happen if fields were created before the FieldOwnerProfile system was implemented
+      if (field.owner.toString() === ownerId) {
+        this.logger.warn(`[verifyFieldOwnership] Field ${fieldId} has User ID as owner instead of FieldOwnerProfile ID. Field owner: ${fieldOwnerId}, User ID: ${ownerId}`);
+        // Allow access but log warning - this is a data inconsistency that should be fixed
+        this.logger.warn(`[verifyFieldOwnership] Allowing access due to legacy data format. Consider migrating field ${fieldId} to use FieldOwnerProfile ID.`);
+        return field;
+      }
+
+      this.logger.error(`[verifyFieldOwnership] Ownership mismatch for field ${fieldId}:`, {
+        fieldOwnerId,
+        ownerProfileId,
+        userId: ownerId,
+        fieldName: field.name,
+      });
+      throw new ForbiddenException(
+        `You do not own this field. Field owner ID: ${fieldOwnerId}, Your profile ID: ${ownerProfileId}. ` +
+        `If you believe this is an error, please contact support.`
+      );
     }
 
     return field;

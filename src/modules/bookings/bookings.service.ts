@@ -42,6 +42,8 @@ import { CoachBookingService } from './services/coach-booking.service';
 import { OwnerBookingService } from './services/owner-booking.service';
 import { BookingQueryService } from './services/booking-query.service';
 import { BookingCancellationService } from './services/booking-cancellation.service';
+import { CancellationValidatorService } from './services/cancellation-validator.service';
+import { CancellationRole } from './config/cancellation-rules.config';
 import { PaymentProofService } from './services/payment-proof.service';
 import { QrCheckinService } from '../qr-checkin/qr-checkin.service';
 import { CheckInLog } from '../qr-checkin/entities/check-in-log.entity';
@@ -104,6 +106,7 @@ export class BookingsService {
     private readonly ownerBookingService: OwnerBookingService,
     private readonly bookingQueryService: BookingQueryService,
     private readonly bookingCancellationService: BookingCancellationService,
+    private readonly cancellationValidator: CancellationValidatorService,
     private readonly paymentProofService: PaymentProofService,
     private readonly qrCheckinService: QrCheckinService,
     private readonly walletService: WalletService,
@@ -626,15 +629,45 @@ export class BookingsService {
 
         const court = await this.validateCourt(dto.courtId, dto.fieldId, session);
 
-        // 4. Batch availability check (ALL dates must be available)
-        const conflicts = await this.checkBatchAvailability(
-          dto.fieldId,
-          dto.courtId,
-          dates,
-          dto.startTime,
-          dto.endTime,
-          session
-        );
+        // 3.5 Prepare dateOverrides map (from conflict resolution - reschedule/switch)
+        const dateOverrides: Record<string, { courtId?: string; startTime?: string; endTime?: string }> = dto.dateOverrides || {};
+        if (Object.keys(dateOverrides).length > 0) {
+          this.logger.debug(`[createWeeklyRecurringBooking] DateOverrides: ${JSON.stringify(dateOverrides)}`);
+        }
+
+        // 4. Batch availability check
+        // For dates WITH overrides, check using the overridden time/court
+        // For dates WITHOUT overrides, check using original time/court
+        const datesWithoutOverrides = dates.filter(d => !dateOverrides[d.toISOString().split('T')[0]]);
+        const datesWithOverrides = dates.filter(d => !!dateOverrides[d.toISOString().split('T')[0]]);
+
+        // Check availability for dates without overrides (using original time/court)
+        let conflicts: Array<{ date: Date; existingStartTime?: string; existingEndTime?: string; reason?: string }> = [];
+        if (datesWithoutOverrides.length > 0) {
+          conflicts = await this.checkBatchAvailability(
+            dto.fieldId,
+            dto.courtId,
+            datesWithoutOverrides,
+            dto.startTime,
+            dto.endTime,
+            session
+          );
+        }
+
+        // Check availability for dates WITH overrides (using overridden time/court)
+        for (const date of datesWithOverrides) {
+          const dateStr = date.toISOString().split('T')[0];
+          const override = dateOverrides[dateStr];
+          const overrideConflicts = await this.checkBatchAvailability(
+            dto.fieldId,
+            override.courtId || dto.courtId,
+            [date],
+            override.startTime || dto.startTime,
+            override.endTime || dto.endTime,
+            session
+          );
+          conflicts.push(...overrideConflicts);
+        }
 
         if (conflicts.length > 0) {
           throw new BadRequestException({
@@ -653,15 +686,9 @@ export class BookingsService {
           session
         );
 
-        // Validate time slots once
+        // Validate time slots once (using base time, overrides will be validated per date)
         const sampleDate = dates[0];
         this.availabilityService.validateTimeSlots(dto.startTime, dto.endTime, field, sampleDate);
-
-        const numSlots = this.availabilityService.calculateNumSlots(
-          dto.startTime,
-          dto.endTime,
-          field.slotDuration
-        );
 
         // 6. Create recurring group ID (link all bookings)
         const recurringGroupId = new Types.ObjectId();
@@ -672,10 +699,34 @@ export class BookingsService {
         const bookings: Booking[] = [];
 
         for (const date of dates) {
-          // Calculate price for THIS specific date (not using sample date)
+          const dateStr = date.toISOString().split('T')[0];
+
+          // Check if there's an override for this date (from conflict resolution)
+          const override = dateOverrides[dateStr];
+          const effectiveStartTime = override?.startTime || dto.startTime;
+          const effectiveEndTime = override?.endTime || dto.endTime;
+
+          // If courtId is overridden, validate and use the new court
+          let effectiveCourt = court;
+          if (override?.courtId && override.courtId !== dto.courtId) {
+            const overriddenCourt = await this.validateCourt(override.courtId, dto.fieldId, session);
+            effectiveCourt = overriddenCourt;
+          }
+
+          // Validate time slots for this specific date with effective times
+          this.availabilityService.validateTimeSlots(effectiveStartTime, effectiveEndTime, field, date);
+
+          // Recalculate numSlots for this specific booking if time changed
+          const effectiveNumSlots = this.availabilityService.calculateNumSlots(
+            effectiveStartTime,
+            effectiveEndTime,
+            field.slotDuration
+          );
+
+          // Calculate price for THIS specific date with effective times
           const pricingInfo = this.availabilityService.calculatePricing(
-            dto.startTime,
-            dto.endTime,
+            effectiveStartTime,
+            effectiveEndTime,
             field,
             date
           );
@@ -687,19 +738,18 @@ export class BookingsService {
 
           if (totalPrice === 0) firstPricePerBooking = pricePerBooking;
           totalPrice += pricePerBooking;
-          const dateStr = date.toISOString().split('T')[0];
 
-          // Upsert schedule for this date
+          // Upsert schedule for this date (use effective court)
           await this.scheduleModel.findOneAndUpdate(
             {
               field: new Types.ObjectId(dto.fieldId),
-              court: court._id,
+              court: effectiveCourt._id,
               date: date
             },
             {
               $setOnInsert: {
                 field: new Types.ObjectId(dto.fieldId),
-                court: court._id,
+                court: effectiveCourt._id,
                 date: date,
                 bookedSlots: [],
                 isHoliday: false
@@ -711,16 +761,16 @@ export class BookingsService {
             }
           );
 
-          // Create booking
+          // Create booking with effective values
           const booking = new this.bookingModel({
             user: new Types.ObjectId(finalUserId),
             field: new Types.ObjectId(dto.fieldId),
-            court: court._id,
+            court: effectiveCourt._id,
             date: date,
             type: BookingType.FIELD,
-            startTime: dto.startTime,
-            endTime: dto.endTime,
-            numSlots,
+            startTime: effectiveStartTime,
+            endTime: effectiveEndTime,
+            numSlots: effectiveNumSlots,
             status: BookingStatus.PENDING,
             paymentStatus: 'unpaid',
             bookingAmount,
@@ -741,18 +791,18 @@ export class BookingsService {
           await booking.save({ session });
           bookings.push(booking);
 
-          // Update schedule slots
+          // Update schedule slots with effective times and court
           await this.scheduleModel.findOneAndUpdate(
             {
               field: new Types.ObjectId(dto.fieldId),
-              court: court._id,
+              court: effectiveCourt._id,
               date: date
             },
             {
               $push: {
                 bookedSlots: {
-                  startTime: dto.startTime,
-                  endTime: dto.endTime
+                  startTime: effectiveStartTime,
+                  endTime: effectiveEndTime
                 }
               }
             },
@@ -2100,6 +2150,25 @@ export class BookingsService {
    */
   async cancelSessionBooking(data: CancelSessionBookingPayload) {
     return this.bookingCancellationService.cancelSessionBooking(data);
+  }
+
+  /**
+   * Get cancellation info for a booking
+   * Used by frontend to display refund/penalty information before cancellation
+   */
+  async getCancellationInfo(bookingId: string, role: 'user' | 'owner' | 'coach') {
+    const booking = await this.bookingModel.findById(bookingId);
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    const cancellationRole = role === 'user' 
+      ? CancellationRole.USER 
+      : role === 'owner' 
+        ? CancellationRole.OWNER 
+        : CancellationRole.COACH;
+
+    return this.cancellationValidator.getCancellationInfo(booking, cancellationRole);
   }
 
   // ============================================================================

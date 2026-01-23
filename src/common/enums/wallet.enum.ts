@@ -8,4 +8,5 @@ export enum WalletRole {
   ADMIN = 'admin',
   FIELD_OWNER = 'field_owner',
   USER = 'user',
+  COACH = 'coach',
 }

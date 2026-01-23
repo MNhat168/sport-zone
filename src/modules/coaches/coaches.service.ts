@@ -10,6 +10,8 @@ import { CoachProfile } from 'src/modules/coaches/entities/coach-profile.entity'
 import { BankAccount } from '../field-owner/entities/bank-account.entity';
 import { CoachesDto } from './dtos/coaches.dto';
 import { Schedule } from 'src/modules/schedules/entities/schedule.entity';
+import { Booking } from '../bookings/entities/booking.entity';
+import { BookingStatus, BookingType } from '@common/enums/booking.enum';
 
 import { CoachRegistrationRequest } from './entities/coach-registration-request.entity';
 import { FieldOwnerRegistrationRequest } from '../field-owner/entities/field-owner-registration-request.entity';
@@ -41,6 +43,7 @@ export class CoachesService {
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(Schedule.name) private scheduleModel: Model<Schedule>,
+    @InjectModel(Booking.name) private bookingModel: Model<Booking>,
     @InjectModel(CoachProfile.name)
     private coachProfileModel: Model<CoachProfile>,
     @InjectModel(BankAccount.name)
@@ -66,7 +69,10 @@ export class CoachesService {
     sportType?: string;
     minRate?: number;
     maxRate?: number;
-    district?: string; // Filter by district (quận)
+    district?: string;
+    date?: string;
+    startTime?: string;
+    endTime?: string;
   }): Promise<CoachesDto[]> {
     const userFilter: any = { role: UserRole.COACH };
     if (query?.name)
@@ -99,7 +105,7 @@ export class CoachesService {
         const profile = profiles.find(
           (p) => p.user.toString() === user._id.toString(),
         );
-        if (!profile) return undefined; // hoặc return null
+        if (!profile) return undefined;
         return {
           id: user._id.toString(),
           fullName: user.fullName,
@@ -113,26 +119,34 @@ export class CoachesService {
           bio: profile.bio,
           rating: profile.rating,
           totalReviews: profile.totalReviews,
-          location: profile.location, // Add location for filtering
-        } as CoachesDto & { location?: string };
+          location: profile.location,
+          coachProfileId: (profile._id as Types.ObjectId).toString(), // Need this for availability check
+        } as CoachesDto & { location?: string; coachProfileId: string };
       })
-      .filter((coach): coach is CoachesDto & { location?: string } => !!coach);
+      .filter((coach): coach is CoachesDto & { location?: string; coachProfileId: string } => !!coach);
 
     // Filter by district if provided
     if (query?.district) {
       const districtLower = query.district.toLowerCase();
       result = result.filter((coach) => {
-        // Check coach.location first (priority)
         if (coach.location && coach.location.toLowerCase().includes(districtLower)) {
           return true;
         }
-        // TODO: Fallback to check field.location.address if coach teaches at fields
-        // For now, only filter by coach.location
         return false;
       });
     }
 
-    return result.map(({ location, ...coach }) => coach); // Remove location from final result
+    // Filter by availability if date/time provided
+    if (query?.date && query?.startTime && query?.endTime) {
+      result = await this.filterByAvailability(
+        result,
+        query.date,
+        query.startTime,
+        query.endTime
+      );
+    }
+
+    return result.map(({ location, coachProfileId, ...coach }) => coach);
   }
 
 
@@ -493,6 +507,77 @@ export class CoachesService {
   private timeStringToMinutes(time: string): number {
     const [hours, minutes] = time.split(':').map(Number);
     return hours * 60 + minutes;
+  }
+
+  /**
+   * Filter coaches by availability on a specific date/time
+   * Removes coaches who have confirmed/pending bookings conflicting with the requested time
+   */
+  private async filterByAvailability(
+    coaches: (CoachesDto & { location?: string; coachProfileId: string })[],
+    date: string,
+    startTime: string,
+    endTime: string
+  ): Promise<(CoachesDto & { location?: string; coachProfileId: string })[]> {
+    try {
+      // Parse date to normalize
+      const bookingDate = new Date(date);
+      bookingDate.setHours(0, 0, 0, 0);
+
+      const startOfDay = new Date(bookingDate);
+      startOfDay.setHours(0, 0, 0, 0);
+
+      const endOfDay = new Date(bookingDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Convert requested time to minutes for comparison
+      const requestedStart = this.timeStringToMinutes(startTime);
+      const requestedEnd = this.timeStringToMinutes(endTime);
+
+      // Get all coach profile IDs
+      const coachProfileIds = coaches.map(c => new Types.ObjectId(c.coachProfileId));
+
+      // Find all bookings for these coaches on this date
+      const bookings = await this.bookingModel
+        .find({
+          type: BookingType.COACH,
+          requestedCoach: { $in: coachProfileIds },
+          date: {
+            $gte: startOfDay,
+            $lte: endOfDay
+          },
+          status: { $in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] }
+        })
+        .lean();
+
+      // Create a set of busy coach IDs
+      const busyCoachIds = new Set<string>();
+
+      bookings.forEach(booking => {
+        if (!booking.requestedCoach) return; // Skip bookings without coach
+
+        const bookingStart = this.timeStringToMinutes(booking.startTime);
+        const bookingEnd = this.timeStringToMinutes(booking.endTime);
+
+        // Check for time overlap
+        if (requestedStart < bookingEnd && requestedEnd > bookingStart) {
+          busyCoachIds.add(booking.requestedCoach.toString());
+        }
+      });
+
+      // Filter out busy coaches
+      const availableCoaches = coaches.filter(coach => {
+        return !busyCoachIds.has(coach.coachProfileId);
+      });
+
+      this.logger.log(`Filtered ${coaches.length} coaches to ${availableCoaches.length} available coaches for ${date} ${startTime}-${endTime}`);
+
+      return availableCoaches;
+    } catch (error) {
+      this.logger.error('Error filtering coaches by availability', error);
+      // If error occurs, return all coaches rather than blocking the request
+      return coaches;
+    }
   }
 
   /**

@@ -868,14 +868,50 @@ export class BookingsController {
   }
 
   /**
-   * Hủy booking với Schedule update
+   * Get cancellation info for a booking
+   * Returns eligibility, refund amount, penalty amount, and warning messages
+   */
+  @Get('bookings/:bookingId/cancellation-info')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Lấy thông tin cancellation cho booking',
+    description: 'Trả về thông tin về eligibility, refund amount, penalty amount để hiển thị trên UI'
+  })
+  @ApiParam({
+    name: 'bookingId',
+    description: 'Booking ID',
+    example: '507f1f77bcf86cd799439011'
+  })
+  @ApiQuery({
+    name: 'role',
+    description: 'Role của người yêu cầu (user, owner, coach)',
+    required: true,
+    enum: ['user', 'owner', 'coach']
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Thông tin cancellation',
+  })
+  @ApiResponse({ status: 404, description: 'Không tìm thấy booking' })
+  @ApiResponse({ status: 401, description: 'Chưa xác thực' })
+  async getCancellationInfo(
+    @Request() req: any,
+    @Param('bookingId') bookingId: string,
+    @Query('role') role: 'user' | 'owner' | 'coach',
+  ) {
+    return await this.bookingsService.getCancellationInfo(bookingId, role);
+  }
+
+  /**
+   * Hủy booking với Schedule update và cancellation rules
    */
   @Patch('bookings/:bookingId/cancel')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Hủy booking',
-    description: 'Hủy booking và cập nhật Schedule tương ứng'
+    description: 'Hủy booking và cập nhật Schedule tương ứng. Áp dụng cancellation rules dựa trên thời gian.'
   })
   @ApiParam({
     name: 'bookingId',

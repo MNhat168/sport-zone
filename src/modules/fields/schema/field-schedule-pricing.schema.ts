@@ -26,6 +26,7 @@ export const FieldSchedulePricingSchema = {
     operatingHours: {
         type: [
             {
+                _id: false,
                 day: {
                     type: String,
                     enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
@@ -41,6 +42,7 @@ export const FieldSchedulePricingSchema = {
     priceRanges: {
         type: [
             {
+                _id: false,
                 day: {
                     type: String,
                     enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
@@ -61,6 +63,7 @@ export const FieldSchedulePricingSchema = {
                 newOperatingHours: {
                     type: [
                         {
+                            _id: false,
                             day: {
                                 type: String,
                                 enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
@@ -76,6 +79,7 @@ export const FieldSchedulePricingSchema = {
                 newPriceRanges: {
                     type: [
                         {
+                            _id: false,
                             day: {
                                 type: String,
                                 enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],

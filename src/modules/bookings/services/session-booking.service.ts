@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger, InternalServerErrorException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectModel, InjectConnection } from '@nestjs/mongoose';
+import { Model, Types, Connection, ClientSession } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Booking } from '../entities/booking.entity';
 import { BookingStatus, BookingType } from '@common/enums/booking.enum';
@@ -17,6 +17,12 @@ import { TransactionStatus, TransactionType } from '@common/enums/transaction.en
 import { EmailService } from '../../email/email.service';
 import { PayOSService } from '../../transactions/payos.service';
 import { generatePayOSOrderCode } from '../../transactions/utils/payos.utils';
+import { CancellationValidatorService } from './cancellation-validator.service';
+import { CancellationRole } from '../config/cancellation-rules.config';
+import { PaymentHandlerService } from './payment-handler.service';
+import { WalletService } from '../../wallet/wallet.service';
+import { WalletRole } from '@common/enums/wallet.enum';
+import { CoachProfile } from '../../coaches/entities/coach-profile.entity';
 
 /**
  * Session Booking Service
@@ -29,11 +35,16 @@ export class SessionBookingService {
   constructor(
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
     @InjectModel(Transaction.name) private readonly transactionModel: Model<Transaction>,
+    @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
+    @InjectConnection() private readonly connection: Connection,
     private readonly eventEmitter: EventEmitter2,
     private readonly coachesService: CoachesService,
     private readonly fieldsService: FieldsService,
     private readonly emailService: EmailService, // Inject EmailService
     private readonly payOSService: PayOSService, // Inject PayOSService
+    private readonly cancellationValidator: CancellationValidatorService,
+    private readonly paymentHandlerService: PaymentHandlerService,
+    private readonly walletService: WalletService,
   ) { }
 
   /**
@@ -409,7 +420,7 @@ export class SessionBookingService {
     return booking;
   }
 
-  //cancel booking request
+  //cancel booking request with cancellation rules
   async cancelCoachBooking(
     coachId: string,
     bookingId: string,
@@ -437,19 +448,124 @@ export class SessionBookingService {
       );
     }
 
-    if (booking.coachStatus !== 'accepted') {
-      throw new BadRequestException(
-        'Only accepted bookings can be cancelled',
-      );
+    // Validate cancellation eligibility (includes coachStatus check)
+    // Note: CancellationValidatorService will check coachStatus === 'accepted'
+    const eligibility = this.cancellationValidator.validateCancellationEligibility(
+      booking,
+      CancellationRole.COACH
+    );
+
+    if (!eligibility.allowed) {
+      throw new BadRequestException(eligibility.errorMessage || 'Cannot cancel this booking');
     }
 
-    if (booking.status === BookingStatus.CANCELLED) {
-      throw new BadRequestException('Booking already cancelled');
+    // Calculate penalty amount
+    const { penaltyAmount, penaltyPercentage } = this.cancellationValidator.calculatePenalty(
+      booking,
+      CancellationRole.COACH
+    );
+
+    // Process refund 100% to user
+    const slotValue = booking.bookingAmount + (booking.platformFee || 0);
+    try {
+      await this.paymentHandlerService.handleRefund(
+        (booking as any)._id.toString(),
+        'credit', // Refund to user's refundBalance
+        slotValue, // 100% refund
+        `Coach cancellation: 100% refund to customer`
+      );
+      this.logger.log(
+        `[Coach Cancel] Processed 100% refund (${slotValue}₫) to user for booking ${bookingId}`
+      );
+    } catch (error) {
+      this.logger.error(
+        `[Coach Cancel] Failed to process refund for booking ${bookingId}:`,
+        error
+      );
+      // Continue with cancellation even if refund fails (will be handled manually)
+    }
+
+    // Deduct penalty from coach wallet if applicable
+    if (penaltyAmount > 0) {
+      const session: ClientSession = await this.connection.startSession();
+      session.startTransaction();
+
+      try {
+        // Get coach profile to find user ID
+        const coachProfile = await this.coachProfileModel
+          .findOne({ _id: new Types.ObjectId(coachId) })
+          .session(session)
+          .exec();
+
+        if (!coachProfile) {
+          throw new NotFoundException('Coach profile not found');
+        }
+
+        const coachUserId = (coachProfile.user as any)?.toString() || coachProfile.user;
+        const coachWallet = await this.walletService.getOrCreateWallet(
+          coachUserId,
+          WalletRole.COACH,
+          session
+        );
+
+        // Deduct from availableBalance first, then pendingBalance if needed
+        const availableBalance = coachWallet.availableBalance || 0;
+        const pendingBalance = coachWallet.pendingBalance || 0;
+        const totalBalance = availableBalance + pendingBalance;
+
+        if (totalBalance < penaltyAmount) {
+          this.logger.warn(
+            `[Coach Cancel] Insufficient balance for penalty. Required: ${penaltyAmount}₫, Available: ${totalBalance}₫`
+          );
+          // Still deduct what's available
+        }
+
+        if (availableBalance >= penaltyAmount) {
+          coachWallet.availableBalance = availableBalance - penaltyAmount;
+        } else {
+          coachWallet.availableBalance = 0;
+          const remainingPenalty = penaltyAmount - availableBalance;
+          coachWallet.pendingBalance = Math.max(0, pendingBalance - remainingPenalty);
+        }
+
+        coachWallet.lastTransactionAt = new Date();
+        await coachWallet.save({ session });
+        await session.commitTransaction();
+
+        this.logger.log(
+          `[Coach Cancel] Deducted penalty of ${penaltyAmount}₫ (${penaltyPercentage}%) from coach ${coachId} wallet`
+        );
+      } catch (error) {
+        await session.abortTransaction();
+        this.logger.error(
+          `[Coach Cancel] Failed to deduct penalty from coach wallet:`,
+          error
+        );
+        // Continue with cancellation even if penalty deduction fails
+      } finally {
+        session.endSession();
+      }
     }
 
     try {
       booking.status = BookingStatus.CANCELLED;
+      booking.cancellationReason = `Coach cancelled (penalty: ${penaltyPercentage}%)`;
+      (booking as any).paymentStatus = 'refunded'; // User gets 100% refund
       await booking.save();
+
+      // Release schedule slots
+      await this.paymentHandlerService.releaseBookingSlots(booking);
+
+      // Emit event with penalty info
+      this.eventEmitter.emit('booking.cancelled.by.coach', {
+        bookingId: booking._id,
+        userId: booking.user,
+        coachId: coachId,
+        penaltyAmount,
+        penaltyPercentage,
+        refundAmount: slotValue, // 100% refund to user
+        reason: 'Coach cancelled',
+      });
     } catch (err) {
       this.logger.error(
         `Failed to cancel booking ${bookingId}`,

@@ -11,6 +11,7 @@ import {
   Schedule,
   ScheduleSchema,
 } from 'src/modules/schedules/entities/schedule.entity';
+import { Booking, BookingSchema } from '../bookings/entities/booking.entity';
 
 import { BankAccount, BankAccountSchema } from '../field-owner/entities/bank-account.entity';
 import { CoachRegistrationRequest, CoachRegistrationRequestSchema } from './entities/coach-registration-request.entity';
@@ -28,7 +29,7 @@ import { EkycModule } from '../ekyc/ekyc.module';
       { name: User.name, schema: UserSchema },
       { name: CoachProfile.name, schema: CoachProfileSchema },
       { name: Schedule.name, schema: ScheduleSchema },
-
+      { name: Booking.name, schema: BookingSchema },
       { name: BankAccount.name, schema: BankAccountSchema },
       { name: CoachRegistrationRequest.name, schema: CoachRegistrationRequestSchema },
       { name: FieldOwnerRegistrationRequest.name, schema: FieldOwnerRegistrationRequestSchema },
