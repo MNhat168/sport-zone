@@ -12,6 +12,8 @@ import { CoachesDto } from './dtos/coaches.dto';
 import { Schedule } from 'src/modules/schedules/entities/schedule.entity';
 
 import { CoachRegistrationRequest } from './entities/coach-registration-request.entity';
+import { FieldOwnerRegistrationRequest } from '../field-owner/entities/field-owner-registration-request.entity';
+import { FieldOwnerProfile } from '../field-owner/entities/field-owner-profile.entity';
 import {
   CreateCoachRegistrationDto,
   UpdateCoachRegistrationDto,
@@ -31,6 +33,7 @@ import { Transaction } from '../transactions/entities/transaction.entity';
 import { TransactionStatus, TransactionType } from '@common/enums/transaction.enum';
 import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 import { generatePayOSOrderCode } from '../transactions/utils/payos.utils';
+import { EkycService } from '../ekyc/ekyc.service';
 @Injectable()
 export class CoachesService {
   private readonly logger = new Logger(CoachesService.name);
@@ -45,12 +48,17 @@ export class CoachesService {
 
     @InjectModel(CoachRegistrationRequest.name)
     private registrationRequestModel: Model<CoachRegistrationRequest>,
+    @InjectModel(FieldOwnerRegistrationRequest.name)
+    private fieldOwnerRegistrationRequestModel: Model<FieldOwnerRegistrationRequest>,
     @InjectModel(Transaction.name)
     private transactionModel: Model<Transaction>,
     private readonly emailService: EmailService,
     private readonly payosService: PayOSService,
     private readonly configService: ConfigService,
+    private readonly ekycService: EkycService,
     private readonly eventEmitter: EventEmitter2,
+    @InjectModel(FieldOwnerProfile.name)
+    private fieldOwnerProfileModel: Model<FieldOwnerProfile>,
   ) { }
 
   async findAll(query?: {
@@ -66,7 +74,7 @@ export class CoachesService {
 
     const users = await this.userModel.find(userFilter).sort({ createdAt: -1 }).lean();
 
-    const profileFilter: any = { 
+    const profileFilter: any = {
       user: { $in: users.map((u) => u._id) },
       isCoachActive: true // Only fetch active coaches
     };
@@ -161,7 +169,7 @@ export class CoachesService {
   async getAllCoachesPublic(sports?: string): Promise<any[]> {
     const users = await this.userModel.find({ role: UserRole.COACH }).sort({ createdAt: -1 }).lean();
 
-    const profileFilter: any = { 
+    const profileFilter: any = {
       user: { $in: users.map((u) => u._id) },
       isCoachActive: true // Only fetch active coaches
     };
@@ -281,37 +289,37 @@ export class CoachesService {
     // Update coach profile
     const profileUpdates: any = {};
     if (payload.bio !== undefined) profileUpdates.bio = payload.bio;
-    
+
     // Validate and process sports
     if (payload.sports !== undefined) {
       let sportsArray: string[] = [];
-      
+
       // Parse sports input (can be string or array)
       if (typeof payload.sports === 'string') {
         sportsArray = payload.sports.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
       } else if (Array.isArray(payload.sports)) {
         sportsArray = payload.sports.map(s => String(s).trim().toLowerCase()).filter(Boolean);
       }
-      
+
       // Validate maximum 3 sports
       if (sportsArray.length > 3) {
         throw new BadRequestException('Maximum 3 sports allowed');
       }
-      
+
       // Validate each sport against SportType enum
       const validSports = Object.values(SportType);
       const invalidSports = sportsArray.filter(sport => !validSports.includes(sport as SportType));
-      
+
       if (invalidSports.length > 0) {
         throw new BadRequestException(
           `Invalid sport types: ${invalidSports.join(', ')}. Valid sports: ${validSports.join(', ')}`
         );
       }
-      
+
       // Save as comma-separated string
       profileUpdates.sports = sportsArray.join(',');
     }
-    
+
     if (payload.certification !== undefined) profileUpdates.certification = payload.certification;
     if (payload.rank !== undefined) profileUpdates.rank = payload.rank;
     if (payload.experience !== undefined) profileUpdates.experience = payload.experience;
@@ -323,8 +331,8 @@ export class CoachesService {
     this.logger.debug(`Profile updates to apply:`, profileUpdates);
 
     // Emit events for bookmark notifications BEFORE applying updates
-    if (profileUpdates.isCoachActive !== undefined && 
-        oldProfile.isCoachActive !== profileUpdates.isCoachActive) {
+    if (profileUpdates.isCoachActive !== undefined &&
+      oldProfile.isCoachActive !== profileUpdates.isCoachActive) {
       this.eventEmitter.emit('coach.statusChanged', {
         coachId: (user._id as any).toString(),
         coachName: user.fullName,
@@ -334,8 +342,8 @@ export class CoachesService {
       this.logger.log(`Emitted coach.statusChanged event for coach ${user.fullName}`);
     }
 
-    if (profileUpdates.hourlyRate !== undefined && 
-        oldProfile.hourlyRate !== profileUpdates.hourlyRate) {
+    if (profileUpdates.hourlyRate !== undefined &&
+      oldProfile.hourlyRate !== profileUpdates.hourlyRate) {
       this.eventEmitter.emit('coach.priceChanged', {
         coachId: (user._id as any).toString(),
         coachName: user.fullName,
@@ -360,6 +368,29 @@ export class CoachesService {
 
     // Return updated record
     return this.getCoachById(id);
+  }
+
+  async confirmPolicy(userId: string): Promise<boolean> {
+    const user = await this.userModel.findById(userId);
+    if (!user || user.role !== UserRole.COACH) {
+      throw new BadRequestException('User is not a coach');
+    }
+
+    const result = await this.coachProfileModel.updateOne(
+      { user: user._id },
+      {
+        $set: {
+          hasReadPolicy: true,
+          policyReadAt: new Date()
+        }
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      throw new NotFoundException('Coach profile not found');
+    }
+
+    return true;
   }
 
   /**
@@ -575,7 +606,17 @@ export class CoachesService {
       });
 
       if (existingRequest) {
-        throw new BadRequestException('You already have a pending or approved registration request');
+        throw new BadRequestException('Bạn đang có yêu cầu đăng ký huấn luyện viên đang chờ duyệt hoặc đã được duyệt.');
+      }
+
+      // Check if user has a pending or approved FIELD OWNER registration
+      const existingFieldOwnerRequest = await this.fieldOwnerRegistrationRequestModel.findOne({
+        userId: new Types.ObjectId(userId),
+        status: { $in: [RegistrationStatus.PENDING, RegistrationStatus.APPROVED] },
+      });
+
+      if (existingFieldOwnerRequest) {
+        throw new BadRequestException('Bạn đang có yêu cầu đăng ký chủ sân đang chờ duyệt hoặc đã được duyệt. Không thể đăng ký làm huấn luyện viên.');
       }
 
       // Check if user is already a coach
@@ -584,18 +625,116 @@ export class CoachesService {
       });
 
       if (existingProfile) {
-        throw new BadRequestException('You are already a coach');
+        throw new BadRequestException('Bạn đã là huấn luyện viên.');
+      }
+
+      // Check if user is already a FIELD OWNER
+      const existingFieldOwnerProfile = await this.fieldOwnerProfileModel.findOne({
+        user: new Types.ObjectId(userId),
+      });
+
+      if (existingFieldOwnerProfile) {
+        throw new BadRequestException('Bạn đã là chủ sân. Không thể đăng ký làm huấn luyện viên.');
+      }
+
+      // Security: Prevent ekycSessionId reuse across different users
+      if (dto.ekycSessionId) {
+        // Check if sessionId is already used by another user in CoachRegistrationRequest
+        const existingCoachRequest = await this.registrationRequestModel.findOne({
+          ekycSessionId: dto.ekycSessionId,
+        });
+
+        if (existingCoachRequest) {
+          // If sessionId belongs to current user, allow (resubmit case)
+          if (existingCoachRequest.userId.toString() !== userId) {
+            throw new BadRequestException(
+              'eKYC session ID đã được sử dụng bởi người dùng khác. Vui lòng tạo session mới.',
+            );
+          }
+        }
+
+        // Check if sessionId is already used by another user in FieldOwnerRegistrationRequest
+        const existingFieldOwnerRequest = await this.fieldOwnerRegistrationRequestModel.findOne({
+          ekycSessionId: dto.ekycSessionId,
+        });
+
+        if (existingFieldOwnerRequest) {
+          // If sessionId belongs to current user, allow (user switching between field owner and coach)
+          if (existingFieldOwnerRequest.userId.toString() !== userId) {
+            throw new BadRequestException(
+              'eKYC session ID đã được sử dụng bởi người dùng khác. Vui lòng tạo session mới.',
+            );
+          }
+        }
+      }
+
+      // Validate eKYC data: if ekycSessionId exists, ekycData must be provided or fetched
+      let finalEkycData = dto.ekycData;
+      let finalEkycStatus = dto.ekycData ? 'verified' : (dto.ekycSessionId ? 'pending' : undefined);
+      let finalEkycVerifiedAt = dto.ekycData ? new Date() : undefined;
+
+      if (dto.ekycSessionId) {
+        // If ekycData is missing, try to fetch from didit API
+        if (!dto.ekycData) {
+          try {
+            const ekycStatusResult = await this.ekycService.getEkycSessionStatus(dto.ekycSessionId);
+
+            if (ekycStatusResult.status === 'verified' && ekycStatusResult.data) {
+              finalEkycData = ekycStatusResult.data;
+              finalEkycStatus = 'verified';
+              finalEkycVerifiedAt = ekycStatusResult.verifiedAt || new Date();
+            } else if (ekycStatusResult.status === 'failed') {
+              throw new BadRequestException(
+                'eKYC verification đã thất bại. Vui lòng tạo session mới và thử lại.',
+              );
+            }
+            // If still pending, keep as pending
+          } catch (error) {
+            // If fetch fails, require ekycData to be provided
+            if (error instanceof BadRequestException) {
+              throw error;
+            }
+            this.logger.warn(
+              `Failed to fetch eKYC status for session ${dto.ekycSessionId}:`,
+              error,
+            );
+            throw new BadRequestException(
+              'Không thể lấy dữ liệu eKYC. Vui lòng đảm bảo eKYC đã được xác thực hoặc thử lại sau.',
+            );
+          }
+        }
+
+        // Validate ekycData completeness: fullName, idNumber, address must not be empty
+        if (finalEkycData) {
+          if (
+            !finalEkycData.fullName ||
+            !finalEkycData.idNumber ||
+            !finalEkycData.address ||
+            finalEkycData.fullName.trim() === '' ||
+            finalEkycData.idNumber.trim() === '' ||
+            finalEkycData.address.trim() === ''
+          ) {
+            throw new BadRequestException(
+              'Dữ liệu eKYC không đầy đủ. Vui lòng đảm bảo họ tên, số CMND/CCCD và địa chỉ đã được điền đầy đủ.',
+            );
+          }
+        } else {
+          // If sessionId exists but no data after fetch attempt, reject
+          throw new BadRequestException(
+            'Dữ liệu eKYC chưa sẵn sàng. Vui lòng đợi eKYC được xác thực hoàn tất.',
+          );
+        }
       }
 
       // Create registration request
       const registrationRequest = new this.registrationRequestModel({
         userId: new Types.ObjectId(userId),
         personalInfo: dto.personalInfo,
-        // eKYC fields
+        // eKYC fields (use final values after validation and fetch)
         ekycSessionId: dto.ekycSessionId,
-        ekycData: dto.ekycData,
-        ekycStatus: dto.ekycData ? 'verified' : (dto.ekycSessionId ? 'pending' : undefined),
-        ekycVerifiedAt: dto.ekycData ? new Date() : undefined,
+        ekycData: finalEkycData,
+        ekycStatus: finalEkycStatus,
+        ekycVerifiedAt: finalEkycVerifiedAt,
         // Coach profile data
         sports: dto.sports,
         certification: dto.certification,
@@ -733,8 +872,21 @@ export class CoachesService {
         }
 
         const idNumber = request.ekycData?.identityCardNumber || request.ekycData?.idNumber;
-        if (!request.ekycData || !request.ekycData.fullName || !idNumber) {
-          throw new BadRequestException('Cannot approve: eKYC data missing or incomplete');
+        const address = request.ekycData?.permanentAddress || request.ekycData?.address;
+
+        // Validate ekycData completeness: fullName, idNumber, address must not be empty
+        if (
+          !request.ekycData ||
+          !request.ekycData.fullName ||
+          !idNumber ||
+          !address ||
+          request.ekycData.fullName.trim() === '' ||
+          idNumber.trim() === '' ||
+          address.trim() === ''
+        ) {
+          throw new BadRequestException(
+            'Cannot approve: eKYC data missing or incomplete. Required fields: fullName, idNumber, address',
+          );
         }
       }
 

@@ -71,6 +71,7 @@ import {
   EkycSessionResponseDto,
   EkycStatusResponseDto,
 } from '../ekyc/dto';
+import { RateLimit, RateLimitGuard } from '@common/guards/rate-limit.guard';
 import { OwnerOnlyGuard } from '../../common/guards/owner-only.guard';
 import { StaffAccountService } from './services/staff-account.service';
 import {
@@ -136,6 +137,16 @@ export class FieldOwnerController {
     }
     const userId = req.user.userId;
     return this.fieldOwnerService.createFieldOwnerProfile(userId, createDto);
+  }
+
+  @Post('confirm-policy')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Confirm field owner has read platform policy' })
+  async confirmPolicy(@Request() req: any): Promise<{ success: boolean }> {
+    const userId = req.user.userId;
+    await this.fieldOwnerService.confirmPolicy(userId);
+    return { success: true };
   }
 
   @Get('profile')
@@ -539,7 +550,8 @@ export class FieldOwnerController {
    * FE sẽ gọi endpoint này mỗi 3-5s để check xem user đã hoàn thành eKYC chưa
    */
   @Get('ekyc/status/:sessionId')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RateLimitGuard)
+  @RateLimit({ ttl: 60, limit: 20 }) // 20 requests per minute (polling every 3s = 20/min)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Lấy trạng thái eKYC session',
@@ -559,18 +571,24 @@ export class FieldOwnerController {
     status: 404,
     description: 'eKYC session không tồn tại hoặc không thuộc về bạn'
   })
+  @ApiResponse({
+    status: 429,
+    description: 'Too many requests - Rate limit exceeded'
+  })
   async getEkycStatus(
     @Param('sessionId') sessionId: string,
     @Request() req: any,
   ): Promise<EkycStatusResponseDto> {
     const userId = req.user.userId;
 
-    // Get status from didit API (also updates local DB)
-    const result = await this.ekycService.getEkycSessionStatus(sessionId);
-
-    // Security check: verify session belongs to current user
+    // Security check: verify session belongs to current user BEFORE calling didit API
     // This will throw NotFoundException if session doesn't belong to user
+    // If no registration exists yet (user just created session), this returns null and allows
     await this.ekycService.verifyEkycSessionOwnership(sessionId, userId);
+
+    // Get status from didit API (also updates local DB)
+    // Only call didit API if ownership check passes
+    const result = await this.ekycService.getEkycSessionStatus(sessionId);
 
     return result;
   }

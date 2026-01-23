@@ -6,6 +6,8 @@ import { FieldOwnerService } from './field-owner.service';
 import { Field, FieldSchema } from '../fields/entities/field.entity';
 import { FieldOwnerProfile, FieldOwnerProfileSchema } from './entities/field-owner-profile.entity';
 import { FieldOwnerRegistrationRequest, FieldOwnerRegistrationRequestSchema } from './entities/field-owner-registration-request.entity';
+import { CoachRegistrationRequest, CoachRegistrationRequestSchema } from '../coaches/entities/coach-registration-request.entity';
+import { CoachProfile, CoachProfileSchema } from '../coaches/entities/coach-profile.entity';
 import { BankAccount, BankAccountSchema } from './entities/bank-account.entity';
 import { FieldQrCode, FieldQrCodeSchema } from './entities/field-qr-code.entity';
 import { Booking, BookingSchema } from '../bookings/entities/booking.entity';
@@ -31,6 +33,8 @@ import { FieldAccessGuard } from '../../common/guards/field-access.guard';
       { name: Field.name, schema: FieldSchema },
       { name: FieldOwnerProfile.name, schema: FieldOwnerProfileSchema },
       { name: FieldOwnerRegistrationRequest.name, schema: FieldOwnerRegistrationRequestSchema },
+      { name: CoachRegistrationRequest.name, schema: CoachRegistrationRequestSchema },
+      { name: CoachProfile.name, schema: CoachProfileSchema },
       { name: BankAccount.name, schema: BankAccountSchema },
       { name: FieldQrCode.name, schema: FieldQrCodeSchema },
       { name: Booking.name, schema: BookingSchema },

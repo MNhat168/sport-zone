@@ -6,6 +6,8 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { User, UserSchema } from '../users/entities/user.entity';
+import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entities/field-owner-profile.entity';
+import { CoachProfile, CoachProfileSchema } from '../coaches/entities/coach-profile.entity';
 import { UsersModule } from '../users/users.module';
 import { EmailModule } from '../email/email.module';
 import { HttpModule } from '@nestjs/axios';
@@ -18,7 +20,11 @@ import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 @Module({
   imports: [
     PassportModule,
-    MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
+    MongooseModule.forFeature([
+      { name: User.name, schema: UserSchema },
+      { name: 'FieldOwnerProfile', schema: FieldOwnerProfileSchema },
+      { name: 'CoachProfile', schema: CoachProfileSchema }
+    ]),
     UsersModule,
     EmailModule,
     ServiceModule,

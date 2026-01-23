@@ -6,6 +6,10 @@ import {
   FieldOwnerRegistrationRequest,
   FieldOwnerRegistrationRequestSchema,
 } from '../field-owner/entities/field-owner-registration-request.entity';
+import {
+  CoachRegistrationRequest,
+  CoachRegistrationRequestSchema,
+} from '../coaches/entities/coach-registration-request.entity';
 import { User, UserSchema } from '../users/entities/user.entity';
 
 /**
@@ -18,6 +22,10 @@ import { User, UserSchema } from '../users/entities/user.entity';
       {
         name: FieldOwnerRegistrationRequest.name,
         schema: FieldOwnerRegistrationRequestSchema,
+      },
+      {
+        name: CoachRegistrationRequest.name,
+        schema: CoachRegistrationRequestSchema,
       },
       {
         name: User.name,

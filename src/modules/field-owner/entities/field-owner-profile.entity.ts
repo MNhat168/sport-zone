@@ -31,6 +31,12 @@ export class FieldOwnerProfile extends BaseEntity {
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
   staffAccounts: Types.ObjectId[];  // Staff members who can manage this owner's fields
+
+  @Prop({ type: Boolean, default: false })
+  hasReadPolicy: boolean;
+
+  @Prop({ type: Date })
+  policyReadAt?: Date;
 }
 
 export const FieldOwnerProfileSchema = SchemaFactory.createForClass(FieldOwnerProfile);

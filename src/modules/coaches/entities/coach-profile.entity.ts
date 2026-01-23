@@ -76,6 +76,12 @@ export class CoachProfile extends BaseEntity {
 
   @Prop({ type: Boolean, default: true })
   isCoachActive: boolean;
+
+  @Prop({ type: Boolean, default: false })
+  hasReadPolicy: boolean;
+
+  @Prop({ type: Date })
+  policyReadAt?: Date;
 }
 
 export const CoachProfileSchema = SchemaFactory.createForClass(CoachProfile);

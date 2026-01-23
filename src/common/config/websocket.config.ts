@@ -10,6 +10,8 @@ export const WEBSOCKET_CORS_CONFIG = {
         const allowedPatterns = [
             /^https:\/\/sport-zone-fe-deploy\.vercel\.app$/,
             /^https:\/\/.*\.vercel\.app$/,
+            /^https:\/\/www\.sportzone\.io\.vn$/,              // Custom Domain (www)
+            /^https:\/\/sportzone\.io\.vn$/,                   // Custom Domain (root)
             /^http:\/\/localhost(:\d+)?$/,  // Allow localhost with optional port
             /^http:\/\/127\.0\.0\.1(:\d+)?$/, // Allow 127.0.0.1 with optional port
         ];

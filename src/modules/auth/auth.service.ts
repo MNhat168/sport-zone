@@ -2,6 +2,8 @@ import { Injectable, BadRequestException, HttpException, HttpStatus, Inject } fr
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { User } from '../users/entities/user.entity';
+import { FieldOwnerProfile } from '../field-owner/entities/field-owner-profile.entity';
+import { CoachProfile } from '../coaches/entities/coach-profile.entity';
 import { UserRole } from '@common/enums/user.enum';
 import * as bcrypt from 'bcrypt';
 import * as nodemailer from 'nodemailer';
@@ -17,6 +19,8 @@ import { USER_REPOSITORY, UserRepositoryInterface } from '../users/interface/use
 export class AuthService {
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    @InjectModel(FieldOwnerProfile.name) private readonly fieldOwnerProfileModel: Model<FieldOwnerProfile>,
+    @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
     private readonly jwt_service: JwtService,
     private readonly config_service: ConfigService,
     private readonly http_service: HttpService,
@@ -220,6 +224,20 @@ export class AuthService {
     if (!user.isVerified) throw new BadRequestException('Account not verified');
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) throw new BadRequestException('Mật khẩu không đúng');
+
+    // Check policy status for partners
+    let hasReadPolicy = false;
+    if (user.role === UserRole.FIELD_OWNER) {
+      const profile = await this.fieldOwnerProfileModel.findOne({ user: user._id });
+      hasReadPolicy = profile?.hasReadPolicy || false;
+    } else if (user.role === UserRole.COACH) {
+      const profile = await this.coachProfileModel.findOne({ user: user._id });
+      hasReadPolicy = profile?.hasReadPolicy || false;
+    } else {
+      // For regular users or admins, assume true or not applicable
+      hasReadPolicy = true;
+    }
+
     const accessToken = this.generateAccessToken({
       userId: (user._id as any).toString(),
       email: user.email,
@@ -238,7 +256,8 @@ export class AuthService {
         role: user.role,
         avatarUrl: user.avatarUrl,
         isActive: user.isActive,
-        isVerified: user.isVerified
+        isVerified: user.isVerified,
+        hasReadPolicy
       },
       accessToken,
       refreshToken,

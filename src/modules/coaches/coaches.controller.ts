@@ -74,6 +74,16 @@ export class CoachesController {
     }
   }
 
+  @Post('confirm-policy')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Confirm coach has read platform policy' })
+  async confirmPolicy(@Request() req: any): Promise<{ success: boolean }> {
+    const userId = req.user.userId;
+    await this.coachesService.confirmPolicy(userId);
+    return { success: true };
+  }
+
   @Get('registration/my-request')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
