@@ -2171,10 +2171,10 @@ export class BookingsService {
       throw new NotFoundException('Booking not found');
     }
 
-    const cancellationRole = role === 'user' 
-      ? CancellationRole.USER 
-      : role === 'owner' 
-        ? CancellationRole.OWNER 
+    const cancellationRole = role === 'user'
+      ? CancellationRole.USER
+      : role === 'owner'
+        ? CancellationRole.OWNER
         : CancellationRole.COACH;
 
     return this.cancellationValidator.getCancellationInfo(booking, cancellationRole);
@@ -2990,203 +2990,6 @@ export class BookingsService {
   }
 
   /**
-   * Confirm check-in by validating QR token
-   * Triggers wallet transaction to unlock funds
-   */
-  async confirmCheckIn(
-    bookingId: string,
-    token: string,
-    staffId: string,
-    ipAddress?: string
-  ) {
-    // 1. Validate token
-    const tokenPayload = await this.qrCheckinService.validateCheckInToken(token);
-
-    // 2. Handle different token types
-    let booking: any;
-
-    if (tokenPayload.type === 'field') {
-      // Field QR code - need bookingId to be provided
-      this.logger.log(`[QR Check-in] Field QR code detected for field ${tokenPayload.fieldId}`);
-
-      if (!bookingId) {
-        throw new BadRequestException('Booking ID is required when using field QR code');
-      }
-
-      // Verify booking belongs to this field
-      booking = await this.bookingModel
-        .findById(bookingId)
-        .populate('field')
-        .populate('transaction')
-        .populate('user');
-
-      if (!booking) {
-        throw new NotFoundException('Booking not found');
-      }
-
-      // Verify booking belongs to the field from QR code
-      const bookingFieldId = (booking.field as any)._id.toString();
-      if (bookingFieldId !== tokenPayload.fieldId) {
-        this.logger.warn(`[QR Check-in] Booking field mismatch: ${bookingFieldId} !== ${tokenPayload.fieldId}`);
-        throw new BadRequestException('This booking does not belong to this field');
-      }
-
-      this.logger.log(`[QR Check-in] Field QR validated for booking ${bookingId}`);
-
-    } else if (tokenPayload.recurringGroupId) {
-      // This is a recurring group QR - find booking for TODAY's date
-      this.logger.log(`[QR Check-in] Recurring group QR detected: ${tokenPayload.recurringGroupId}`);
-
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-
-      // Find booking in this recurring group that matches today's date
-      booking = await this.bookingModel
-        .findOne({
-          recurringGroupId: new Types.ObjectId(tokenPayload.recurringGroupId),
-          date: {
-            $gte: today,
-            $lt: tomorrow
-          }
-        })
-        .populate('field')
-        .populate('transaction')
-        .populate('user');
-
-      if (!booking) {
-        // Check if there are any bookings in this group for other dates
-        const anyBookingInGroup = await this.bookingModel.findOne({
-          recurringGroupId: new Types.ObjectId(tokenPayload.recurringGroupId)
-        }).lean();
-
-        if (anyBookingInGroup) {
-          throw new BadRequestException(
-            `Không tìm thấy booking cho ngày hôm nay (${today.toLocaleDateString('vi-VN')}). ` +
-            `QR code này dùng cho nhóm booking hàng loạt - vui lòng quét vào đúng ngày đã đặt.`
-          );
-        } else {
-          throw new NotFoundException('Không tìm thấy nhóm booking này');
-        }
-      }
-
-      this.logger.log(`[QR Check-in] Found booking ${booking._id} for today in recurring group`);
-
-    } else {
-      // Single booking QR - get booking ID from token payload
-      // ✅ FIX: Use bookingId from token, not from URL parameter
-      // This allows field-owner to scan QR without knowing the booking ID
-      const tokenBookingId = tokenPayload.bookingId;
-
-      if (!tokenBookingId) {
-        throw new BadRequestException('Token does not contain booking ID');
-      }
-
-      // Optional validation: if bookingId is provided in URL, verify it matches
-      if (bookingId && bookingId !== tokenBookingId) {
-        this.logger.warn(`[QR Check-in] URL bookingId (${bookingId}) doesn't match token bookingId (${tokenBookingId})`);
-        throw new BadRequestException('Token does not match booking ID');
-      }
-
-      // 3. Find booking with all relations using the ID from token
-      booking = await this.bookingModel
-        .findById(tokenBookingId)
-        .populate('field')
-        .populate('transaction')
-        .populate('user');
-
-      if (!booking) {
-        throw new NotFoundException('Booking not found');
-      }
-    }
-
-    // 4. Check if already checked in
-    if (booking.status === BookingStatus.CHECKED_IN) {
-      throw new HttpException('Đã check-in rồi', HttpStatus.CONFLICT);
-    }
-
-    // 5. Verify booking is paid and confirmed
-    if (booking.paymentStatus !== 'paid') {
-      throw new BadRequestException('Booking must be  paid before check-in');
-    }
-
-    if (booking.status !== BookingStatus.CONFIRMED) {
-      throw new BadRequestException('Booking must be confirmed before check-in');
-    }
-
-    // 6. Update booking status
-    booking.status = BookingStatus.CHECKED_IN;
-    booking.checkedInAt = new Date();
-    booking.checkedInBy = new Types.ObjectId(staffId);
-    await booking.save();
-
-    this.logger.log(`[QR Check-in] Booking ${bookingId} checked in by staff ${staffId}`);
-
-    // 7. Trigger wallet transaction (unlock funds)
-    let walletTransaction: any = null;
-    try {
-      // Type-safe transaction access
-      const transactionId = booking.transaction;
-      if (transactionId) {
-        const transaction = await this.transactionModel.findById(transactionId).lean();
-
-        if (transaction && transaction.amount > 0) {
-          const field = booking.field as any;
-          const fieldOwner = field?.owner;
-
-          if (fieldOwner) {
-            walletTransaction = await this.walletService.transferPendingToAvailable(
-              fieldOwner.toString(),
-              transaction.amount,
-              bookingId,
-              transaction._id.toString()
-            );
-
-            this.logger.log(`[QR Check-in] Transferred ${transaction.amount} from pending to available for field owner ${fieldOwner}`);
-          }
-        }
-      }
-    } catch (error) {
-      this.logger.error(`[QR Check-in] Failed to transfer wallet funds: ${error.message}`, error.stack);
-      // Don't fail the check-in if wallet transfer fails - log for manual intervention
-    }
-
-    // 8. Create check-in log (audit trail)
-    try {
-      const checkInLog = new this.checkInLogModel({
-        booking: booking._id,
-        checkedInBy: new Types.ObjectId(staffId),
-        checkedInAt: new Date(),
-        ipAddress,
-        tokenPayload,
-        status: 'success'
-      });
-      await checkInLog.save();
-    } catch (error) {
-      // Log but don't fail
-      this.logger.error(`[QR Check-in] Failed to create check-in log: ${error.message}`, error.stack);
-    }
-
-    // 9. Emit event for real-time updates
-    this.eventEmitter.emit('booking.checkedIn', {
-      bookingId: (booking._id as Types.ObjectId).toString(),
-      userId: booking.user.toString(),
-      fieldId: booking.field?.toString() || '',
-      checkedInAt: booking.checkedInAt,
-      staffId
-    });
-
-    return {
-      success: true,
-      booking: booking.toObject(),
-      walletTransaction,
-      checkedInAt: booking.checkedInAt
-    };
-  }
-
-  /**
    * Get check-in time window information for a booking
    * Used for displaying countdown timers
    */
@@ -3264,5 +3067,125 @@ export class BookingsService {
     // This ensures that "22:00" is interpreted as "22:00 GMT+7" (15:00 UTC)
     // regardless of the server's local timezone
     return new Date(`${dateStr}T${timeStr}+07:00`);
+  }
+  /**
+   * Confirm customer self check-in using Field QR
+   */
+  async confirmCustomerCheckIn(
+    userId: string,
+    bookingId: string,
+    token: string,
+    ipAddress?: string,
+  ) {
+    // 1. Validate token
+    const tokenPayload = await this.qrCheckinService.validateCheckInToken(token);
+
+    if (tokenPayload.type !== 'field') {
+      throw new BadRequestException('Mã QR không hợp lệ. Vui lòng quét mã QR tại sân.');
+    }
+
+    // 2. Validate Booking
+    // Check ownership and valid status
+    const booking = await this.bookingModel.findById(bookingId)
+      .populate({
+        path: 'field',
+        populate: { path: 'owner' } // Populate owner (FieldOwnerProfile) to get userId
+      })
+      .populate('transaction')
+      .populate('user');
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    // 3. Ownership Check
+    if (booking.user._id.toString() !== userId) {
+      throw new ForbiddenException('Bạn chỉ có thể check-in cho booking của chính mình');
+    }
+
+    // 4. Field Match Check
+    const bookingField = booking.field as any;
+    const bookingFieldId = bookingField._id.toString();
+    if (bookingFieldId !== tokenPayload.fieldId) {
+      throw new BadRequestException('Booking này thuộc về sân khác');
+    }
+
+    // 5. Status Checks
+    if (booking.status === BookingStatus.CHECKED_IN) {
+      throw new HttpException('Đã check-in rồi', HttpStatus.CONFLICT);
+    }
+
+    if (booking.paymentStatus !== 'paid') {
+      throw new BadRequestException('Booking phải được thanh toán trước khi check-in');
+    }
+
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new BadRequestException('Booking phải ở trạng thái CONFIRMED');
+    }
+
+    // 6. Perform Check-in
+    booking.status = BookingStatus.CHECKED_IN;
+    booking.checkedInAt = new Date();
+    booking.checkedInBy = new Types.ObjectId(userId);
+    await booking.save();
+
+    this.logger.log(`[Self Check-in] User ${userId} checked in booking ${bookingId}`);
+
+    // 7. Unlock Funds (Transfer Pending -> Available for Field Owner)
+    let walletTransaction: any = null;
+    try {
+      const transactionId = booking.transaction;
+      if (transactionId) {
+        // Get transaction details
+        const txObj = transactionId as any; // Populated transaction
+        const txId = txObj._id || transactionId;
+        const amount = txObj.amount || 0;
+
+        // Get Field Owner User ID from the Field Owner Profile
+        // booking.field.owner is the FieldOwnerProfile document (from populate above)
+        const fieldOwnerProfile = bookingField.owner;
+        const fieldOwnerUserId = fieldOwnerProfile.user?.toString();
+
+        if (fieldOwnerUserId && amount > 0) {
+          const updatedWallet = await this.walletService.transferPendingToAvailable(
+            fieldOwnerUserId,
+            amount,
+            bookingId,
+            txId.toString()
+          );
+          walletTransaction = { status: 'unlocked', walletId: updatedWallet._id };
+          this.logger.log(`[Self Check-in] Funds unlocked for field owner ${fieldOwnerUserId}`);
+        } else {
+          this.logger.warn(`[Self Check-in] Could not unlock funds: OwnerId=${fieldOwnerUserId}, Amount=${amount} (Transaction might be missing amount or owner profile incomplete)`);
+        }
+      }
+    } catch (error) {
+      // Don't fail the check-in if wallet fails, but log it critical
+      this.logger.error(`[Self Check-in] Failed to unlock funds for booking ${bookingId}: ${error.message}`);
+    }
+
+    // 8. Create check-in log (audit trail)
+    try {
+      const checkInLog = new this.checkInLogModel({
+        booking: booking._id,
+        checkedInBy: new Types.ObjectId(userId),
+        checkedInAt: new Date(),
+        ipAddress,
+        tokenPayload,
+        status: 'success'
+      });
+      await checkInLog.save();
+      this.logger.log(`[Self Check-in] Check-in log created for booking ${bookingId}`);
+    } catch (error) {
+      // Log but don't fail
+      this.logger.error(`[Self Check-in] Failed to create check-in log: ${error.message}`, error.stack);
+    }
+
+    return {
+      success: true,
+      booking,
+      walletTransaction,
+      checkedInAt: booking.checkedInAt
+    };
   }
 }

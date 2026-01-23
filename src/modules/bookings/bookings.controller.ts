@@ -1804,66 +1804,31 @@ export class BookingsController {
   }
 
   /**
-   * Confirm check-in by validating QR token
-   * Updates booking status and triggers wallet transaction (pending → available)
-   * ✅ SECURITY: Field owners and their staff can confirm check-ins
+   * Confirm check-in by customer (Self Check-in)
+   * Updates booking status and triggers wallet transaction
+   * ✅ SECURITY: Requires valid JWT + ownership of booking
    */
-  @Post('bookings/:id/check-in')
-  @UseGuards(AuthGuard('jwt'), FieldAccessGuard)
+  @Post('bookings/check-in')
+  @UseGuards(AuthGuard('jwt'), CheckInRateLimitGuard)
   @ApiBearerAuth()
-  @RateLimit({ ttl: 60, limit: 30 }) // 30 check-ins per minute for staff
   @ApiOperation({
-    summary: 'Confirm check-in with QR token',
-    description: 'Validate QR token and confirm customer check-in. Triggers wallet transaction to unlock funds. Field owners and their staff can perform check-ins.'
+    summary: 'Customer Self Check-in',
+    description: 'Validate QR token and confirm user check-in for their own booking.'
   })
-  @ApiParam({
-    name: 'id',
-    description: 'Booking ID (can be placeholder like "scan" - actual ID is extracted from QR token)',
-    example: 'scan'
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Check-in confirmed successfully',
-    schema: {
-      example: {
-        booking: { /* full booking object */ },
-        walletTransaction: {
-          type: 'check_in_unlock',
-          amount: 500000,
-          newAvailableBalance: 500000
-        },
-        checkedInAt: '2026-01-07T14:05:32Z'
-      }
-    }
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Invalid or expired token',
-    schema: {
-      example: { message: 'Mã QR đã hết hạn' }
-    }
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Invalid signature',
-    schema: {
-      example: { message: 'Mã QR không hợp lệ' }
-    }
-  })
-  @ApiResponse({ status: 409, description: 'Already checked in' })
-  @ApiResponse({ status: 404, description: 'Booking not found' })
-  async confirmCheckIn(
-    @Param('id') bookingId: string,
+  @ApiResponse({ status: 200, description: 'Check-in confirmed successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid token or booking' })
+  async confirmCustomerCheckIn(
+    @Body('bookingId') bookingId: string,
     @Body('token') token: string,
     @Request() req: any,
   ) {
-    const staffId = this.getUserId(req);
+    const userId = this.getUserId(req);
 
-    if (!token) {
-      throw new BadRequestException('QR token is required');
+    if (!token || !bookingId) {
+      throw new BadRequestException('Token and Booking ID are required');
     }
 
-    return await this.bookingsService.confirmCheckIn(bookingId, token, staffId, req.ip);
+    return await this.bookingsService.confirmCustomerCheckIn(userId, bookingId, token, req.ip);
   }
 
   /**

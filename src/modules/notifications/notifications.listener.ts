@@ -145,9 +145,10 @@ export class NotificationListener {
 
       // Relax status check for FIELD_COACH bookings (they start as pending)
       const isCombinedBooking = (booking as any).type === 'field_coach' || (payload as any).type === 'field_coach';
-      if (!isCombinedBooking && booking.status !== 'confirmed') {
-        return;
-      }
+      // Allow notifications for ALL bookings (Pending & Confirmed)
+      // if (!isCombinedBooking && booking.status !== 'confirmed') {
+      //   return;
+      // }
 
       const field = await this.fieldModel.findById(payload.fieldId).lean();
       if (!field) {

@@ -1,0 +1,11 @@
+--- Debugging QR Check-in Round 2 ---
+Query Range (VN Today): $gte 2026-01-23T17:00:00.000Z , $lt 2026-01-24T17:00:00.000Z
+Connected to MongoDB
+
+[A] Checking user's bookings for field 69723ef87a7e635e0d02f09d (ANY DATE):
+ - Date: 2026-01-30T00:00:00.000Z, Status: confirmed, Payment: paid
+ - Date: 2026-02-06T00:00:00.000Z, Status: confirmed, Payment: paid
+
+[B] Checking user's bookings for TODAY (2026-01-23) (ANY FIELD):
+ - Field: Sân Thể Thao Test Đà Nẵngzxxx, Date: 2026-01-24T00:00:00.000Z, Status: confirmed
+ - Field: Sân Thể Thao Test Đà Nẵngzxxx, Date: 2026-01-24T00:00:00.000Z, Status: confirmed
