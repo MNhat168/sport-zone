@@ -14,10 +14,13 @@ import {
 
 import { BankAccount, BankAccountSchema } from '../field-owner/entities/bank-account.entity';
 import { CoachRegistrationRequest, CoachRegistrationRequestSchema } from './entities/coach-registration-request.entity';
+import { FieldOwnerRegistrationRequest, FieldOwnerRegistrationRequestSchema } from '../field-owner/entities/field-owner-registration-request.entity';
+import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entities/field-owner-profile.entity';
 import { EmailService } from 'src/modules/email/email.service';
 import { ServiceModule } from '../../service/service.module';
 import { Transaction, TransactionSchema } from '../transactions/entities/transaction.entity';
 import { TransactionsModule } from '../transactions/transactions.module';
+import { EkycModule } from '../ekyc/ekyc.module';
 
 @Module({
   imports: [
@@ -28,10 +31,13 @@ import { TransactionsModule } from '../transactions/transactions.module';
 
       { name: BankAccount.name, schema: BankAccountSchema },
       { name: CoachRegistrationRequest.name, schema: CoachRegistrationRequestSchema },
+      { name: FieldOwnerRegistrationRequest.name, schema: FieldOwnerRegistrationRequestSchema },
+      { name: FieldOwnerProfile.name, schema: FieldOwnerProfileSchema },
       { name: Transaction.name, schema: TransactionSchema },
     ]),
     ServiceModule,
     TransactionsModule,
+    EkycModule,
     ConfigModule,
   ],
   controllers: [CoachesController, CoachProfileController],

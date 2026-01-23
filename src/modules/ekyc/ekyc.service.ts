@@ -11,6 +11,7 @@ import { Model } from 'mongoose';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { FieldOwnerRegistrationRequest } from '../field-owner/entities/field-owner-registration-request.entity';
+import { CoachRegistrationRequest } from '../coaches/entities/coach-registration-request.entity';
 import { User } from '../users/entities/user.entity';
 
 /**
@@ -29,7 +30,9 @@ export class EkycService {
   constructor(
     private readonly configService: ConfigService,
     @InjectModel(FieldOwnerRegistrationRequest.name)
-    private readonly registrationRequestModel: Model<FieldOwnerRegistrationRequest>,
+    private readonly fieldOwnerRegistrationRequestModel: Model<FieldOwnerRegistrationRequest>,
+    @InjectModel(CoachRegistrationRequest.name)
+    private readonly coachRegistrationRequestModel: Model<CoachRegistrationRequest>,
     @InjectModel(User.name)
     private readonly userModel: Model<User>,
     private readonly httpService: HttpService,
@@ -348,6 +351,7 @@ export class EkycService {
 
   /**
    * Update registration request với eKYC data (internal)
+   * Hỗ trợ cả FieldOwner và Coach registration
    * @private
    */
   private async updateLocalRegistrationRequest(
@@ -356,9 +360,17 @@ export class EkycService {
     ekycData?: any,
     verifiedAt?: Date,
   ): Promise<void> {
-    const request = await this.registrationRequestModel.findOne({
+    // Tìm trong FieldOwnerRegistrationRequest trước
+    let request = await this.fieldOwnerRegistrationRequestModel.findOne({
       ekycSessionId: sessionId,
     });
+
+    // Nếu không tìm thấy, tìm trong CoachRegistrationRequest
+    if (!request) {
+      request = await this.coachRegistrationRequestModel.findOne({
+        ekycSessionId: sessionId,
+      }) as any;
+    }
 
     if (!request) {
       this.logger.warn(
@@ -383,14 +395,23 @@ export class EkycService {
 
   /**
    * Đồng bộ một số thông tin từ eKYC sang User (không thay đổi schema User)
+   * Hỗ trợ cả FieldOwner và Coach registration
    */
   private async syncUserFromEkyc(
     sessionId: string,
     ekycData: { fullName: string; idNumber: string; address: string },
   ): Promise<void> {
-    const request = await this.registrationRequestModel.findOne({
+    // Tìm trong FieldOwnerRegistrationRequest trước
+    let request = await this.fieldOwnerRegistrationRequestModel.findOne({
       ekycSessionId: sessionId,
     });
+
+    // Nếu không tìm thấy, tìm trong CoachRegistrationRequest
+    if (!request) {
+      request = await this.coachRegistrationRequestModel.findOne({
+        ekycSessionId: sessionId,
+      }) as any;
+    }
 
     if (!request) {
       this.logger.warn(
@@ -418,16 +439,25 @@ export class EkycService {
 
   /**
    * Verify eKYC session belongs to user (security check)
+   * Hỗ trợ cả FieldOwner và Coach registration
    * @param sessionId - eKYC session ID
    * @throws NotFoundException nếu session không tồn tại hoặc không thuộc về user
    */
   async verifyEkycSessionOwnership(
     sessionId: string,
     userId: string,
-  ): Promise<FieldOwnerRegistrationRequest | null> {
-    const request = await this.registrationRequestModel.findOne({
+  ): Promise<FieldOwnerRegistrationRequest | CoachRegistrationRequest | null> {
+    // Tìm trong FieldOwnerRegistrationRequest trước
+    let request = await this.fieldOwnerRegistrationRequestModel.findOne({
       ekycSessionId: sessionId,
     });
+
+    // Nếu không tìm thấy, tìm trong CoachRegistrationRequest
+    if (!request) {
+      request = await this.coachRegistrationRequestModel.findOne({
+        ekycSessionId: sessionId,
+      }) as any;
+    }
 
     // Nếu chưa có registration (user mới tạo session), cho phép
     if (!request) {

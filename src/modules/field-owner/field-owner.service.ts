@@ -18,6 +18,8 @@ import { FieldOwnerProfile } from './entities/field-owner-profile.entity';
 import {
   FieldOwnerRegistrationRequest,
 } from './entities/field-owner-registration-request.entity';
+import { CoachRegistrationRequest } from '../coaches/entities/coach-registration-request.entity';
+import { CoachProfile } from '../coaches/entities/coach-profile.entity';
 import { RegistrationStatus } from '@common/enums/field-owner-registration.enum';
 import { BankAccount } from './entities/bank-account.entity';
 import { BankAccountStatus } from '@common/enums/bank-account.enum';
@@ -63,6 +65,7 @@ import { Court } from '../courts/entities/court.entity';
 import { BookingStatus } from '@common/enums/booking.enum';
 import { SportType } from '@common/enums/sport-type.enum';
 import { QrCheckinService } from '../qr-checkin/qr-checkin.service';
+import { EkycService } from '../ekyc/ekyc.service';
 
 @Injectable()
 export class FieldOwnerService {
@@ -73,12 +76,15 @@ export class FieldOwnerService {
     @InjectModel(FieldOwnerProfile.name) private readonly fieldOwnerProfileModel: Model<FieldOwnerProfile>,
     @InjectModel(FieldOwnerRegistrationRequest.name)
     private readonly registrationRequestModel: Model<FieldOwnerRegistrationRequest>,
+    @InjectModel(CoachRegistrationRequest.name)
+    private readonly coachRegistrationRequestModel: Model<CoachRegistrationRequest>,
     @InjectModel(BankAccount.name) private readonly bankAccountModel: Model<BankAccount>,
     @InjectModel(FieldQrCode.name) private readonly fieldQrCodeModel: Model<FieldQrCode>,
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Transaction.name) private readonly transactionModel: Model<Transaction>,
     @InjectModel(Court.name) private readonly courtModel: Model<Court>,
+    @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
     private readonly priceFormatService: PriceFormatService,
     private readonly awsS3Service: AwsS3Service,
     private readonly payosService: PayOSService,
@@ -88,6 +94,7 @@ export class FieldOwnerService {
     private readonly fieldsService: FieldsService,
     @Inject(forwardRef(() => QrCheckinService))
     private readonly qrCheckinService: QrCheckinService,
+    private readonly ekycService: EkycService,
     private readonly eventEmitter: EventEmitter2,
   ) { }
 
@@ -1700,7 +1707,17 @@ export class FieldOwnerService {
       });
 
       if (existingRequest) {
-        throw new BadRequestException('You already have a pending or approved registration request');
+        throw new BadRequestException('Bạn đang có yêu cầu đăng ký chủ sân đang chờ duyệt hoặc đã được duyệt.');
+      }
+
+      // Check if user has a pending or approved COACH registration
+      const existingCoachRequest = await this.coachRegistrationRequestModel.findOne({
+        userId: new Types.ObjectId(userId),
+        status: { $in: [RegistrationStatus.PENDING, RegistrationStatus.APPROVED] },
+      });
+
+      if (existingCoachRequest) {
+        throw new BadRequestException('Bạn đang có yêu cầu đăng ký huấn luyện viên đang chờ duyệt hoặc đã được duyệt. Không thể đăng ký làm chủ sân.');
       }
 
       const existingProfile = await this.fieldOwnerProfileModel.findOne({
@@ -1708,7 +1725,105 @@ export class FieldOwnerService {
       });
 
       if (existingProfile) {
-        throw new BadRequestException('You are already a field owner');
+        throw new BadRequestException('Bạn đã là chủ sân.');
+      }
+
+      // Check if user is already a COACH
+      const existingCoachProfile = await this.coachProfileModel.findOne({
+        user: new Types.ObjectId(userId),
+      });
+
+      if (existingCoachProfile) {
+        throw new BadRequestException('Bạn đã là huấn luyện viên. Không thể đăng ký làm chủ sân.');
+      }
+
+      // Security: Prevent ekycSessionId reuse across different users
+      if (dto.ekycSessionId) {
+        // Check if sessionId is already used by another user in FieldOwnerRegistrationRequest
+        const existingFieldOwnerRequest = await this.registrationRequestModel.findOne({
+          ekycSessionId: dto.ekycSessionId,
+        });
+
+        if (existingFieldOwnerRequest) {
+          // If sessionId belongs to current user, allow (resubmit case)
+          if (existingFieldOwnerRequest.userId.toString() !== userId) {
+            throw new BadRequestException(
+              'eKYC session ID đã được sử dụng bởi người dùng khác. Vui lòng tạo session mới.',
+            );
+          }
+        }
+
+        // Check if sessionId is already used by another user in CoachRegistrationRequest
+        const existingCoachRequest = await this.coachRegistrationRequestModel.findOne({
+          ekycSessionId: dto.ekycSessionId,
+        });
+
+        if (existingCoachRequest) {
+          // If sessionId belongs to current user, allow (user switching between field owner and coach)
+          if (existingCoachRequest.userId.toString() !== userId) {
+            throw new BadRequestException(
+              'eKYC session ID đã được sử dụng bởi người dùng khác. Vui lòng tạo session mới.',
+            );
+          }
+        }
+      }
+
+      // Validate eKYC data: if ekycSessionId exists, ekycData must be provided or fetched
+      let finalEkycData = dto.ekycData;
+      let finalEkycStatus = dto.ekycData ? 'verified' : (dto.ekycSessionId ? 'pending' : undefined);
+      let finalEkycVerifiedAt = dto.ekycData ? new Date() : undefined;
+
+      if (dto.ekycSessionId) {
+        // If ekycData is missing, try to fetch from didit API
+        if (!dto.ekycData) {
+          try {
+            const ekycStatusResult = await this.ekycService.getEkycSessionStatus(dto.ekycSessionId);
+
+            if (ekycStatusResult.status === 'verified' && ekycStatusResult.data) {
+              finalEkycData = ekycStatusResult.data;
+              finalEkycStatus = 'verified';
+              finalEkycVerifiedAt = ekycStatusResult.verifiedAt || new Date();
+            } else if (ekycStatusResult.status === 'failed') {
+              throw new BadRequestException(
+                'eKYC verification đã thất bại. Vui lòng tạo session mới và thử lại.',
+              );
+            }
+            // If still pending, keep as pending
+          } catch (error) {
+            // If fetch fails, require ekycData to be provided
+            if (error instanceof BadRequestException) {
+              throw error;
+            }
+            this.logger.warn(
+              `Failed to fetch eKYC status for session ${dto.ekycSessionId}:`,
+              error,
+            );
+            throw new BadRequestException(
+              'Không thể lấy dữ liệu eKYC. Vui lòng đảm bảo eKYC đã được xác thực hoặc thử lại sau.',
+            );
+          }
+        }
+
+        // Validate ekycData completeness: fullName, idNumber, address must not be empty
+        if (finalEkycData) {
+          if (
+            !finalEkycData.fullName ||
+            !finalEkycData.idNumber ||
+            !finalEkycData.address ||
+            finalEkycData.fullName.trim() === '' ||
+            finalEkycData.idNumber.trim() === '' ||
+            finalEkycData.address.trim() === ''
+          ) {
+            throw new BadRequestException(
+              'Dữ liệu eKYC không đầy đủ. Vui lòng đảm bảo họ tên, số CMND/CCCD và địa chỉ đã được điền đầy đủ.',
+            );
+          }
+        } else {
+          // If sessionId exists but no data after fetch attempt, reject
+          throw new BadRequestException(
+            'Dữ liệu eKYC chưa sẵn sàng. Vui lòng đợi eKYC được xác thực hoàn tất.',
+          );
+        }
       }
 
       // Business documents: only businessLicense is still used, identity handled via eKYC
@@ -1723,13 +1838,11 @@ export class FieldOwnerService {
             businessLicense: dto.documents.businessLicense,
           }
           : undefined,
-        // eKYC fields
+        // eKYC fields (use final values after validation and fetch)
         ekycSessionId: dto.ekycSessionId,
-        ekycData: dto.ekycData,
-        // If ekycData exists, eKYC is verified; otherwise pending if session exists
-        ekycStatus: dto.ekycData ? 'verified' : (dto.ekycSessionId ? 'pending' : undefined),
-        // Set verifiedAt timestamp when eKYC is verified
-        ekycVerifiedAt: dto.ekycData ? new Date() : undefined,
+        ekycData: finalEkycData,
+        ekycStatus: finalEkycStatus,
+        ekycVerifiedAt: finalEkycVerifiedAt,
         // Facility info (optional during registration, can be filled during approval)
         facility: {
           facilityName: dto.facilityName || '',
@@ -1750,34 +1863,45 @@ export class FieldOwnerService {
           contactPhone: dto.contactPhone || '',
           website: dto.website,
         },
-        // Store all field images
-        fieldImages: dto.fieldImages || [],
-        status: RegistrationStatus.PENDING,
-        submittedAt: new Date(),
       });
 
       const savedRequest = await registrationRequest.save();
 
-      // Send notification email (non-blocking)
-      try {
-        const user = await this.userModel.findById(userId).exec();
-        if (user) {
-          await this.emailService.sendFieldOwnerRegistrationSubmitted(user.email, user.fullName);
-        }
-      } catch (emailError) {
-        this.logger.warn('Failed to send registration email', emailError);
-        // Don't fail the registration if email fails
-      }
+      // Send confirmation email (can be async)
+      // await this.emailService.sendFieldOwnerRegistrationSubmitted(user.email, user.fullName);
 
       return this.mapToRegistrationDto(savedRequest);
     } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      this.logger.error('Error creating registration request', error);
+      this.logger.error('Error creating registration request:', error);
+      if (error instanceof BadRequestException) throw error;
       throw new InternalServerErrorException('Failed to create registration request');
     }
   }
+
+  async confirmPolicy(userId: string): Promise<boolean> {
+    const user = await this.userModel.findById(userId);
+    if (!user || user.role !== UserRole.FIELD_OWNER) {
+      throw new BadRequestException('User is not a field owner');
+    }
+
+    const result = await this.fieldOwnerProfileModel.updateOne(
+      { user: user._id },
+      {
+        $set: {
+          hasReadPolicy: true,
+          policyReadAt: new Date()
+        }
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      throw new NotFoundException('Field owner profile not found');
+    }
+
+    return true;
+  }
+
+
 
   async getMyRegistrationRequest(userId: string) {
     try {
@@ -1879,8 +2003,21 @@ export class FieldOwnerService {
         }
 
         const idNumber = request.ekycData?.identityCardNumber || request.ekycData?.idNumber;
-        if (!request.ekycData || !request.ekycData.fullName || !idNumber) {
-          throw new BadRequestException('Cannot approve: eKYC data missing or incomplete');
+        const address = request.ekycData?.permanentAddress || request.ekycData?.address;
+
+        // Validate ekycData completeness: fullName, idNumber, address must not be empty
+        if (
+          !request.ekycData ||
+          !request.ekycData.fullName ||
+          !idNumber ||
+          !address ||
+          request.ekycData.fullName.trim() === '' ||
+          idNumber.trim() === '' ||
+          address.trim() === ''
+        ) {
+          throw new BadRequestException(
+            'Cannot approve: eKYC data missing or incomplete. Required fields: fullName, idNumber, address',
+          );
         }
 
         this.logger.log(
@@ -2996,6 +3133,9 @@ export class FieldOwnerService {
 
       this.logger.log(`Deleted ${courtsToRemove.length} courts from field ${fieldId}`);
     }
+
+
+
   }
 
   private mapToBankAccountDto(account: BankAccount): BankAccountResponseDto {

@@ -18,6 +18,8 @@ import { GetAllUsersResponseDto, UserListDto } from './dto/get-all-users-respons
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { Booking } from '../bookings/entities/booking.entity';
+import { FieldOwnerProfile } from '../field-owner/entities/field-owner-profile.entity';
+import { CoachProfile } from '../coaches/entities/coach-profile.entity';
 import { BookmarkCoachDto } from './dto/bookmark-coach.dto';
 import { UserRole } from '@common/enums/user.enum';
 import { Field } from '../fields/entities/field.entity';
@@ -34,6 +36,8 @@ export class UsersService {
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Field.name) private readonly fieldModel: Model<Field>,
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
+    @InjectModel(FieldOwnerProfile.name) private readonly fieldOwnerProfileModel: Model<FieldOwnerProfile>,
+    @InjectModel(CoachProfile.name) private readonly coachProfileModel: Model<CoachProfile>,
   ) { }
 
   async findOneByCondition(condition: FilterQuery<User>): Promise<User | null> {
@@ -50,6 +54,24 @@ export class UsersService {
     const user = await this.userRepository.findById(id);
     if (!user) throw new NotFoundException('User not found');
     return user;
+  }
+
+  async getUserProfileWithPolicyStatus(userId: string) {
+    const user = await this.findById(userId);
+    let hasReadPolicy = true;
+
+    if (user.role === UserRole.FIELD_OWNER) {
+      const profile = await this.fieldOwnerProfileModel.findOne({ user: user._id });
+      hasReadPolicy = profile?.hasReadPolicy || false;
+    } else if (user.role === UserRole.COACH) {
+      const profile = await this.coachProfileModel.findOne({ user: user._id });
+      hasReadPolicy = profile?.hasReadPolicy || false;
+    }
+
+    return {
+      ...user.toObject(),
+      hasReadPolicy
+    };
   }
 
   async update(

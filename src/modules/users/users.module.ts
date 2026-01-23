@@ -5,6 +5,8 @@ import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { User, UserSchema } from './entities/user.entity';
 import { Field, FieldSchema } from '../fields/entities/field.entity';
+import { FieldOwnerProfile, FieldOwnerProfileSchema } from '../field-owner/entities/field-owner-profile.entity';
+import { CoachProfile, CoachProfileSchema } from '../coaches/entities/coach-profile.entity';
 import { Booking, BookingSchema } from '../bookings/entities/booking.entity';
 import { UserRepository } from './repositories/user.repository';
 import { USER_REPOSITORY } from './interface/users.interface';
@@ -18,6 +20,8 @@ import { JwtModule } from '@nestjs/jwt';
       { name: User.name, schema: UserSchema },
       { name: Field.name, schema: FieldSchema },
       { name: Booking.name, schema: BookingSchema },
+      { name: FieldOwnerProfile.name, schema: FieldOwnerProfileSchema },
+      { name: CoachProfile.name, schema: CoachProfileSchema },
     ]),
     forwardRef(() => BookingsModule),
     ServiceModule,
@@ -38,4 +42,4 @@ import { JwtModule } from '@nestjs/jwt';
     MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]), // Export the User model
   ]
 })
-export class UsersModule {}
+export class UsersModule { }

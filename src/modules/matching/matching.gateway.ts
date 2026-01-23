@@ -13,7 +13,28 @@ import { JwtService } from '@nestjs/jwt';
 
 @WebSocketGateway({
     cors: {
-        origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+        origin: (origin, callback) => {
+            // Allow requests with no origin (mobile apps, curl, etc.)
+            if (!origin) return callback(null, true);
+
+            const allowedPatterns = [
+                /^https:\/\/sport-zone-fe-deploy\.vercel\.app$/,
+                /^https:\/\/.*\.vercel\.app$/,
+                /^https:\/\/www\.sportzone\.io\.vn$/,              // Custom Domain (www)
+                /^https:\/\/sportzone\.io\.vn$/,                   // Custom Domain (root)
+                /^http:\/\/localhost(:\d+)?$/,                     // Allow localhost with optional port
+                /^http:\/\/127\.0\.0\.1(:\d+)?$/,                  // Allow 127.0.0.1 with optional port
+            ];
+
+            const isAllowed = allowedPatterns.some(pattern => pattern.test(origin));
+            if (isAllowed) {
+                return callback(null, true);
+            }
+
+            // Log rejected origins for debugging
+            console.warn(`[Matching Gateway CORS] Rejected origin: ${origin}`);
+            return callback(new Error(`Not allowed by Matching Gateway CORS: ${origin}`));
+        },
         credentials: true,
     },
     namespace: '/matching',
