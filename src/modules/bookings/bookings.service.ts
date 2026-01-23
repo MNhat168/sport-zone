@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger, InternalServerErrorException, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, GoneException, Logger, InternalServerErrorException, HttpException, HttpStatus } from '@nestjs/common';
 import { InjectModel, InjectConnection } from '@nestjs/mongoose';
 import { Model, Types, Connection, ClientSession } from 'mongoose';
 import { Booking } from './entities/booking.entity';
@@ -2801,10 +2801,18 @@ export class BookingsService {
   // ============================================================================
 
   /**
+   * @deprecated This method is deprecated. Users should scan field QR codes at the venue instead.
    * Generate QR check-in token for a booking
    * Only available within configured time window before match start
    */
   async generateCheckInQR(bookingId: string, userId: string) {
+    // DEPRECATED: This method is no longer used
+    // Users now scan field QR codes at the venue instead of generating booking-specific QR codes
+    throw new GoneException(
+      'Booking-specific QR generation is deprecated. Please scan the field QR code at the venue.'
+    );
+
+    /* LEGACY CODE - KEPT FOR REFERENCE, WILL BE REMOVED IN FUTURE
     // 1. Find and validate booking
     if (!Types.ObjectId.isValid(bookingId)) {
       throw new BadRequestException('Invalid booking ID format');
@@ -2866,6 +2874,50 @@ export class BookingsService {
       startTime: startDateTime,
       fieldName: (booking.field as any)?.name || 'Sân không xác định'
     };
+    */
+  }
+
+  /**
+   * Get user's bookings for a specific field today
+   * Used for field QR check-in - user scans field QR, we show their bookings
+   * @param userId - The user ID
+   * @param fieldId - The field ID
+   * @returns List of user's bookings for today at this field
+   */
+  async getUserBookingsForFieldToday(
+    userId: string,
+    fieldId: string,
+  ): Promise<any[]> {
+    // Get today's date in Vietnam timezone
+    const vietnamTime = new Date();
+    const vietnamDate = new Date(
+      vietnamTime.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }),
+    );
+    vietnamDate.setHours(0, 0, 0, 0);
+
+    const tomorrow = new Date(vietnamDate);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    this.logger.log(`[Field QR Check-in] Finding bookings for user ${userId} at field ${fieldId} on ${vietnamDate.toISOString()}`);
+
+    // Find confirmed, paid bookings for this user, field, and today
+    const bookings = await this.bookingModel.find({
+      user: new Types.ObjectId(userId),
+      field: new Types.ObjectId(fieldId),
+      date: {
+        $gte: vietnamDate,
+        $lt: tomorrow
+      },
+      status: BookingStatus.CONFIRMED,
+      paymentStatus: 'paid',
+    })
+      .populate('field', 'name')
+      .populate('court', 'name courtNumber')
+      .lean();
+
+    this.logger.log(`[Field QR Check-in] Found ${bookings.length} bookings`);
+
+    return bookings;
   }
 
   /**
@@ -2881,10 +2933,38 @@ export class BookingsService {
     // 1. Validate token
     const tokenPayload = await this.qrCheckinService.validateCheckInToken(token);
 
-    // 2. Handle recurring group QR code vs single booking QR code
+    // 2. Handle different token types
     let booking: any;
 
-    if (tokenPayload.recurringGroupId) {
+    if (tokenPayload.type === 'field') {
+      // Field QR code - need bookingId to be provided
+      this.logger.log(`[QR Check-in] Field QR code detected for field ${tokenPayload.fieldId}`);
+
+      if (!bookingId) {
+        throw new BadRequestException('Booking ID is required when using field QR code');
+      }
+
+      // Verify booking belongs to this field
+      booking = await this.bookingModel
+        .findById(bookingId)
+        .populate('field')
+        .populate('transaction')
+        .populate('user');
+
+      if (!booking) {
+        throw new NotFoundException('Booking not found');
+      }
+
+      // Verify booking belongs to the field from QR code
+      const bookingFieldId = (booking.field as any)._id.toString();
+      if (bookingFieldId !== tokenPayload.fieldId) {
+        this.logger.warn(`[QR Check-in] Booking field mismatch: ${bookingFieldId} !== ${tokenPayload.fieldId}`);
+        throw new BadRequestException('This booking does not belong to this field');
+      }
+
+      this.logger.log(`[QR Check-in] Field QR validated for booking ${bookingId}`);
+
+    } else if (tokenPayload.recurringGroupId) {
       // This is a recurring group QR - find booking for TODAY's date
       this.logger.log(`[QR Check-in] Recurring group QR detected: ${tokenPayload.recurringGroupId}`);
 
@@ -2926,14 +3006,24 @@ export class BookingsService {
       this.logger.log(`[QR Check-in] Found booking ${booking._id} for today in recurring group`);
 
     } else {
-      // Single booking QR - verify token matches booking ID
-      if (tokenPayload.bookingId !== bookingId) {
+      // Single booking QR - get booking ID from token payload
+      // ✅ FIX: Use bookingId from token, not from URL parameter
+      // This allows field-owner to scan QR without knowing the booking ID
+      const tokenBookingId = tokenPayload.bookingId;
+
+      if (!tokenBookingId) {
+        throw new BadRequestException('Token does not contain booking ID');
+      }
+
+      // Optional validation: if bookingId is provided in URL, verify it matches
+      if (bookingId && bookingId !== tokenBookingId) {
+        this.logger.warn(`[QR Check-in] URL bookingId (${bookingId}) doesn't match token bookingId (${tokenBookingId})`);
         throw new BadRequestException('Token does not match booking ID');
       }
 
-      // 3. Find booking with all relations
+      // 3. Find booking with all relations using the ID from token
       booking = await this.bookingModel
-        .findById(bookingId)
+        .findById(tokenBookingId)
         .populate('field')
         .populate('transaction')
         .populate('user');

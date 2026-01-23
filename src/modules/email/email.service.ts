@@ -1,4 +1,4 @@
-import { SportType } from '@common/enums/sport-type.enum';
+﻿import { SportType } from '@common/enums/sport-type.enum';
 import { MailerService } from '@nestjs-modules/mailer';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -197,6 +197,7 @@ export class EmailService {
 		dateLabel?: string;
 		createdAt?: string;
 		paymentMethod?: PaymentMethod | string;
+		qrCodeDataUrl?: string; // QR code for check-in
 	}) {
 		let methodLabel = 'Chưa chọn';
 		if (payload.paymentMethod !== undefined) {

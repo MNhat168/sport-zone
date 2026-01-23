@@ -232,10 +232,20 @@ export class PaymentHandlerService implements OnModuleInit {
       // ✅ 3. Process Bookings & Calculate Owner Revenue
       const ownerRevenueMap = new Map<string, number>(); // OwnerID -> Revenue
       const recurringGroupsProcessed = new Set<string>(); // Track recurring groups for email
+      const emailsToSend = new Set<string>(); // Track which emails need to be sent (bookingId or recurringGroupId)
 
       for (const booking of bookings) {
         const isSplitPayment = booking.metadata?.splitPayment === true;
         const userIdStr = String(event.userId);
+
+        // ✅ CRITICAL FIX: Collect emails to send BEFORE idempotency check
+        // This ensures emails are sent even if booking was already updated by fallback mechanism
+        const recurringGroupId = booking.recurringGroupId?.toString();
+        if (recurringGroupId) {
+          emailsToSend.add(`recurring:${recurringGroupId}`);
+        } else {
+          emailsToSend.add(`single:${booking.id.toString()}`);
+        }
 
         // Idempotency check
         // For split payments, we check if THIS specific user has already paid
@@ -247,8 +257,8 @@ export class PaymentHandlerService implements OnModuleInit {
           }
         } else if (booking.status === BookingStatus.CONFIRMED && booking.paymentStatus === 'paid') {
           // Standard booking idempotency
-          this.logger.debug(`[Payment Success] Booking ${booking._id} already confirmed and paid, skipping`);
-          continue;
+          this.logger.debug(`[Payment Success] Booking ${booking._id} already confirmed and paid, skipping update but will send email`);
+          continue; - skip update but continue to send email
         }
 
         const isCoach = booking.type === BookingType.COACH;
@@ -323,25 +333,6 @@ export class PaymentHandlerService implements OnModuleInit {
           date: booking.date,
         });
 
-        // ✅ NEW: Send email only once per recurring group (or per single booking)
-        const recurringGroupId = booking.recurringGroupId?.toString();
-        if (recurringGroupId) {
-          // This is a recurring booking - only send email for the first booking in the group
-          if (!recurringGroupsProcessed.has(recurringGroupId)) {
-            recurringGroupsProcessed.add(recurringGroupId);
-            // Send consolidated email for the entire recurring group
-            this.bookingEmailService.sendRecurringConfirmationEmail(
-              recurringGroupId,
-              event.method
-            ).catch(e => this.logger.error('[Payment Success] Failed to send recurring email:', e));
-            this.logger.log(`[Payment Success] Sent consolidated email for recurring group ${recurringGroupId}`);
-          }
-        } else {
-          // Single booking - send individual email as before
-          this.bookingEmailService.sendConfirmationEmails(booking.id.toString(), event.method)
-            .catch(e => this.logger.error('[Payment Success] Failed to send confirmation email:', e));
-        }
-
         // Calculate Revenue for Owner
         if (booking.field) {
           // Populate field and field.owner (FieldOwnerProfile) to get the actual userId
@@ -394,6 +385,28 @@ export class PaymentHandlerService implements OnModuleInit {
 
       await session.commitTransaction();
       this.logger.log(`[Payment Success] ✅ Successfully confirmed ${bookings.length} booking(s)`);
+
+      // ✅ CRITICAL FIX: Send emails AFTER transaction commits to ensure they're always sent
+      // This runs regardless of whether bookings were already confirmed by fallback mechanism
+      // Process collected emails (moved outside transaction for better reliability)
+      for (const emailKey of emailsToSend) {
+        if (emailKey.startsWith('recurring:')) {
+          const recurringGroupId = emailKey.replace('recurring:', '');
+          if (!recurringGroupsProcessed.has(recurringGroupId)) {
+            recurringGroupsProcessed.add(recurringGroupId);
+            this.bookingEmailService.sendRecurringConfirmationEmail(
+              recurringGroupId,
+              event.method
+            ).catch(e => this.logger.error('[Payment Success] Failed to send recurring email:', e));
+            this.logger.log(`[Payment Success] 📧 Sent consolidated email for recurring group ${recurringGroupId}`);
+          }
+        } else if (emailKey.startsWith('single:')) {
+          const bookingId = emailKey.replace('single:', '');
+          this.bookingEmailService.sendConfirmationEmails(bookingId, event.method)
+            .catch(e => this.logger.error('[Payment Success] Failed to send confirmation email:', e));
+          this.logger.log(`[Payment Success] 📧 Sent confirmation email for booking ${bookingId}`);
+        }
+      }
 
     } catch (error) {
       await session.abortTransaction();

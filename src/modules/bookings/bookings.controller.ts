@@ -10,6 +10,7 @@ import {
   UseGuards,
   BadRequestException,
   NotFoundException,
+  GoneException,
   UseInterceptors,
   UploadedFile,
 } from '@nestjs/common';
@@ -45,11 +46,13 @@ import { FieldBookingService } from './services/field-booking.service';
 import { TransactionsService } from '../transactions/transactions.service';
 import { AiService } from '../ai/ai.service'; // Turn 3
 import { BookingCancellationService } from './services/booking-cancellation.service'; // Turn 4
+import { OwnerBookingService } from './services/owner-booking.service';
 import { CheckInRateLimitGuard } from '../qr-checkin/guards/check-in-rate-limit.guard';
 import { RolesGuard } from '@common/guards/roles.guard';
 import { Roles } from '../../decorators/roles.decorator';
 import { UserRole } from '@common/enums/user.enum';
 import { FieldAccessGuard } from '@common/guards/field-access.guard';
+import { CreateOwnerReservedBookingDto } from './dto/create-owner-reserved-booking.dto';
 
 /**
  * Bookings Controller with Pure Lazy Creation pattern
@@ -67,6 +70,7 @@ export class BookingsController {
     private readonly transactionsService: TransactionsService, // NEW
     private readonly aiService: AiService, // Turn 3
     private readonly bookingCancellationService: BookingCancellationService, // Turn 4
+    private readonly ownerBookingService: OwnerBookingService,
     @InjectModel(Schedule.name) private readonly scheduleModel: Model<Schedule>,
     @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
     private readonly cleanupService: CleanupService,
@@ -1667,8 +1671,9 @@ export class BookingsController {
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Generate QR code for check-in',
-    description: 'Generate a signed JWT token for QR check-in. Only available within configured time window before match start (default: 15 minutes).'
+    summary: '[DEPRECATED] Generate QR code for check-in',
+    description: 'DEPRECATED: This endpoint is no longer supported. Please scan the field QR code at the venue to check in. Field QR codes are displayed at the reception area.',
+    deprecated: true
   })
   @ApiParam({
     name: 'id',
@@ -1704,14 +1709,62 @@ export class BookingsController {
     @Param('id') bookingId: string,
     @Request() req: any,
   ) {
-    // Debug logging
-    console.debug(`[QR Generation] Request user: ${JSON.stringify(req.user)}`);
-    console.debug(`[QR Generation] Booking ID: ${bookingId}`);
+    throw new GoneException(
+      'This endpoint has been deprecated. Please scan the field QR code at the venue to check in. You no longer need to generate QR codes from bookings.'
+    );
+  }
 
+  /**
+   * Get user's bookings for a field today (for field QR check-in)
+   * When user scans a field QR code, this returns their bookings at that field
+   * so they can select which one to check in
+   */
+  @Get('bookings/check-in/options')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get check-in options for field QR',
+    description: 'Returns user\'s bookings for a specific field today when scanning field QR code'
+  })
+  @ApiQuery({
+    name: 'fieldId',
+    description: 'Field ID from the scanned QR token',
+    required: true,
+    example: '507f1f77bcf86cd799439011'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'List of user\'s bookings for today at this field',
+    schema: {
+      example: [{
+        _id: '507f1f77bcf86cd799439011',
+        date: '2026-01-22T00:00:00Z',
+        fieldStartTime: '14:00',
+        fieldEndTime: '16:00',
+        field: { name: 'Sân bóng ABC' },
+        court: { name: 'Sân 1', courtNumber: 1 },
+        status: 'confirmed',
+        paymentStatus: 'paid'
+      }]
+    }
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 400, description: 'Invalid field ID' })
+  async getCheckInOptions(
+    @Query('fieldId') fieldId: string,
+    @Request() req: any,
+  ) {
     const userId = this.getUserId(req);
-    console.debug(`[QR Generation] Extracted userId: ${userId}`);
 
-    return await this.bookingsService.generateCheckInQR(bookingId, userId);
+    if (!fieldId) {
+      throw new BadRequestException('Field ID is required');
+    }
+
+    if (!Types.ObjectId.isValid(fieldId)) {
+      throw new BadRequestException('Invalid field ID format');
+    }
+
+    return await this.bookingsService.getUserBookingsForFieldToday(userId, fieldId);
   }
 
   /**
@@ -1729,8 +1782,8 @@ export class BookingsController {
   })
   @ApiParam({
     name: 'id',
-    description: 'Booking ID',
-    example: '507f1f77bcf86cd799439011'
+    description: 'Booking ID (can be placeholder like "scan" - actual ID is extracted from QR token)',
+    example: 'scan'
   })
   @ApiResponse({
     status: 200,
@@ -1813,6 +1866,35 @@ export class BookingsController {
   ) {
     const userId = this.getUserId(req);
     return await this.bookingsService.getCheckInWindow(bookingId, userId);
+  }
+
+  /**
+   * Create owner-reserved booking
+   * Allows field owner to reserve their own slots with system fee deducted from pendingBalance
+   * ✅ SECURITY: Only field owners or staff can access
+   */
+  @Post('bookings/owner-reserved')
+  @UseGuards(AuthGuard('jwt'), FieldAccessGuard)
+  @ApiBearerAuth()
+  @RateLimit({ ttl: 60, limit: 10 }) // 10 bookings per minute
+  @ApiOperation({
+    summary: 'Tạo owner-reserved booking (chủ sân tự khóa slot)',
+    description: 'Cho phép chủ sân tự khóa các khung giờ trên sân của mình. Phí hệ thống sẽ được trừ từ số dư chờ xử lý (pendingBalance).'
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Owner-reserved booking được tạo thành công',
+    type: Booking
+  })
+  @ApiResponse({ status: 400, description: 'Dữ liệu không hợp lệ hoặc slot đã được đặt hoặc không đủ số dư' })
+  @ApiResponse({ status: 403, description: 'Không có quyền truy cập' })
+  @ApiResponse({ status: 404, description: 'Không tìm thấy sân hoặc court' })
+  async createOwnerReservedBooking(
+    @Request() req: any,
+    @Body() bookingData: CreateOwnerReservedBookingDto,
+  ): Promise<Booking> {
+    const ownerUserId = this.getUserId(req);
+    return await this.ownerBookingService.createOwnerReservedBooking(ownerUserId, bookingData);
   }
 }
 

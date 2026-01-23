@@ -47,9 +47,9 @@ export class UsersController {
   ) { }
   @UseGuards(JwtAccessTokenGuard)
   @Get('get-profile')
-  async getProfile(@Req() req: any): Promise<User> {
+  async getProfile(@Req() req: any) {
     //console.log('req.user',req.user);
-    return await this.usersService.findById(req.user.userId);
+    return await this.usersService.getUserProfileWithPolicyStatus(req.user.userId);
   }
 
 
