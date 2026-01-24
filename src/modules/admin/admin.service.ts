@@ -593,7 +593,8 @@ export class AdminService {
             topFieldsByFavorites,
             topCoachesByFavorites,
             bookingPatterns,
-            retentionMetrics
+            retentionMetrics,
+            peakRevenuePeriods
         ] = await Promise.all([
             this.getMonthlyRevenueData(dateFilter, sportType), // REAL method
             this.getRevenueBySport(dateFilter), // REAL method
@@ -604,7 +605,8 @@ export class AdminService {
             this.getTopFieldsByFavorites(dateFilter, sportType),
             this.getTopCoachesByFavorites(dateFilter, sportType),
             this.getBookingPatterns(dateFilter),
-            this.getRetentionMetrics(dateFilter)
+            this.getRetentionMetrics(dateFilter),
+            this.getPeakRevenuePeriods(dateFilter)
         ]);
 
         if (!useAi) {
@@ -633,7 +635,8 @@ export class AdminService {
             topFieldsByFavorites: topFieldsByFavorites || [],
             topCoachesByFavorites: topCoachesByFavorites || [],
             bookingPatterns: bookingPatterns,
-            retentionMetrics: retentionMetrics
+            retentionMetrics: retentionMetrics,
+            peakRevenuePeriods: peakRevenuePeriods || []
 
         };
 
@@ -2390,8 +2393,25 @@ export class AdminService {
             },
             { $unwind: { path: '$fieldData', preserveNullAndEmptyArrays: true } },
             {
+                $addFields: {
+                    normalizedSport: {
+                        $cond: {
+                            if: { $ifNull: ["$fieldData.sportType", false] },
+                            then: "$fieldData.sportType",
+                            else: {
+                                $cond: {
+                                    if: { $eq: ["$type", "coach"] },
+                                    then: "Coaching",
+                                    else: "Other"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            {
                 $group: {
-                    _id: '$fieldData.sportType',
+                    _id: '$normalizedSport',
                     revenue: { $sum: '$totalPrice' },
                     count: { $sum: 1 }
                 }
@@ -2411,7 +2431,57 @@ export class AdminService {
 
 
     private async getPeakRevenuePeriods(dateFilter: any): Promise<string[]> {
-        return ['Weekends', 'Evenings'];
+        const result = await this.bookingModel.aggregate([
+            {
+                $match: {
+                    status: { $in: [BookingStatus.CONFIRMED, BookingStatus.COMPLETED] },
+                    ...dateFilter
+                }
+            },
+            {
+                $project: {
+                    totalPrice: 1,
+                    hour: {
+                        $cond: [
+                            { $eq: [{ $type: "$startTime" }, "date"] },
+                            { $hour: "$startTime" },
+                            {
+                                $toInt: {
+                                    $arrayElemAt: [
+                                        { $split: [{ $toString: "$startTime" }, ":"] },
+                                        0
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                $match: {
+                    hour: { $ne: null }
+                }
+            },
+            {
+                $group: {
+                    _id: "$hour",
+                    revenue: { $sum: "$totalPrice" }
+                }
+            },
+            { $sort: { revenue: -1 } },
+            { $limit: 5 }
+        ]);
+
+        if (result.length === 0) {
+            return [];
+        }
+
+        return result.map(item => {
+            const startHour = item._id;
+            const endHour = (startHour + 1) % 24;
+            const format = (h: number) => h.toString().padStart(2, '0') + ':00';
+            return `${format(startHour)} - ${format(endHour)}`;
+        });
     }
 
     private async getSportsPopularityData(
@@ -2559,11 +2629,11 @@ export class AdminService {
         };
     }
 
-    private validateRevenueTypeDto(type: any): 'field' | 'coach' | 'tournament' {
+    private validateRevenueTypeDto(type: any): 'field' | 'coach' {
         if (typeof type === 'string') {
             const lowerType = type.toLowerCase();
-            if (lowerType === 'field' || lowerType === 'coach' || lowerType === 'tournament') {
-                return lowerType as 'field' | 'coach' | 'tournament';
+            if (lowerType === 'field' || lowerType === 'coach') {
+                return lowerType as 'field' | 'coach';
             }
         }
         return 'field'; // Default value
@@ -2624,10 +2694,12 @@ export class AdminService {
 
         const [
             bookingPatterns,
-            retentionMetrics
+            retentionMetrics,
+            peakRevenuePeriods
         ] = await Promise.all([
             this.getBookingPatterns(dateFilter),
-            this.getRetentionMetrics(dateFilter)
+            this.getRetentionMetrics(dateFilter),
+            this.getPeakRevenuePeriods(dateFilter)
         ]);
 
         return {

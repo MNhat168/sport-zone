@@ -112,6 +112,7 @@ export interface PlatformAnalyticsData {
         favoriteToBookingConversion: number;
         userSatisfactionScore: number;
     };
+    peakRevenuePeriods?: string[];
 }
 
 @Injectable()
@@ -287,7 +288,7 @@ export class AiService {
                 messages: [
                     {
                         role: "system",
-                        content: "You are a senior sports analytics expert. Provide data-driven insights with actionable recommendations. For revenue types, use ONLY 'field' or 'coach' exactly as written. Always base your analysis on the provided data, not assumptions."
+                        content: "You are a senior sports analytics expert. Provide data-driven insights with actionable recommendations. For revenue types, use ONLY 'field' or 'coach' exactly as written. Strictly avoid any mentions of tournaments or tournament-based revenue. Always base your analysis on the provided data, not assumptions."
                     },
                     {
                         role: "user",
@@ -864,7 +865,7 @@ export class AiService {
             ],
             recommendations: [
                 "Implement a loyalty program targeting repeat customers",
-                `Introduce ${topSport?.sport || 'popular sport'} tournament packages`,
+                `Introduce specialized ${topSport?.sport || 'popular sport'} coaching packages`,
                 "Offer bundled deals for multiple field bookings",
                 "Add premium amenities to increase average booking value by 15-20%",
                 "Use dynamic pricing during identified peak hours",
@@ -956,7 +957,7 @@ export class AiService {
             : 65;
 
         if (fieldRevenuePercent > 70) {
-            recommendations.push("Diversify revenue streams by expanding coach and tournament offerings");
+            recommendations.push("Diversify revenue streams by expanding coach offerings and value-added amenities");
         }
 
         if (totalRevenue < 10000) {
@@ -1037,7 +1038,9 @@ export class AiService {
                     : this.generateEnhancedSimulatedPlatformAnalytics(originalData).revenueAnalysis.revenueByType,
                 peakRevenuePeriods: Array.isArray(validatedData.revenueAnalysis?.peakRevenuePeriods)
                     ? validatedData.revenueAnalysis.peakRevenuePeriods
-                    : ['Weekends', 'Evenings']
+                    : (originalData.peakRevenuePeriods && originalData.peakRevenuePeriods.length > 0
+                        ? originalData.peakRevenuePeriods
+                        : ['Weekends', 'Evenings'])
             },
             popularityAnalysis: {
                 sportsPopularity: Array.isArray(validatedData.popularityAnalysis?.sportsPopularity)
