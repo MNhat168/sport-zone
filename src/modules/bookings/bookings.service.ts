@@ -2669,7 +2669,8 @@ export class BookingsService {
     }
 
     // Determine Return/Cancel URLs
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    // FIXED: Use FRONTEND_URL from env for production redirection
+    const clientUrl = process.env.FRONTEND_URL || process.env.CLIENT_URL || 'http://localhost:5173';
     let returnUrl: string | undefined;
     let cancelUrl: string | undefined;
 
