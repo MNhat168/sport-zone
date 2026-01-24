@@ -35,6 +35,7 @@ import { CoachBookingService } from './services/coach-booking.service';
 import { OwnerBookingService } from './services/owner-booking.service';
 import { BookingQueryService } from './services/booking-query.service';
 import { BookingCancellationService } from './services/booking-cancellation.service';
+import { CancellationValidatorService } from './services/cancellation-validator.service';
 import { PaymentProofService } from './services/payment-proof.service';
 import { FieldAccessGuard } from '@common/guards/field-access.guard';
 import { CheckInRateLimitGuard } from '../qr-checkin/guards/check-in-rate-limit.guard';
@@ -86,6 +87,7 @@ import { CheckInRateLimitGuard } from '../qr-checkin/guards/check-in-rate-limit.
     OwnerBookingService,
     BookingQueryService,
     BookingCancellationService,
+    CancellationValidatorService,
     PaymentProofService,
     FieldAccessGuard, // Enable staff access to check-in
     CheckInRateLimitGuard, // Enable rate limiting for QR generation

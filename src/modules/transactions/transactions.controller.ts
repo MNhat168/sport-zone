@@ -1021,8 +1021,6 @@ export class TransactionsController {
                     transactionId: webhookData.reference,
                 });
 
-
-
                 // Successfully emitted payment.success event
                 // This will be handled by NotificationListener to create a persistent notification
                 // and by PaymentHandlerService to confirm the booking.

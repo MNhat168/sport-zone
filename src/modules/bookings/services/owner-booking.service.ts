@@ -20,6 +20,9 @@ import { Court } from '../../courts/entities/court.entity';
 import { Schedule } from '../../schedules/entities/schedule.entity';
 import { CreateOwnerReservedBookingDto } from '../dto/create-owner-reserved-booking.dto';
 import { WalletRole } from '@common/enums/wallet.enum';
+import { CancellationValidatorService } from './cancellation-validator.service';
+import { CancellationRole } from '../config/cancellation-rules.config';
+import { PaymentHandlerService } from './payment-handler.service';
 
 /**
  * Owner Booking Service
@@ -46,6 +49,8 @@ export class OwnerBookingService {
         private readonly transactionsService: TransactionsService,
         private readonly walletService: WalletService,
         private readonly availabilityService: AvailabilityService,
+        private readonly cancellationValidator: CancellationValidatorService,
+        private readonly paymentHandlerService: PaymentHandlerService,
     ) { }
 
     /**
@@ -265,7 +270,8 @@ export class OwnerBookingService {
     }
 
     /**
-     * Owner: reject a booking
+     * Owner: reject a booking with cancellation rules
+     * Applies penalty policy based on time until booking start
      */
     async ownerRejectBooking(ownerUserId: string, bookingId: string, reason?: string) {
         const booking = await this.bookingModel
@@ -279,12 +285,116 @@ export class OwnerBookingService {
         const ownerMatches = (field.owner?.toString?.() === ownerUserId) || (!!ownerProfile && field.owner?.toString?.() === ownerProfile._id.toString());
         if (!ownerMatches) throw new BadRequestException('Not authorized to update this booking');
 
+        // Validate cancellation eligibility
+        const eligibility = this.cancellationValidator.validateCancellationEligibility(
+            booking,
+            CancellationRole.OWNER
+        );
+
+        if (!eligibility.allowed) {
+            throw new BadRequestException(eligibility.errorMessage || 'Cannot cancel this booking');
+        }
+
+        // Calculate penalty amount
+        const { penaltyAmount, penaltyPercentage } = this.cancellationValidator.calculatePenalty(
+            booking,
+            CancellationRole.OWNER
+        );
+
+        // Process refund 100% to user
+        const slotValue = booking.bookingAmount + (booking.platformFee || 0);
+        try {
+            await this.paymentHandlerService.handleRefund(
+                (booking as any)._id.toString(),
+                'credit', // Refund to user's refundBalance
+                slotValue, // 100% refund
+                `Owner cancellation: 100% refund to customer (${reason || 'No reason provided'})`
+            );
+            this.logger.log(
+                `[Owner Reject] Processed 100% refund (${slotValue}₫) to user for booking ${bookingId}`
+            );
+        } catch (error) {
+            this.logger.error(
+                `[Owner Reject] Failed to process refund for booking ${bookingId}:`,
+                error
+            );
+            // Continue with cancellation even if refund fails (will be handled manually)
+        }
+
+        // Deduct penalty from owner wallet if applicable
+        if (penaltyAmount > 0) {
+            const session: ClientSession = await this.connection.startSession();
+            session.startTransaction();
+
+            try {
+                const ownerWallet = await this.walletService.getOrCreateWallet(
+                    ownerUserId,
+                    WalletRole.FIELD_OWNER,
+                    session
+                );
+
+                // Deduct from availableBalance first, then pendingBalance if needed
+                const availableBalance = ownerWallet.availableBalance || 0;
+                const pendingBalance = ownerWallet.pendingBalance || 0;
+                const totalBalance = availableBalance + pendingBalance;
+
+                if (totalBalance < penaltyAmount) {
+                    this.logger.warn(
+                        `[Owner Reject] Insufficient balance for penalty. Required: ${penaltyAmount}₫, Available: ${totalBalance}₫`
+                    );
+                    // Still deduct what's available
+                }
+
+                if (availableBalance >= penaltyAmount) {
+                    ownerWallet.availableBalance = availableBalance - penaltyAmount;
+                } else {
+                    ownerWallet.availableBalance = 0;
+                    const remainingPenalty = penaltyAmount - availableBalance;
+                    ownerWallet.pendingBalance = Math.max(0, pendingBalance - remainingPenalty);
+                }
+
+                ownerWallet.lastTransactionAt = new Date();
+                await ownerWallet.save({ session });
+                await session.commitTransaction();
+
+                this.logger.log(
+                    `[Owner Reject] Deducted penalty of ${penaltyAmount}₫ (${penaltyPercentage}%) from owner ${ownerUserId} wallet`
+                );
+            } catch (error) {
+                await session.abortTransaction();
+                this.logger.error(
+                    `[Owner Reject] Failed to deduct penalty from owner wallet:`,
+                    error
+                );
+                // Continue with cancellation even if penalty deduction fails
+            } finally {
+                session.endSession();
+            }
+        }
+
         // Update approval status
         (booking as any).approvalStatus = 'rejected';
         // Cancel the booking
         booking.status = BookingStatus.CANCELLED;
-        if (reason) booking.cancellationReason = reason;
+        booking.cancellationReason = reason || `Owner cancelled (penalty: ${penaltyPercentage}%)`;
+        (booking as any).paymentStatus = 'refunded'; // User gets 100% refund
         await booking.save();
+
+        // Release schedule slots
+        await this.paymentHandlerService.releaseBookingSlots(booking);
+
+        // Emit event with penalty info
+        this.eventEmitter.emit('booking.cancelled.by.owner', {
+            bookingId: booking._id,
+            userId: booking.user,
+            ownerId: ownerUserId,
+            fieldId: booking.field,
+            penaltyAmount,
+            penaltyPercentage,
+            refundAmount: slotValue, // 100% refund to user
+            reason: reason || 'Owner cancelled',
+        });
+
         return booking.toJSON();
     }
 

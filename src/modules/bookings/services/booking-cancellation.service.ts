@@ -8,6 +8,9 @@ import {
     CancelBookingPayload,
     CancelSessionBookingPayload,
 } from '../interfaces/booking-service.interfaces';
+import { CancellationValidatorService } from './cancellation-validator.service';
+import { CancellationRole } from '../config/cancellation-rules.config';
+import { PaymentHandlerService } from './payment-handler.service';
 
 /**
  * Booking Cancellation Service
@@ -21,26 +24,77 @@ export class BookingCancellationService {
     constructor(
         @InjectModel(Booking.name) private readonly bookingModel: Model<Booking>,
         private readonly eventEmitter: EventEmitter2,
+        private readonly cancellationValidator: CancellationValidatorService,
+        private readonly paymentHandlerService: PaymentHandlerService,
     ) { }
 
     /**
-     * Cancel field booking (legacy)
+     * Cancel field booking with cancellation rules
+     * Applies refund policy based on time until booking start
      */
     async cancelBooking(data: CancelBookingPayload) {
         const booking = await this.bookingModel.findById(data.bookingId);
         if (!booking) {
             throw new BadRequestException('Booking not found');
         }
+
+        // Check authorization
         if (String(booking.user) !== String(data.userId)) {
             throw new BadRequestException(
                 'You are not authorized to cancel this booking',
             );
         }
+
+        // Validate cancellation eligibility
+        const eligibility = this.cancellationValidator.validateCancellationEligibility(
+            booking,
+            CancellationRole.USER
+        );
+
+        if (!eligibility.allowed) {
+            throw new BadRequestException(eligibility.errorMessage || 'Cannot cancel this booking');
+        }
+
+        // Calculate refund amount
+        const { refundAmount, refundPercentage } = this.cancellationValidator.calculateUserRefund(booking);
+
+        // Process refund if applicable
+        if (refundAmount > 0) {
+            try {
+                await this.paymentHandlerService.handleRefund(
+                    (booking as any)._id.toString(),
+                    'credit', // Refund to user's refundBalance
+                    refundAmount,
+                    `User cancellation: ${refundPercentage}% refund (${data.cancellationReason || 'No reason provided'})`
+                );
+                this.logger.log(
+                    `[Cancel Booking] Processed refund of ${refundAmount}₫ (${refundPercentage}%) for booking ${data.bookingId}`
+                );
+            } catch (error) {
+                this.logger.error(
+                    `[Cancel Booking] Failed to process refund for booking ${data.bookingId}:`,
+                    error
+                );
+                // Continue with cancellation even if refund fails (will be handled manually)
+            }
+        } else {
+            this.logger.log(
+                `[Cancel Booking] No refund for booking ${data.bookingId} (${refundPercentage}% refund policy)`
+            );
+        }
+
+        // Update booking status
         booking.status = BookingStatus.CANCELLED;
-        booking.cancellationReason = data.cancellationReason;
+        booking.cancellationReason = data.cancellationReason || `User cancelled (${refundPercentage}% refund)`;
+        if (refundAmount > 0) {
+            (booking as any).paymentStatus = 'refunded';
+        }
         await booking.save();
 
-        // Emit notification with court info
+        // Release schedule slots
+        await this.paymentHandlerService.releaseBookingSlots(booking);
+
+        // Emit notification with court info and refund details
         this.eventEmitter.emit('booking.cancelled', {
             bookingId: booking._id,
             userId: booking.user,
@@ -49,8 +103,11 @@ export class BookingCancellationService {
             date: booking.date,
             startTime: booking.startTime,
             endTime: booking.endTime,
-            reason: data.cancellationReason
+            reason: data.cancellationReason,
+            refundAmount,
+            refundPercentage,
         });
+
         return booking;
     }
 

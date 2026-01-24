@@ -406,37 +406,31 @@ export class NotificationListener {
 
     // Check if this is a Field booking to send "Booking Confirmed" notification
     let isFieldBooking = false;
+    let isRecurringBooking = false;
     let booking: any = null;
+    let otherBookingsInGroup: any[] = [];
 
     if (payload.bookingId) {
       const bookingIdStr = typeof payload.bookingId === 'string' ? payload.bookingId : String(payload.bookingId);
       if (Types.ObjectId.isValid(bookingIdStr)) {
         booking = await this.bookingModel.findById(bookingIdStr).populate('field').lean();
-        if (booking && booking.type === BookingType.FIELD) {
-          isFieldBooking = true;
+
+        if (booking) {
+          // Check for recurring group
+          if (booking.recurringGroupId) {
+            isRecurringBooking = true;
+            isFieldBooking = true; // Recurring bookings are always field bookings for now
+
+            // Fetch all bookings in the group to provide summary
+            otherBookingsInGroup = await this.bookingModel.find({
+              recurringGroupId: booking.recurringGroupId
+            }).populate('field').sort({ date: 1 }).lean();
+          } else if (booking.type === BookingType.FIELD) {
+            isFieldBooking = true;
+          }
         }
       }
     }
-
-    if (isFieldBooking && booking) {
-      // Template 1: Field Booking
-      title = 'Lịch đặt sân đã được xác nhận!';
-
-      const dateStr = booking.date instanceof Date
-        ? booking.date.toLocaleDateString('vi-VN')
-        : (typeof booking.date === 'string' ? new Date(booking.date).toLocaleDateString('vi-VN') : booking.date);
-
-      const fieldName = booking.field?.name || '';
-      const address = booking.field?.location?.address || '';
-
-      message = `Bạn đã đặt sân thành công vào lúc ${booking.startTime} - ${booking.endTime} ngày ${dateStr} tại ${fieldName}, ${address}.`;
-    } else {
-      // Default Payment Success Message
-      message = `Bạn đã thanh toán thành công ${amountStr} qua ${payload.method.toString().toUpperCase()}${payload.transactionId ? ` (Mã GD: ${payload.transactionId})` : ''}.`;
-    }
-
-    // Clean up message formatting
-    message = message.replace(/ ,/g, ',').replace(/\.\./g, '.');
 
     // ✅ IDEMPOTENCY CHECK: Avoid duplicate notifications for the same payment
     // Check if a payment success notification already exists for this recipient and paymentId
@@ -453,23 +447,116 @@ export class NotificationListener {
       }
     }
 
-    await this.notificationsService.create({
-      recipient: new Types.ObjectId(userIdStr),
-      type: isFieldBooking ? NotificationType.BOOKING_CONFIRMED : NotificationType.PAYMENT_SUCCESS,
-      title,
-      message,
-      metadata: {
-        paymentId: payload.paymentId,
-        bookingId: payload.bookingId || null,
-        transactionId: payload.transactionId || null,
-        amount: payload.amount,
-        method: payload.method,
-      },
-    });
+    if (isRecurringBooking && otherBookingsInGroup.length > 0) {
+      // --- RECURRING BOOKING NOTIFICATION ---
+      const firstBooking = otherBookingsInGroup[0];
+      const lastBooking = otherBookingsInGroup[otherBookingsInGroup.length - 1];
+      const count = otherBookingsInGroup.length;
+
+      const fieldName = (firstBooking.field as any)?.name || '';
+      const startDateStr = this.formatDateVN(firstBooking.date);
+      const endDateStr = this.formatDateVN(lastBooking.date);
+
+      title = 'Đăng ký lịch định kỳ thành công!';
+      message = `Bạn đã đặt thành công ${count} buổi tại ${fieldName}. Thời gian: ${startDateStr} - ${endDateStr}. Tổng tiền: ${amountStr}.`;
+
+      await this.notificationsService.create({
+        recipient: new Types.ObjectId(userIdStr),
+        type: NotificationType.BOOKING_CONFIRMED,
+        title,
+        message,
+        metadata: {
+          paymentId: payload.paymentId,
+          bookingId: payload.bookingId || null,
+          recurringGroupId: booking.recurringGroupId.toString(),
+          transactionId: payload.transactionId || null,
+          amount: payload.amount,
+          method: payload.method,
+          isRecurring: true,
+          bookingCount: count
+        },
+      });
+
+      // Notify Field Owner for Recurring Booking
+      const field = await this.fieldModel.findById((firstBooking.field as any)._id).lean();
+      if (field) {
+        const ownerUserId = await this.resolveFieldOwnerId(field);
+        if (ownerUserId && Types.ObjectId.isValid(ownerUserId)) {
+          const customerUser = await this.userModel.findById(booking.user).select('fullName email phone').lean();
+          const customerName = customerUser?.fullName || 'Khách hàng';
+
+          const ownerMessage = `Khách hàng ${customerName} đã đặt ${count} buổi định kỳ tại ${(field as any).name}. Thời gian: ${startDateStr} - ${endDateStr}. Tổng tiền: ${amountStr}.`;
+
+          await this.notificationsService.create({
+            recipient: new Types.ObjectId(ownerUserId),
+            type: NotificationType.BOOKING_CONFIRMED,
+            title: 'Có lịch đặt định kỳ mới',
+            message: ownerMessage,
+            metadata: {
+              bookingId: payload.bookingId, // Main booking ID references
+              recurringGroupId: booking.recurringGroupId.toString(),
+              fieldId: (field as any)._id.toString(),
+              customerName,
+              totalPrice: payload.amount,
+              bookingCount: count,
+              isRecurring: true
+            },
+          }).catch(err => this.logger.warn('Failed to create owner notification for recurring', err));
+        }
+      }
+
+    } else if (isFieldBooking && booking) {
+      // Template 1: Single Field Booking
+      title = 'Lịch đặt sân đã được xác nhận!';
+
+      const dateStr = booking.date instanceof Date
+        ? booking.date.toLocaleDateString('vi-VN')
+        : (typeof booking.date === 'string' ? new Date(booking.date).toLocaleDateString('vi-VN') : booking.date);
+
+      const fieldName = booking.field?.name || '';
+      const address = booking.field?.location?.address || '';
+
+      message = `Bạn đã đặt sân thành công vào lúc ${booking.startTime} - ${booking.endTime} ngày ${dateStr} tại ${fieldName}, ${address}.`;
+
+      await this.notificationsService.create({
+        recipient: new Types.ObjectId(userIdStr),
+        type: NotificationType.BOOKING_CONFIRMED,
+        title,
+        message,
+        metadata: {
+          paymentId: payload.paymentId,
+          bookingId: payload.bookingId || null,
+          transactionId: payload.transactionId || null,
+          amount: payload.amount,
+          method: payload.method,
+        },
+      });
+
+    } else {
+      // Default Payment Success Message
+      message = `Bạn đã thanh toán thành công ${amountStr} qua ${payload.method.toString().toUpperCase()}${payload.transactionId ? ` (Mã GD: ${payload.transactionId})` : ''}.`;
+
+      await this.notificationsService.create({
+        recipient: new Types.ObjectId(userIdStr),
+        type: NotificationType.PAYMENT_SUCCESS,
+        title,
+        message,
+        metadata: {
+          paymentId: payload.paymentId,
+          bookingId: payload.bookingId || null,
+          transactionId: payload.transactionId || null,
+          amount: payload.amount,
+          method: payload.method,
+        },
+      });
+    }
+
+    // Clean up message formatting if needed (though already constructed cleanly above)
+    // message = message.replace(/ ,/g, ',').replace(/\.\./g, '.');
 
     // Send booking email to field owner on non-cash payments once payment succeeds
     try {
-      if (payload.bookingId) {
+      if (payload.bookingId && !isRecurringBooking) { // Skip this block for recurring for now, or adapt it
         // Ensure bookingId is a valid string
         const bookingIdStr = typeof payload.bookingId === 'string'
           ? payload.bookingId

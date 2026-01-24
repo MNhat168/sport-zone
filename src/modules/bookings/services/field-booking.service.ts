@@ -153,10 +153,10 @@ export class FieldBookingService {
         const isOnlinePayment = paymentMethod === PaymentMethod.PAYOS;
 
         // Booking status logic:
-        // - Online payments: Always PENDING (wait for payment confirmation)
-        // - Cash with note: PENDING (needs confirmation)
-        // - Cash without note: CONFIRMED (immediate confirmation)
-        const bookingStatus = isOnlinePayment || bookingData.note
+        // - Online payments (PayOS): Always PENDING (wait for payment confirmation via webhook)
+        // - All other methods: CONFIRMED immediately (bank transfer, cash, etc.)
+        // Note: Removed note-based PENDING logic - notes are informational only
+        const bookingStatus = isOnlinePayment
           ? BookingStatus.PENDING
           : BookingStatus.CONFIRMED;
 

@@ -38,12 +38,23 @@ export class CoachesController {
   }
 
   @Get()
+  @ApiQuery({ name: 'name', required: false, description: 'Filter by coach name' })
+  @ApiQuery({ name: 'sportType', required: false, description: 'Filter by sport type' })
+  @ApiQuery({ name: 'minRate', required: false, description: 'Minimum hourly rate' })
+  @ApiQuery({ name: 'maxRate', required: false, description: 'Maximum hourly rate' })
+  @ApiQuery({ name: 'district', required: false, description: 'Filter by district' })
+  @ApiQuery({ name: 'date', required: false, description: 'Filter by availability on date (YYYY-MM-DD)' })
+  @ApiQuery({ name: 'startTime', required: false, description: 'Filter by availability from time (HH:MM)' })
+  @ApiQuery({ name: 'endTime', required: false, description: 'Filter by availability to time (HH:MM)' })
   async findAll(
     @Query('name') name?: string,
     @Query('sportType') sportType?: string,
     @Query('minRate') minRate?: number,
     @Query('maxRate') maxRate?: number,
     @Query('district') district?: string,
+    @Query('date') date?: string,
+    @Query('startTime') startTime?: string,
+    @Query('endTime') endTime?: string,
   ): Promise<CoachesDto[]> {
     return this.coachesService.findAll({
       name,
@@ -51,6 +62,9 @@ export class CoachesController {
       minRate: minRate ? Number(minRate) : undefined,
       maxRate: maxRate ? Number(maxRate) : undefined,
       district,
+      date,
+      startTime,
+      endTime,
     });
   }
 

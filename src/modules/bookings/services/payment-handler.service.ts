@@ -237,7 +237,6 @@ export class PaymentHandlerService implements OnModuleInit {
       for (const booking of bookings) {
         const isSplitPayment = booking.metadata?.splitPayment === true;
         const userIdStr = String(event.userId);
-
         // ✅ CRITICAL FIX: Collect emails to send BEFORE idempotency check
         // This ensures emails are sent even if booking was already updated by fallback mechanism
         const recurringGroupId = booking.recurringGroupId?.toString();
@@ -257,8 +256,8 @@ export class PaymentHandlerService implements OnModuleInit {
           }
         } else if (booking.status === BookingStatus.CONFIRMED && booking.paymentStatus === 'paid') {
           // Standard booking idempotency
-          this.logger.debug(`[Payment Success] Booking ${booking._id} already confirmed and paid, skipping update but will send email`);
-          continue; - skip update but continue to send email
+          this.logger.debug(`[Payment Success] Booking ${booking._id} already confirmed and paid, skipping`);
+          continue;
         }
 
         const isCoach = booking.type === BookingType.COACH;
@@ -267,7 +266,7 @@ export class PaymentHandlerService implements OnModuleInit {
           // Update individual payment status
           // ✅ FIX: Ensure we use string key and mark modified correctly
           const payments = booking.metadata?.payments || {};
-          const userIdStr = String(event.userId);
+
 
           if (payments[userIdStr]) {
             payments[userIdStr].status = 'paid';

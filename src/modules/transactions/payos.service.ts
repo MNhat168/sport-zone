@@ -36,6 +36,8 @@ export class PayOSService {
         const checksumKey = this.configService.get<string>('PAYOS_CHECKSUM_KEY');
         const returnUrl = this.configService.get<string>('PAYOS_RETURN_URL');
         const cancelUrl = this.configService.get<string>('PAYOS_CANCEL_URL');
+        // ✅ FIX: Get FRONTEND_URL for dynamic linking
+        const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
 
         // Check missing configurations
         const missingConfigs: string[] = [];
@@ -56,15 +58,16 @@ export class PayOSService {
         this.logger.debug(`[PayOS Config]   - Checksum Key (first 4): ${checksumKey!.substring(0, 4)}...`);
         this.logger.debug(`[PayOS Config]   - Checksum Key (last 4): ...${checksumKey!.substring(checksumKey!.length - 4)}`);
         this.logger.debug(`[PayOS Config]   - Checksum Key has whitespace: ${checksumKey!.trim() !== checksumKey}`);
-        this.logger.debug(`[PayOS Config]   - Return URL: ${returnUrl || 'default'}`);
-        this.logger.debug(`[PayOS Config]   - Cancel URL: ${cancelUrl || 'default'}`);
+        this.logger.debug(`[PayOS Config]   - Return URL: ${returnUrl || `Dynamic from ${frontendUrl}`}`);
+        this.logger.debug(`[PayOS Config]   - Cancel URL: ${cancelUrl || `Dynamic from ${frontendUrl}`}`);
 
         return {
             clientId: clientId!.trim(),
             apiKey: apiKey!.trim(),
             checksumKey: checksumKey!.trim(),
-            returnUrl: returnUrl?.trim() || 'http://localhost:5173/transactions/payos/return',
-            cancelUrl: cancelUrl?.trim() || 'http://localhost:5173/transactions/payos/cancel',
+            // ✅ FIX: Use dynamic URLs if specific PayOS URLs are not provided
+            returnUrl: returnUrl?.trim() || `${frontendUrl}/transactions/payos/return`,
+            cancelUrl: cancelUrl?.trim() || `${frontendUrl}/transactions/payos/cancel`,
         };
     }
 
