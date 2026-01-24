@@ -1227,32 +1227,74 @@ export class FieldOwnerService {
         updateData.images = [...newImages, ...finalImages];
       }
 
-      // 2. Process Basic Fields
-      const excludeFields = ['images', 'keptImages', 'courtsToDelete', 'amenities', 'location', 'numberOfCourts', 'files'];
+      // 2. Process Basic Fields - only update non-empty, valid values
+      const excludeFields = ['images', 'keptImages', 'courtsToDelete', 'amenities', 'location', 'numberOfCourts', 'files', 'operatingHours', 'priceRanges'];
       for (const [key, value] of Object.entries(updateFieldDto)) {
         if (!excludeFields.includes(key) && value !== undefined) {
+          // Skip null values
+          if (value === null) {
+            continue;
+          }
+          // Allow boolean false and number 0 (they are valid values)
+          if (typeof value === 'boolean' || typeof value === 'number') {
+            updateData[key] = value;
+            continue;
+          }
+          // Skip empty strings
+          if (typeof value === 'string' && value.trim() === '') {
+            continue;
+          }
+          // Skip empty arrays
+          if (Array.isArray(value) && value.length === 0) {
+            continue;
+          }
+          // Skip empty objects
+          if (typeof value === 'object' && Object.keys(value).length === 0) {
+            continue;
+          }
           updateData[key] = value;
         }
       }
 
-      // 3. Process Amenities
-      if (updateFieldDto.amenities) {
-        updateData.amenities = updateFieldDto.amenities.map((a) => ({
-          amenity: new Types.ObjectId(a.amenityId),
-          price: a.price || 0,
-        }));
+      // 3. Process Operating Hours - only update if array has items
+      if (updateFieldDto.operatingHours !== undefined) {
+        if (Array.isArray(updateFieldDto.operatingHours) && updateFieldDto.operatingHours.length > 0) {
+          updateData.operatingHours = updateFieldDto.operatingHours;
+        }
+        // If empty array is sent, skip update to preserve existing data
       }
 
-      // 4. Process Location - only update if location is provided and valid
+      // 4. Process Price Ranges - only update if array has items
+      if (updateFieldDto.priceRanges !== undefined) {
+        if (Array.isArray(updateFieldDto.priceRanges) && updateFieldDto.priceRanges.length > 0) {
+          updateData.priceRanges = updateFieldDto.priceRanges;
+        }
+        // If empty array is sent, skip update to preserve existing data
+      }
+
+      // 5. Process Amenities - only update if array has items
+      if (updateFieldDto.amenities !== undefined) {
+        if (Array.isArray(updateFieldDto.amenities) && updateFieldDto.amenities.length > 0) {
+          updateData.amenities = updateFieldDto.amenities.map((a) => ({
+            amenity: new Types.ObjectId(a.amenityId),
+            price: a.price || 0,
+          }));
+        }
+        // If empty array is sent, skip update to preserve existing amenities
+      }
+
+      // 6. Process Location - only update if location is provided and valid
       if (updateFieldDto.location && typeof updateFieldDto.location === 'object') {
-        // Check if location has the address field - if not, skip location update
-        if (updateFieldDto.location.address && typeof updateFieldDto.location.address === 'string') {
+        // Check if location has the address field and it's not empty - if not, skip location update
+        if (updateFieldDto.location.address && 
+            typeof updateFieldDto.location.address === 'string' && 
+            updateFieldDto.location.address.trim() !== '') {
           updateData.location = this.validateAndNormalizeLocation(updateFieldDto.location);
         }
-        // If location is provided but incomplete, we skip it and keep the existing location
+        // If location is provided but incomplete or empty, we skip it and keep the existing location
       }
 
-      // 5. Handle Court Deletion and Sync
+      // 7. Handle Court Deletion and Sync
       if (updateFieldDto.courtsToDelete && updateFieldDto.courtsToDelete.length > 0) {
         const courtObjectIds = updateFieldDto.courtsToDelete.map(id => new Types.ObjectId(id));
 
