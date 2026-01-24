@@ -2987,7 +2987,21 @@ export class BookingsService {
 
     this.logger.log(`[Field QR Check-in] Found ${bookings.length} bookings`);
 
-    return bookings;
+    // Map fields to match frontend interface and format date
+    return bookings.map((booking: any) => ({
+      _id: booking._id,
+      date: booking.date instanceof Date 
+        ? booking.date.toISOString().split('T')[0] 
+        : typeof booking.date === 'string' 
+          ? booking.date.split('T')[0] 
+          : booking.date,
+      fieldStartTime: booking.startTime,
+      fieldEndTime: booking.endTime,
+      field: booking.field,
+      court: booking.court,
+      status: booking.status,
+      paymentStatus: booking.paymentStatus,
+    }));
   }
 
   /**
@@ -3078,11 +3092,42 @@ export class BookingsService {
     token: string,
     ipAddress?: string,
   ) {
+    // Log token metadata (first and last 10 chars only for security)
+    const tokenPreview = token && token.length > 20 
+      ? `${token.substring(0, 10)}...${token.substring(token.length - 10)}` 
+      : token?.substring(0, Math.min(20, token?.length || 0)) || 'EMPTY';
+    
+    this.logger.log(`[Self Check-in] User ${userId} attempting check-in for booking ${bookingId}`, {
+      tokenLength: token?.length || 0,
+      tokenPreview,
+      hasToken: !!token,
+      ipAddress: ipAddress || 'N/A',
+    });
+    
     // 1. Validate token
-    const tokenPayload = await this.qrCheckinService.validateCheckInToken(token);
+    let tokenPayload: any;
+    try {
+      tokenPayload = await this.qrCheckinService.validateCheckInToken(token);
+      this.logger.log(`[Self Check-in] Token validated. Type: ${tokenPayload.type}, FieldId: ${tokenPayload.fieldId}`);
+    } catch (error: any) {
+      this.logger.error(`[Self Check-in] Token validation failed: ${error.message}`, {
+        errorName: error?.name,
+        errorMessage: error?.message,
+        errorStack: error?.stack?.substring(0, 500),
+        tokenLength: token?.length || 0,
+        tokenPreview,
+      });
+      throw error;
+    }
 
     if (tokenPayload.type !== 'field') {
+      this.logger.warn(`[Self Check-in] Invalid token type: ${tokenPayload.type}. Expected 'field'`);
       throw new BadRequestException('Mã QR không hợp lệ. Vui lòng quét mã QR tại sân.');
+    }
+
+    if (!tokenPayload.fieldId) {
+      this.logger.error(`[Self Check-in] Token missing fieldId. Token payload: ${JSON.stringify(tokenPayload)}`);
+      throw new BadRequestException('Mã QR không hợp lệ. Thiếu thông tin sân.');
     }
 
     // 2. Validate Booking
@@ -3096,23 +3141,35 @@ export class BookingsService {
       .populate('user');
 
     if (!booking) {
+      this.logger.warn(`[Self Check-in] Booking not found: ${bookingId}`);
       throw new NotFoundException('Booking not found');
     }
 
     // 3. Ownership Check
     if (booking.user._id.toString() !== userId) {
+      this.logger.warn(`[Self Check-in] Ownership mismatch. Booking user: ${booking.user._id.toString()}, Request user: ${userId}`);
       throw new ForbiddenException('Bạn chỉ có thể check-in cho booking của chính mình');
     }
 
     // 4. Field Match Check
     const bookingField = booking.field as any;
+    if (!bookingField || !bookingField._id) {
+      this.logger.error(`[Self Check-in] Booking ${bookingId} has no field associated`);
+      throw new BadRequestException('Booking không có thông tin sân');
+    }
+    
     const bookingFieldId = bookingField._id.toString();
-    if (bookingFieldId !== tokenPayload.fieldId) {
+    const tokenFieldId = tokenPayload.fieldId.toString();
+    
+    this.logger.log(`[Self Check-in] Field comparison - Booking field: ${bookingFieldId}, Token field: ${tokenFieldId}`);
+    
+    if (bookingFieldId !== tokenFieldId) {
+      this.logger.warn(`[Self Check-in] Field mismatch. Booking field: ${bookingFieldId}, Token field: ${tokenFieldId}`);
       throw new BadRequestException('Booking này thuộc về sân khác');
     }
 
     // 5. Status Checks
-    if (booking.status === BookingStatus.CHECKED_IN) {
+    if (booking.status === BookingStatus.CHECKED_IN || booking.status === BookingStatus.COMPLETED) {
       throw new HttpException('Đã check-in rồi', HttpStatus.CONFLICT);
     }
 
@@ -3124,13 +3181,13 @@ export class BookingsService {
       throw new BadRequestException('Booking phải ở trạng thái CONFIRMED');
     }
 
-    // 6. Perform Check-in
-    booking.status = BookingStatus.CHECKED_IN;
+    // 6. Perform Check-in and mark as completed
+    booking.status = BookingStatus.COMPLETED;
     booking.checkedInAt = new Date();
     booking.checkedInBy = new Types.ObjectId(userId);
     await booking.save();
 
-    this.logger.log(`[Self Check-in] User ${userId} checked in booking ${bookingId}`);
+    this.logger.log(`[Self Check-in] User ${userId} checked in booking ${bookingId} and marked as completed`);
 
     // 7. Unlock Funds (Transfer Pending -> Available for Field Owner)
     let walletTransaction: any = null;

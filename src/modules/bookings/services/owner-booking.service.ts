@@ -378,6 +378,11 @@ export class OwnerBookingService {
         booking.status = BookingStatus.CANCELLED;
         booking.cancellationReason = reason || `Owner cancelled (penalty: ${penaltyPercentage}%)`;
         (booking as any).paymentStatus = 'refunded'; // User gets 100% refund
+
+        // [NEW] Log refund to note for admin
+        const logMessage = `[System Log] Owner rejected. Refund required: ${slotValue.toLocaleString('vi-VN')} VND (100%). Penalty: ${penaltyAmount.toLocaleString('vi-VN')} VND (${penaltyPercentage}%). Reason: ${reason || 'No reason'}`;
+        booking.note = booking.note ? `${booking.note}\n${logMessage}` : logMessage;
+
         await booking.save();
 
         // Release schedule slots
@@ -938,10 +943,10 @@ export class OwnerBookingService {
                     endTime: bookingData.endTime,
                     numSlots,
                     status: BookingStatus.CONFIRMED,
-                    paymentStatus: 'paid',
-                    bookingAmount: 0,
-                    platformFee: 0,
-                    totalPrice: 0,
+                    paymentStatus: 'paid', // Marked as paid via wallet deduction
+                    bookingAmount: 0, // No base amount charged for owner
+                    platformFee: systemFeeAmount, // Set platform fee
+                    totalPrice: systemFeeAmount, // Total is just the fee
                     amenitiesFee: 0,
                     selectedAmenities: [],
                     metadata: {
@@ -964,24 +969,12 @@ export class OwnerBookingService {
                 ownerWallet.lastTransactionAt = new Date();
                 await ownerWallet.save({ session });
 
-                // 12. Create FEE transaction
-                const feeTransaction = new this.transactionModel({
-                    user: new Types.ObjectId(ownerUserId),
-                    amount: systemFeeAmount,
-                    direction: 'out',
-                    type: TransactionType.FEE,
-                    method: PaymentMethod.INTERNAL,
-                    status: TransactionStatus.SUCCEEDED,
-                    booking: booking._id,
-                    notes: `Phí hệ thống cho owner-reserved booking`,
-                    completedAt: new Date()
-                });
-
-                await feeTransaction.save({ session });
+                // NO Transaction record created as per requirement "no transaction"
+                // Money is deducted from pending balance but not logged in Transactions collection
 
                 this.logger.log(
                     `[Owner Reserved] Created booking ${booking._id} for owner ${ownerUserId}. ` +
-                    `Original price: ${originalPrice}₫, System fee: ${systemFeeAmount}₫`
+                    `Original price: ${originalPrice}₫, System fee: ${systemFeeAmount}₫ (Deducted from Pending Balance)`
                 );
 
                 return booking;

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Model, Types } from 'mongoose';
 import { CreateWalletDto } from './dto/create-wallet.dto';
@@ -7,12 +7,15 @@ import {
   Wallet,
   WalletDocument
 } from './entities/wallet.entity';
+import { WithdrawalRequest, WithdrawalRequestDocument, WithdrawalRequestStatus } from './entities/withdrawal-request.entity';
 import { WalletStatus, WalletRole } from '@common/enums/wallet.enum';
 import {
   FieldOwnerWalletDto,
   UserWalletDto,
   AdminWalletDto,
 } from './dto/wallet-response.dto';
+import { WithdrawalRequestResponseDto } from './dto/withdrawal-request-response.dto';
+import { PaymentHandlerService } from '../bookings/services/payment-handler.service';
 
 /**
  * Wallet Service V2
@@ -31,6 +34,10 @@ export class WalletService {
   constructor(
     @InjectModel(Wallet.name)
     private readonly walletModel: Model<WalletDocument>,
+    @InjectModel(WithdrawalRequest.name)
+    private readonly withdrawalRequestModel: Model<WithdrawalRequest>,
+    @Inject(forwardRef(() => PaymentHandlerService))
+    private readonly paymentHandlerService: PaymentHandlerService,
   ) { }
 
   // ===================================================================
@@ -122,6 +129,7 @@ export class WalletService {
    */
   async getFieldOwnerWallet(userId: string): Promise<FieldOwnerWalletDto> {
     const wallet = await this.getOrCreateWallet(userId, WalletRole.FIELD_OWNER);
+    this.logger.log(`[GetFieldOwnerWallet] UserId: ${userId}, PendingBalance: ${wallet.pendingBalance}, AvailableBalance: ${wallet.availableBalance}`);
     return FieldOwnerWalletDto.fromWallet(wallet);
   }
 
@@ -332,6 +340,201 @@ export class WalletService {
     );
 
     return wallet;
+  }
+
+  // ===================================================================
+  // WITHDRAWAL REQUEST METHODS
+  // ===================================================================
+
+  /**
+   * Get withdrawal requests with filters and pagination
+   * Used by admin to view all withdrawal requests
+   * 
+   * @param filters - Filter options (status, userRole)
+   * @param page - Page number (default: 1)
+   * @param limit - Items per page (default: 10)
+   * @returns Paginated withdrawal requests with user info
+   */
+  async getWithdrawalRequests(
+    filters: {
+      status?: WithdrawalRequestStatus;
+      userRole?: 'field_owner' | 'coach';
+      userId?: string;
+    } = {},
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{
+    data: WithdrawalRequestResponseDto[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
+    const query: any = {};
+
+    if (filters.status) {
+      query.status = filters.status;
+    }
+
+    if (filters.userRole) {
+      query.userRole = filters.userRole;
+    }
+
+    if (filters.userId) {
+      query.userId = new Types.ObjectId(filters.userId);
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [requests, total] = await Promise.all([
+      this.withdrawalRequestModel
+        .find(query)
+        .populate('userId', 'fullName email phone')
+        .sort({ createdAt: -1 }) // Mới nhất lên đầu
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      this.withdrawalRequestModel.countDocuments(query),
+    ]);
+
+    const data = requests.map((req: any) => ({
+      _id: req._id.toString(),
+      userId: req.userId._id?.toString() || req.userId.toString(),
+      userRole: req.userRole,
+      amount: req.amount,
+      status: req.status,
+      bankAccount: req.bankAccount,
+      bankName: req.bankName,
+      rejectionReason: req.rejectionReason,
+      approvedBy: req.approvedBy?.toString(),
+      approvedAt: req.approvedAt,
+      rejectedBy: req.rejectedBy?.toString(),
+      rejectedAt: req.rejectedAt,
+      adminNotes: req.adminNotes,
+      createdAt: req.createdAt,
+      updatedAt: req.updatedAt,
+      user: req.userId && typeof req.userId === 'object' ? {
+        _id: req.userId._id.toString(),
+        fullName: req.userId.fullName,
+        email: req.userId.email,
+        phone: req.userId.phone,
+      } : undefined,
+    }));
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  /**
+   * Approve withdrawal request
+   * Processes the withdrawal (trừ balance, tạo transaction, gọi PayOS)
+   * 
+   * @param requestId - Withdrawal request ID
+   * @param adminId - Admin user ID
+   * @param notes - Admin notes (optional)
+   * @returns Updated withdrawal request
+   */
+  async approveWithdrawalRequest(
+    requestId: string,
+    adminId: string,
+    notes?: string,
+  ): Promise<WithdrawalRequestDocument> {
+    const request = await this.withdrawalRequestModel.findById(requestId);
+
+    if (!request) {
+      throw new NotFoundException('Yêu cầu rút tiền không tồn tại');
+    }
+
+    if (request.status !== WithdrawalRequestStatus.PENDING) {
+      throw new BadRequestException(`Yêu cầu đã được xử lý. Trạng thái hiện tại: ${request.status}`);
+    }
+
+    // Process withdrawal (trừ balance, tạo transaction, etc.)
+    await this.paymentHandlerService.processWithdrawalRequest(requestId, adminId, notes);
+
+    // Reload request to get updated status
+    const updatedRequest = await this.withdrawalRequestModel.findById(requestId);
+    if (!updatedRequest) {
+      throw new NotFoundException('Yêu cầu rút tiền không tồn tại sau khi xử lý');
+    }
+
+    return updatedRequest;
+  }
+
+  /**
+   * Reject withdrawal request
+   * Updates request status to rejected
+   * 
+   * @param requestId - Withdrawal request ID
+   * @param adminId - Admin user ID
+   * @param reason - Rejection reason
+   * @returns Updated withdrawal request
+   */
+  async rejectWithdrawalRequest(
+    requestId: string,
+    adminId: string,
+    reason: string,
+  ): Promise<WithdrawalRequestDocument> {
+    const request = await this.withdrawalRequestModel.findById(requestId);
+
+    if (!request) {
+      throw new NotFoundException('Yêu cầu rút tiền không tồn tại');
+    }
+
+    if (request.status !== WithdrawalRequestStatus.PENDING) {
+      throw new BadRequestException(`Yêu cầu đã được xử lý. Trạng thái hiện tại: ${request.status}`);
+    }
+
+    request.status = WithdrawalRequestStatus.REJECTED;
+    request.rejectedBy = new Types.ObjectId(adminId);
+    request.rejectedAt = new Date();
+    request.rejectionReason = reason;
+
+    await request.save();
+
+    this.logger.log(`[Withdrawal Request] Rejected request ${requestId} by admin ${adminId}`);
+
+    // Emit event for notification
+    // this.eventEmitter.emit('withdrawal.request.rejected', { ... });
+
+    return request;
+  }
+
+  /**
+   * Get user's withdrawal requests
+   * Used by field-owner/coach to view their own requests
+   * 
+   * @param userId - User ID
+   * @returns List of withdrawal requests
+   */
+  async getUserWithdrawalRequests(userId: string): Promise<WithdrawalRequestResponseDto[]> {
+    const requests = await this.withdrawalRequestModel
+      .find({ userId: new Types.ObjectId(userId) })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return requests.map((req: any) => ({
+      _id: req._id.toString(),
+      userId: req.userId.toString(),
+      userRole: req.userRole,
+      amount: req.amount,
+      status: req.status,
+      bankAccount: req.bankAccount,
+      bankName: req.bankName,
+      rejectionReason: req.rejectionReason,
+      approvedBy: req.approvedBy?.toString(),
+      approvedAt: req.approvedAt,
+      rejectedBy: req.rejectedBy?.toString(),
+      rejectedAt: req.rejectedAt,
+      adminNotes: req.adminNotes,
+      createdAt: req.createdAt,
+      updatedAt: req.updatedAt,
+    }));
   }
 
   /**

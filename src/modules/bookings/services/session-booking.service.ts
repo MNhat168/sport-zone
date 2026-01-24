@@ -360,6 +360,11 @@ export class SessionBookingService {
     fieldBooking.cancellationReason = data.cancellationReason;
     coachBooking.cancellationReason = data.cancellationReason;
 
+    // [NEW] Log cancellation
+    const logMessage = `[System Log] Session cancelled by user. Reason: ${data.cancellationReason}`;
+    fieldBooking.note = fieldBooking.note ? `${fieldBooking.note}\n${logMessage}` : logMessage;
+    coachBooking.note = coachBooking.note ? `${coachBooking.note}\n${logMessage}` : logMessage;
+
     await fieldBooking.save();
     await coachBooking.save();
 
@@ -551,6 +556,11 @@ export class SessionBookingService {
       booking.status = BookingStatus.CANCELLED;
       booking.cancellationReason = `Coach cancelled (penalty: ${penaltyPercentage}%)`;
       (booking as any).paymentStatus = 'refunded'; // User gets 100% refund
+
+      // [NEW] Log refund to note for admin
+      const logMessage = `[System Log] Coach cancelled. Refund required: ${slotValue.toLocaleString('vi-VN')} VND (100%). Penalty: ${penaltyAmount.toLocaleString('vi-VN')} VND (${penaltyPercentage}%).`;
+      booking.note = booking.note ? `${booking.note}\n${logMessage}` : logMessage;
+
       await booking.save();
 
       // Release schedule slots

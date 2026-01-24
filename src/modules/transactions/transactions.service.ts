@@ -962,7 +962,7 @@ export class TransactionsService {
   async createWithdrawalTransaction(data: {
     userId: string;
     amount: number;
-    method: string;
+    method: PaymentMethod;
     bankAccount?: string;
     bankName?: string;
     notes?: string;

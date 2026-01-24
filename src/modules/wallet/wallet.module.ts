@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Wallet, WalletSchema } from './entities/wallet.entity';
+import { WithdrawalRequest, WithdrawalRequestSchema } from './entities/withdrawal-request.entity';
 import { WalletService } from './wallet.service';
 import { WalletController } from './wallet.controller';
 
@@ -10,6 +11,10 @@ import { WalletController } from './wallet.controller';
       {
         name: Wallet.name,
         schema: WalletSchema,
+      },
+      {
+        name: WithdrawalRequest.name,
+        schema: WithdrawalRequestSchema,
       },
     ]),
     // [V2] Import BookingsModule for PaymentHandlerService (circular dependency)

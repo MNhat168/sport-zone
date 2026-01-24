@@ -1843,6 +1843,7 @@ export class FieldOwnerService {
         ekycData: finalEkycData,
         ekycStatus: finalEkycStatus,
         ekycVerifiedAt: finalEkycVerifiedAt,
+        fieldImages: dto.fieldImages || [],
         // Facility info (optional during registration, can be filled during approval)
         facility: {
           facilityName: dto.facilityName || '',

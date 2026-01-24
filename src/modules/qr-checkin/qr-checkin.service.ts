@@ -1,4 +1,4 @@
-import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 
@@ -27,6 +27,7 @@ export interface DateValidationResult {
 
 @Injectable()
 export class QrCheckinService {
+  private readonly logger = new Logger(QrCheckinService.name);
   private readonly qrCheckinWindowMinutes: number;
   private readonly qrTokenExpiryMinutes: number;
   private readonly qrCheckinLateWindowMinutes: number;
@@ -182,8 +183,40 @@ export class QrCheckinService {
    * @returns Decoded token payload
    */
   async validateCheckInToken(token: string): Promise<CheckInTokenPayload> {
+    // Log JWT secret configuration status (first 4 chars only for security)
+    const qrSecret = this.configService.get<string>('QR_CHECKIN_SECRET');
+    const jwtSecret = this.configService.get<string>('JWT_SECRET');
+    const secretInUse = qrSecret || jwtSecret;
+    const secretPreview = secretInUse 
+      ? `${secretInUse.substring(0, 4)}...${secretInUse.length} chars` 
+      : 'NOT CONFIGURED';
+    this.logger.debug(`[Token Validation] JWT Secret: ${secretPreview}, Using: ${qrSecret ? 'QR_CHECKIN_SECRET' : 'JWT_SECRET'}`);
+
+    // Validate token format
+    if (!token || typeof token !== 'string') {
+      this.logger.error('[Token Validation] Token is empty or not a string');
+      throw new HttpException('Mã QR không hợp lệ: Token không tồn tại', HttpStatus.UNAUTHORIZED);
+    }
+
+    // Validate JWT format (should have 3 parts separated by dots)
+    const tokenParts = token.split('.');
+    if (tokenParts.length !== 3) {
+      const tokenPreview = token.length > 20 
+        ? `${token.substring(0, 10)}...${token.substring(token.length - 10)}` 
+        : token.substring(0, 10);
+      this.logger.error(`[Token Validation] Invalid JWT format. Parts: ${tokenParts.length}, Length: ${token.length}, Preview: ${tokenPreview}`);
+      throw new HttpException('Mã QR không hợp lệ: Định dạng token không đúng', HttpStatus.UNAUTHORIZED);
+    }
+
+    // Log token metadata (first and last 10 chars only for security)
+    const tokenPreview = token.length > 20 
+      ? `${token.substring(0, 10)}...${token.substring(token.length - 10)}` 
+      : token.substring(0, Math.min(20, token.length));
+    this.logger.debug(`[Token Validation] Token metadata - Length: ${token.length}, Preview: ${tokenPreview}`);
+
     try {
       const decoded = await this.jwtService.verifyAsync<CheckInTokenPayload>(token);
+      this.logger.debug(`[Token Validation] Token decoded successfully. Type: ${decoded.type}, FieldId: ${decoded.fieldId || 'N/A'}, BookingId: ${decoded.bookingId || 'N/A'}`);
 
       // If this is a field token, no date/time validation needed
       // Field QR codes can be used anytime
@@ -206,12 +239,42 @@ export class QrCheckinService {
     } catch (error) {
       // Re-throw HttpException as-is
       if (error instanceof HttpException) {
+        this.logger.debug(`[Token Validation] HttpException re-thrown: ${error.message}`);
         throw error;
       }
 
-      if (error.name === 'TokenExpiredError') {
+      // Log detailed error information
+      const errorName = error?.name || 'UnknownError';
+      const errorMessage = error?.message || 'Unknown error';
+      const errorStack = error?.stack || 'No stack trace';
+      
+      this.logger.error(`[Token Validation] JWT verification failed`, {
+        errorName,
+        errorMessage,
+        errorStack: errorStack.substring(0, 500), // Limit stack trace length
+        tokenLength: token.length,
+        tokenPreview,
+        secretConfigured: !!secretInUse,
+      });
+
+      // Handle specific JWT error types
+      if (errorName === 'TokenExpiredError') {
+        this.logger.warn(`[Token Validation] Token expired`);
         throw new HttpException('Mã QR đã hết hạn', HttpStatus.BAD_REQUEST);
       }
+
+      if (errorName === 'JsonWebTokenError') {
+        this.logger.warn(`[Token Validation] Invalid JWT: ${errorMessage}`);
+        throw new HttpException(`Mã QR không hợp lệ: ${errorMessage}`, HttpStatus.UNAUTHORIZED);
+      }
+
+      if (errorName === 'NotBeforeError') {
+        this.logger.warn(`[Token Validation] Token not active yet: ${errorMessage}`);
+        throw new HttpException('Mã QR chưa có hiệu lực', HttpStatus.BAD_REQUEST);
+      }
+
+      // Generic error for other JWT errors
+      this.logger.error(`[Token Validation] Unexpected JWT error: ${errorName} - ${errorMessage}`);
       throw new HttpException('Mã QR không hợp lệ', HttpStatus.UNAUTHORIZED);
     }
   }

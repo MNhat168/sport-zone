@@ -1,4 +1,5 @@
-import { Controller, Get, Param, Patch, Body, Query, UseGuards, Post } from '@nestjs/common';
+import { Controller, Get, Param, Patch, Body, Query, UseGuards, Post, Request } from '@nestjs/common';
+import { Types } from 'mongoose';
 import { User } from 'src/modules/users/entities/user.entity';
 import { AdminService } from './admin.service';
 import { UserRoleStatDto, UserMonthlyStatsDto } from './dto/user.dto';
@@ -18,12 +19,20 @@ import {
     FieldOwnerStatsDto,
     CoachStatsDto
 } from './dto/admin-stats.dto';
+import { WalletService } from '../wallet/wallet.service';
+import { WithdrawalRequestStatus, WithdrawalRequestDocument } from '../wallet/entities/withdrawal-request.entity';
+import { ApproveWithdrawalRequestDto } from '../wallet/dto/approve-withdrawal-request.dto';
+import { RejectWithdrawalRequestDto } from '../wallet/dto/reject-withdrawal-request.dto';
+import { ApiOperation, ApiResponse, ApiQuery, ApiParam } from '@nestjs/swagger';
 
 @Controller('admin')
 @UseGuards(JwtAccessTokenGuard, RolesGuard)
 @Roles(UserRole.ADMIN)
 export class AdminController {
-    constructor(private readonly adminService: AdminService) { }
+    constructor(
+        private readonly adminService: AdminService,
+        private readonly walletService: WalletService,
+    ) { }
 
     @Get('manage/users')
     async getAllUsers(): Promise<User[]> {
@@ -216,5 +225,100 @@ export class AdminController {
             body.message,
             body.metadata,
         );
+    }
+
+    // ===================================================================
+    // WITHDRAWAL REQUEST ENDPOINTS
+    // ===================================================================
+
+    /**
+     * Get withdrawal requests list (admin only)
+     * Returns paginated list sorted by createdAt DESC (newest first)
+     */
+    @Get('withdrawal-requests')
+    @ApiOperation({ summary: 'Get withdrawal requests list (admin only)' })
+    @ApiQuery({ name: 'status', required: false, enum: WithdrawalRequestStatus, description: 'Filter by status' })
+    @ApiQuery({ name: 'userRole', required: false, enum: ['field_owner', 'coach'], description: 'Filter by user role' })
+    @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
+    @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 10)' })
+    @ApiResponse({ status: 200, description: 'Paginated withdrawal requests list' })
+    async getWithdrawalRequests(
+        @Query('status') status?: WithdrawalRequestStatus,
+        @Query('userRole') userRole?: 'field_owner' | 'coach',
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+    ) {
+        const pageNum = page ? parseInt(page, 10) : 1;
+        const limitNum = limit ? parseInt(limit, 10) : 10;
+
+        return this.walletService.getWithdrawalRequests(
+            { status, userRole },
+            pageNum,
+            limitNum,
+        );
+    }
+
+    /**
+     * Approve withdrawal request
+     * Processes the withdrawal (trừ balance, tạo transaction, gọi PayOS)
+     */
+    @Post('withdrawal-requests/:id/approve')
+    @ApiOperation({ summary: 'Approve withdrawal request (admin only)' })
+    @ApiParam({ name: 'id', description: 'Withdrawal request ID' })
+    @ApiResponse({ status: 200, description: 'Withdrawal request approved and processed' })
+    async approveWithdrawalRequest(
+        @Request() req: any,
+        @Param('id') requestId: string,
+        @Body() dto: ApproveWithdrawalRequestDto,
+    ) {
+        const adminId = req.user.userId;
+        const request: WithdrawalRequestDocument = await this.walletService.approveWithdrawalRequest(
+            requestId,
+            adminId,
+            dto.notes,
+        );
+
+        return {
+            success: true,
+            message: 'Yêu cầu rút tiền đã được duyệt và xử lý thành công',
+            data: {
+                requestId: (request._id as Types.ObjectId).toString(),
+                status: request.status,
+                amount: request.amount,
+                approvedAt: request.approvedAt,
+            },
+        };
+    }
+
+    /**
+     * Reject withdrawal request
+     * Updates request status to rejected
+     */
+    @Post('withdrawal-requests/:id/reject')
+    @ApiOperation({ summary: 'Reject withdrawal request (admin only)' })
+    @ApiParam({ name: 'id', description: 'Withdrawal request ID' })
+    @ApiResponse({ status: 200, description: 'Withdrawal request rejected' })
+    async rejectWithdrawalRequest(
+        @Request() req: any,
+        @Param('id') requestId: string,
+        @Body() dto: RejectWithdrawalRequestDto,
+    ) {
+        const adminId = req.user.userId;
+        const request = await this.walletService.rejectWithdrawalRequest(
+            requestId,
+            adminId,
+            dto.reason,
+        ) as WithdrawalRequestDocument;
+
+        return {
+            success: true,
+            message: 'Yêu cầu rút tiền đã bị từ chối',
+            data: {
+                requestId: (request._id as Types.ObjectId).toString(),
+                status: request.status,
+                rejectionReason: request.rejectionReason,
+                rejectedAt: request.rejectedAt,
+            },
+        };
     }
 }

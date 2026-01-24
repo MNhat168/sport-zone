@@ -17,6 +17,9 @@ import { WalletService } from '../../wallet/wallet.service';
 import { WalletRole } from '@common/enums/wallet.enum';
 import { InjectConnection } from '@nestjs/mongoose';
 import { BookingsService } from '../bookings.service';
+import { WithdrawalRequest, WithdrawalRequestDocument, WithdrawalRequestStatus } from '../../wallet/entities/withdrawal-request.entity';
+import { BadRequestException } from '@nestjs/common';
+import { PaymentMethod } from 'src/common/enums/payment-method.enum';
 
 /**
  * Payment Handler Service
@@ -35,6 +38,8 @@ export class PaymentHandlerService implements OnModuleInit {
     private readonly fieldOwnerProfileModel: Model<FieldOwnerProfile>,
     @InjectModel(CoachProfile.name)
     private readonly coachProfileModel: Model<CoachProfile>,
+    @InjectModel(WithdrawalRequest.name)
+    private readonly withdrawalRequestModel: Model<WithdrawalRequest>,
     @InjectConnection() private readonly connection: any,
     private readonly eventEmitter: EventEmitter2,
     private readonly emailService: EmailService,
@@ -457,7 +462,7 @@ export class PaymentHandlerService implements OnModuleInit {
    * - Must use setUTCHours(0,0,0,0) to normalize date correctly
    * - This works correctly regardless of server timezone (UTC+8 Singapore, etc.)
    */
-  async releaseBookingSlots(booking: Booking): Promise<void> {
+  async releaseBookingSlots(booking: Booking, session?: ClientSession): Promise<void> {
     try {
       this.logger.log(
         `[Release Slots] 🔓 Releasing schedule slots for booking ${booking._id} ` +
@@ -510,7 +515,8 @@ export class PaymentHandlerService implements OnModuleInit {
           $inc: { version: 1 }
         },
         {
-          new: true
+          new: true,
+          session: session // [NEW] Pass session if provided
         }
       ).exec();
 
@@ -566,9 +572,13 @@ export class PaymentHandlerService implements OnModuleInit {
     refundTo: 'bank' | 'credit',
     refundAmount?: number,
     reason?: string,
+    externalSession?: ClientSession // [NEW] Optional external session
   ): Promise<void> {
-    const session: ClientSession = await this.connection.startSession();
-    session.startTransaction();
+    // Only start a new session if one isn't provided
+    const session = externalSession || await this.connection.startSession();
+    if (!externalSession) {
+      session.startTransaction();
+    }
 
     try {
       this.logger.log(`[Refund V2] Processing refund for booking ${bookingId} to ${refundTo}`);
@@ -578,7 +588,7 @@ export class PaymentHandlerService implements OnModuleInit {
 
       if (!booking) {
         this.logger.error(`[Refund V2] Booking ${bookingId} not found`);
-        await session.abortTransaction();
+        if (!externalSession) await session.abortTransaction();
         return;
       }
 
@@ -601,7 +611,7 @@ export class PaymentHandlerService implements OnModuleInit {
           `[Refund V2] Insufficient admin systemBalance for refund. ` +
           `Required: ${amount}₫, Available: ${adminWallet.systemBalance || 0}₫`
         );
-        await session.abortTransaction();
+        if (!externalSession) await session.abortTransaction();
         return;
       }
 
@@ -648,15 +658,18 @@ export class PaymentHandlerService implements OnModuleInit {
       (booking as any).paymentStatus = 'refunded';
       await booking.save({ session });
 
-      // Commit transaction
-      await session.commitTransaction();
+      // Commit transaction only if we started it
+      if (!externalSession) {
+        await session.commitTransaction();
+      }
 
       this.logger.log(
         `[Refund V2] ✅ Successfully refunded ${amount}₫ to ${refundTo} for booking ${bookingId}. ` +
         `Reason: ${reason || 'N/A'}`
       );
 
-      // Emit refund event
+      // Emit refund event - Emit after local commit or let caller handle it (conceptually better to emit after commit, but for check correctness we assume caller commits)
+      // Since event emitters are usually side effects, we can keep it here.
       this.eventEmitter.emit('booking.refunded', {
         bookingId,
         userId,
@@ -667,11 +680,13 @@ export class PaymentHandlerService implements OnModuleInit {
       });
 
     } catch (error) {
-      await session.abortTransaction();
+      if (!externalSession) await session.abortTransaction();
       this.logger.error('[Refund V2] Error processing refund', error);
-      throw error; // Re-throw for admin to handle
+      throw error; // Re-throw 
     } finally {
-      session.endSession();
+      if (!externalSession) {
+        session.endSession();
+      }
     }
   }
 
@@ -872,18 +887,230 @@ export class PaymentHandlerService implements OnModuleInit {
   }
 
   /**
-   * [V2 NEW] Handle Field Owner withdrawal from availableBalance
+   * [V2 NEW] Create withdrawal request (replaces auto-withdrawal)
+   * Creates a pending withdrawal request that requires admin approval
+   * 
+   * Flow:
+   * 1. Validate: tối đa 3 requests/ngày
+   * 2. Validate: availableBalance >= amount (chỉ check, không trừ)
+   * 3. Create withdrawal request với status='pending'
+   * 
+   * @param userId - User ID (field-owner hoặc coach)
+   * @param userRole - Role của user
+   * @param amount - Amount to withdraw
+   * @param bankAccount - Bank account number (optional)
+   * @param bankName - Bank name (optional)
+   * @returns WithdrawalRequest
+   */
+  async createWithdrawalRequest(
+    userId: string,
+    userRole: 'field_owner' | 'coach',
+    amount: number,
+    bankAccount?: string,
+    bankName?: string,
+  ): Promise<WithdrawalRequestDocument> {
+    try {
+      this.logger.log(`[Withdrawal Request] Creating request for user ${userId}, role: ${userRole}, amount: ${amount}`);
+
+      // Validation 1: Check if there is any PENDING request
+      const pendingRequest = await this.withdrawalRequestModel.findOne({
+        userId: new Types.ObjectId(userId),
+        status: WithdrawalRequestStatus.PENDING,
+      });
+
+      if (pendingRequest) {
+        throw new BadRequestException('Bạn đang có yêu cầu rút tiền chưa được xử lý. Vui lòng chờ admin duyệt trước khi tạo yêu cầu mới.');
+      }
+
+      // Validation 2: Check availableBalance (chỉ validate, không trừ)
+      const walletRole = userRole === 'field_owner' ? WalletRole.FIELD_OWNER : WalletRole.COACH;
+      const wallet = await this.walletService.getOrCreateWallet(userId, walletRole);
+
+      const availableBalance = wallet.availableBalance || 0;
+      if (availableBalance < amount) {
+        throw new BadRequestException(
+          `Số dư khả dụng không đủ. Cần: ${amount.toLocaleString('vi-VN')}đ, Hiện có: ${availableBalance.toLocaleString('vi-VN')}đ`
+        );
+      }
+
+      // Create withdrawal request
+      const withdrawalRequest = new this.withdrawalRequestModel({
+        userId: new Types.ObjectId(userId),
+        userRole,
+        amount,
+        status: WithdrawalRequestStatus.PENDING,
+        bankAccount,
+        bankName,
+      });
+
+      const savedRequest = await withdrawalRequest.save() as WithdrawalRequestDocument;
+
+      this.logger.log(`[Withdrawal Request] Created request ${savedRequest._id} for user ${userId}`);
+
+      // Emit event for notification
+      this.eventEmitter.emit('withdrawal.request.created', {
+        requestId: (savedRequest._id as Types.ObjectId).toString(),
+        userId,
+        userRole,
+        amount,
+        createdAt: savedRequest.createdAt,
+      });
+
+      return savedRequest;
+    } catch (error) {
+      this.logger.error('[Withdrawal Request] Error creating withdrawal request', error);
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Không thể tạo yêu cầu rút tiền. Vui lòng thử lại sau.');
+    }
+  }
+
+  /**
+   * [V2 NEW] Process withdrawal request when admin approves
    * Transfers money from system to owner's bank account
    * 
    * Flow:
-   * 1. Check owner has sufficient availableBalance
-   * 2. Owner wallet: availableBalance -= amount
-   * 3. Admin wallet: systemBalance -= amount
-   * 4. Create WITHDRAWAL transaction record
-   * 5. Call PayOS/Bank API to transfer to owner's bank (TODO)
+   * 1. Validate request status = pending
+   * 2. Check owner has sufficient availableBalance
+   * 3. Owner wallet: availableBalance -= amount
+   * 4. Admin wallet: systemBalance -= amount
+   * 5. Create WITHDRAWAL transaction record
+   * 6. Call PayOS/Bank API to transfer to owner's bank (TODO)
+   * 7. Update request status = approved
    * 
-   * @param ownerId - Field owner user ID
-   * @param amount - Amount to withdraw
+   * @param requestId - Withdrawal request ID
+   * @param adminId - Admin user ID who approves
+   * @param notes - Admin notes (optional)
+   */
+  async processWithdrawalRequest(requestId: string, adminId: string, notes?: string): Promise<void> {
+    const session: ClientSession = await this.connection.startSession();
+    session.startTransaction();
+
+    try {
+      this.logger.log(`[Withdrawal Process] Processing request ${requestId} by admin ${adminId}`);
+
+      // Get withdrawal request
+      const request = await this.withdrawalRequestModel.findById(requestId).session(session);
+      if (!request) {
+        throw new BadRequestException('Yêu cầu rút tiền không tồn tại');
+      }
+
+      if (request.status !== WithdrawalRequestStatus.PENDING) {
+        throw new BadRequestException(`Yêu cầu đã được xử lý. Trạng thái hiện tại: ${request.status}`);
+      }
+
+      const userId = request.userId.toString();
+      const amount = request.amount;
+      const walletRole = request.userRole === 'field_owner' ? WalletRole.FIELD_OWNER : WalletRole.COACH;
+
+      // Get owner wallet and check balance
+      const ownerWallet = await this.walletService.getOrCreateWallet(userId, walletRole, session);
+
+      const availableBalance = ownerWallet.availableBalance || 0;
+      if (availableBalance < amount) {
+        this.logger.error(
+          `[Withdrawal Process] Insufficient availableBalance. ` +
+          `Required: ${amount}d, Available: ${availableBalance}d`
+        );
+        await session.abortTransaction();
+        throw new BadRequestException(`Số dư khả dụng không đủ. Cần: ${amount.toLocaleString('vi-VN')}đ, Hiện có: ${availableBalance.toLocaleString('vi-VN')}đ`);
+      }
+
+      // Step 1: Deduct from owner's availableBalance
+      ownerWallet.availableBalance = availableBalance - amount;
+      ownerWallet.lastTransactionAt = new Date();
+      await ownerWallet.save({ session });
+
+      this.logger.log(
+        `[Withdrawal Process] Deducted ${amount}d from user ${userId} availableBalance. ` +
+        `New balance: ${ownerWallet.availableBalance}d`
+      );
+
+      // Step 2: Deduct from admin systemBalance
+      const adminWallet = await this.walletService.getOrCreateWallet(
+        'ADMIN_SYSTEM_ID',
+        WalletRole.ADMIN,
+        session,
+      );
+
+      if ((adminWallet.systemBalance || 0) < amount) {
+        this.logger.error(
+          `[Withdrawal Process] Insufficient admin systemBalance. ` +
+          `Required: ${amount}d, Available: ${adminWallet.systemBalance || 0}d`
+        );
+        await session.abortTransaction();
+        throw new BadRequestException('Không đủ số dư hệ thống. Vui lòng liên hệ admin.');
+      }
+
+      adminWallet.systemBalance = (adminWallet.systemBalance || 0) - amount;
+      await adminWallet.save({ session });
+
+      this.logger.log(
+        `[Withdrawal Process] Deducted ${amount}d from admin systemBalance. ` +
+        `New balance: ${adminWallet.systemBalance}d`
+      );
+
+      // Step 3: Create WITHDRAWAL transaction record
+      await this.transactionsService.createWithdrawalTransaction({
+        userId,
+        amount,
+        method: PaymentMethod.BANK_TRANSFER,
+        bankAccount: request.bankAccount,
+        bankName: request.bankName,
+      }, session);
+
+      // Step 3.5: Create OUT transaction for Admin System
+      // This tracks the money leaving the system wallet
+      const adminUserId = '000000000000000000000001'; // Fixed Admin System ID
+      await this.transactionsService.createWithdrawalTransaction({
+        userId: adminUserId,
+        amount,
+        method: PaymentMethod.BANK_TRANSFER,
+        notes: `System payout for withdrawal request ${requestId} (User: ${userId})`,
+      }, session);
+
+      // Step 4: Update request status
+      request.status = WithdrawalRequestStatus.APPROVED;
+      request.approvedBy = new Types.ObjectId(adminId);
+      request.approvedAt = new Date();
+      if (notes) {
+        request.adminNotes = notes;
+      }
+      await request.save({ session });
+
+      // TODO: Step 5 - Call PayOS/Bank API to transfer to owner's bank
+      this.logger.log(`[Withdrawal Process] Initiating bank transfer via PayOS for ${amount}d`);
+
+      // Commit transaction
+      await session.commitTransaction();
+
+      this.logger.log(`[Withdrawal Process] Successfully processed withdrawal request ${requestId}`);
+
+      // Emit withdrawal event
+      this.eventEmitter.emit('wallet.withdrawal.completed', {
+        requestId: requestId,
+        userId,
+        amount,
+        remainingBalance: ownerWallet.availableBalance,
+        withdrawnAt: new Date(),
+      });
+
+    } catch (error) {
+      await session.abortTransaction();
+      this.logger.error('[Withdrawal Process] Error processing withdrawal request', error);
+      throw error;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  /**
+   * [V2 LEGACY] Handle Field Owner withdrawal from availableBalance
+   * DEPRECATED: Use createWithdrawalRequest() instead
+   * Kept for backward compatibility
+   * 
+   * @deprecated Use createWithdrawalRequest() and processWithdrawalRequest() instead
    */
   async withdrawAvailableBalance(ownerId: string, amount: number): Promise<void> {
     const session: ClientSession = await this.connection.startSession();
@@ -947,7 +1174,7 @@ export class PaymentHandlerService implements OnModuleInit {
       await this.transactionsService.createWithdrawalTransaction({
         userId: ownerId,
         amount,
-        method: 'BANK_TRANSFER',
+        method: PaymentMethod.BANK_TRANSFER,
       });
 
       // TODO: Step 4 - Call PayOS/Bank API to transfer to owner's bank

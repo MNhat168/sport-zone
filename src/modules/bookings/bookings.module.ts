@@ -13,6 +13,7 @@ import { Transaction, TransactionSchema } from '../transactions/entities/transac
 import { Court, CourtSchema } from '../courts/entities/court.entity';
 import { CheckInLog, CheckInLogSchema } from '../qr-checkin/entities/check-in-log.entity';
 import { Match, MatchSchema } from '../matching/entities/match.entity';
+import { WithdrawalRequest, WithdrawalRequestSchema } from '../wallet/entities/withdrawal-request.entity';
 
 // Services and Controllers
 import { BookingsService } from './bookings.service';
@@ -64,6 +65,7 @@ import { CheckInRateLimitGuard } from '../qr-checkin/guards/check-in-rate-limit.
       { name: Transaction.name, schema: TransactionSchema },
       { name: CheckInLog.name, schema: CheckInLogSchema },
       { name: Match.name, schema: MatchSchema },
+      { name: WithdrawalRequest.name, schema: WithdrawalRequestSchema },
     ]),
     EventEmitterModule,
     forwardRef(() => TransactionsModule),

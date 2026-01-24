@@ -12,6 +12,7 @@ import { CoachProfile, CoachProfileSchema } from '../coaches/entities/coach-prof
 import { AiModule } from '../ai/ai.module';
 import { FieldOwnerProfile } from '@modules/field-owner/entities/field-owner-profile.entity';
 import { Notification, NotificationSchema } from '../notifications/entities/notification.entity';
+import { WalletModule } from '../wallet/wallet.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { Notification, NotificationSchema } from '../notifications/entities/noti
       { name: Notification.name, schema: NotificationSchema },
     ]),
     AiModule,
+    WalletModule,
   ],
   controllers: [AdminController],
   providers: [AdminService],
